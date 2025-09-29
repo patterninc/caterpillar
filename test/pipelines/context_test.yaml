@@ -1,0 +1,38 @@
+tasks:
+  - name: fetch_user_data
+    type: http
+    endpoint: https://jsonplaceholder.typicode.com/users/2
+    context:
+      user_id: ".id"
+      user_name: ".name"
+      user_email: ".email"
+      user_company: ".company.name"
+  
+  - name: form_posts_endpoint_with_context
+    type: jq
+    path: |
+      {
+        "endpoint": "https://jsonplaceholder.typicode.com/posts?userId={{ context "user_id" }}"
+      }
+
+  - name: echo_posts_endpoint
+    type: echo
+    only_data: true
+
+  - name: hit_endpoint_with_context
+    type: http
+
+  - name: transform_with_context_jq
+    type: jq
+    path: |
+      {
+        "user_id": {{ context "user_id" }},
+        "user_name": "{{ context "user_name" }}",
+        "user_email": "{{ context "user_email" }}",
+        "user_company": "{{ context "user_company" }}",
+        "original_data": .
+      }
+
+  - name: file_with_context
+    type: file
+    path: output/{{ context "user_name" }}_{{ macro "uuid" }}_record.txt

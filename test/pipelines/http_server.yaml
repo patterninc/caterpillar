@@ -1,0 +1,11 @@
+tasks:
+  - name: http_server
+    type: http_server
+    end_after: 10s
+    auth:
+      behavior: api-key
+      headers:
+        Authorization: test_me
+  - name: echo
+    type: echo
+    only_data: true

@@ -1,0 +1,18 @@
+tasks:
+  - name: read_sample_data
+    type: file
+    path: names.txt
+  - name: split_to_lines
+    type: split
+    delimiter: "\n"
+  - name: join_records
+    type: join
+    number: 3
+    delimiter: "|"
+  - name: join_records
+    type: join
+    number: 5
+    delimiter: " ◆ "
+  - name: echo
+    type: echo
+    only_data: true

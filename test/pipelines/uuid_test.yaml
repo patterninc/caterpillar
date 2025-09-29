@@ -1,0 +1,22 @@
+tasks:
+  - name: get_list_of_names
+    type: file
+    path: names.txt
+  - name: split_to_lines
+    type: split
+    delimiter: "\n"
+  - name: random
+    type: sample
+    filter: head
+    limit: 10
+  - name: replace
+    type: replace
+    expression: ^(.*)$
+    replacement: '{"name":"$1"}'
+  - name: unique_id_generator
+    type: jq
+    path: |
+      . | map({name: ., id: uuid})
+  - name: echo
+    type: echo
+    data_only: true
