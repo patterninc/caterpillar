@@ -3,10 +3,10 @@ tasks:
     type: http
     endpoint: https://jsonplaceholder.typicode.com/users/2
     context:
-      user_id: ".id"
-      user_name: ".name"
-      user_email: ".email"
-      user_company: ".company.name"
+      user_id: ".data | fromjson | .id"
+      user_name: ".data | fromjson | .name"
+      user_email: ".data | fromjson | .email"
+      user_company: ".data | fromjson | .company.name"
   
   - name: form_posts_endpoint_with_context
     type: jq
