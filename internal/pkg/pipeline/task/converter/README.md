@@ -17,13 +17,14 @@ The converter task transforms data between different formats. It receives record
 | `name` | string | - | Task name for identification |
 | `type` | string | `converter` | Must be "converter" |
 | `format` | string | - | Format to convert to (csv, html, sst) |
-| `delimeter` | string| \t | Used only in sst converter for spliting key and value| 
+| `delimiter` | string| \t | Used only in sst converter for spliting key and value| 
 
 ### CSV Format Options
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `skip_first` | bool | `false` | Skip the first record (useful for headers) |
+| `take_column_names_from_first_row` | bool | `false` | Name columns using column headers in CSV.  If setting to true, set skip_first to true also.
 | `columns` | array | - | Array of column definitions |
 | `columns[].name` | string | - | Name for the column |
 | `columns[].is_numeric` | bool | `false` | Whether the column contains numeric data |
@@ -59,6 +60,15 @@ tasks:
       - name: email
       - name: age
         is_numeric: true
+```
+or
+```yaml
+tasks:
+  - name: csv_to_json_use_column_headers
+    type: converter
+    format: csv
+    skip_first: true
+    take_column_names_from_first_row: true
 ```
 
 ### HTML to JSON conversion:
