@@ -1,0 +1,9 @@
+tasks:
+  - name: pull_hello_world
+    type: file
+    path: names.txt
+  - name: split_to_lines
+    type: split
+  - name: echo
+    type: echo
+    only_data: true

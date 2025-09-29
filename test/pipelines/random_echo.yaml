@@ -1,0 +1,11 @@
+tasks:
+  - name: get_list_of_names
+    type: file
+    path: names.txt
+  - name: split_to_lines
+    type: split
+  - name: random
+    type: sample
+    limit: 25
+  - name: echo
+    type: echo

@@ -1,0 +1,8 @@
+tasks:
+  - name: read_names
+    type: file
+    path: names.txt
+  - name: split_to_lines
+    type: split
+  - name: unknown
+    type: unknown

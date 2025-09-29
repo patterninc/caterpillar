@@ -1,0 +1,18 @@
+tasks:
+  - name: get_list_of_names_with_context
+    type: file
+    path: names.txt
+    context:
+      names: '.data | split("\n") | shuffle | .[:10]'
+      origin: '.origin'
+  - name: split_to_lines
+    type: split
+  - name: random
+    type: sample
+  - name: replace
+    type: replace
+    expression: ^(.*)$
+    replacement: Hello, $1!
+  - name: echo
+    type: echo
+    only_data: true

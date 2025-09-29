@@ -1,0 +1,16 @@
+tasks:
+  - name: get_data
+    type: http
+    method: GET
+    endpoint: https://cdn.wsform.com/wp-content/uploads/2020/06/industry.csv
+  - name: split_to_lines
+    type: split
+  - name: convert_from_csv
+    type: converter
+    format: csv
+    skip_first: true
+    columns:
+      - name: industry
+  - name: echo
+    type: echo
+    only_data: true

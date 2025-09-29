@@ -1,0 +1,14 @@
+tasks:
+  - name: basic_auth_server
+    type: http_server
+    auth:
+      behavior: basic-auth
+      username: webhook_user
+      password: secure_password_123
+    port: 9002
+    paths:
+      - method: POST
+        path: /webhook
+  - name: echo
+    type: echo
+    only_data: true

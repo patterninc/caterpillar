@@ -1,0 +1,12 @@
+# please execute compress_test.yaml before decompress_test.yaml
+tasks:
+  - name: get_packed_file
+    type: file
+    path: compressed_names.txt.gz
+  - name: unpack_compressed_file
+    type: compress
+    format: gzip
+    action: decompress
+  - name: store_unpacked_file
+    type: file  
+    path: decompressed_names.txt

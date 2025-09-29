@@ -1,0 +1,20 @@
+tasks:
+  - name: read_csv_file
+    type: file
+    path: sample.csv
+  - name: split_to_lines
+    type: split
+  - name: convert_from_csv
+    type: converter
+    format: csv
+    skip_first: true
+    columns:
+      - name: name
+      - name: age
+        is_numeric: true
+      - name: salary
+        is_numeric: true
+      - name: department
+  - name: echo
+    type: echo
+    only_data: true

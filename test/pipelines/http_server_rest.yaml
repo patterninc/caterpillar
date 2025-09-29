@@ -1,0 +1,23 @@
+tasks:
+  - name: unified_api_server
+    type: http_server
+    auth:
+      behavior: ip-whitelist
+      whitelist_ips:
+        - 3.134.147.250
+        - 50.31.156.6
+        - 50.31.156.77
+        - 18.217.206.57
+    port: 9002
+    paths:
+      - method: POST
+        path: /v1/some-path
+      - method: POST
+        path: /v1/some-path-other-path
+      - method: GET
+        path: /v1/users
+      - method: PUT
+        path: /v1/products/category/productId
+  - name: echo
+    type: echo
+    only_data: true

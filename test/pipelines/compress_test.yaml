@@ -1,0 +1,10 @@
+tasks:
+  - name: pull_names_from_s3
+    type: file
+    path: names.txt
+  - name: compress_file
+    type: compress
+    format: gzip
+  - name: store_compressed_file
+    type: file  
+    path: compressed_names.txt.gz
