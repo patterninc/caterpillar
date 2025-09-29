@@ -117,13 +117,16 @@ func (b *Base) SendRecord(r *record.Record, output chan<- *record.Record) /* we 
 		output <- r
 	}()
 
-	if b.Context == nil {
+	// before we set context, let's serialize the whole record
+	data, err := json.Marshal(r)
+	if err != nil {
+		// TODO: do prom metrics / log event to syslog
+		fmt.Println(`ERROR (marshal):`, err)
 		return
 	}
-
 	// Set the context values for the record
 	for name, query := range b.Context {
-		queryResult, err := query.Execute(r.Data)
+		queryResult, err := query.Execute(data)
 		if err != nil {
 			// TODO: do prom metrics / log event to syslog
 			fmt.Println(`ERROR (query):`, err)
