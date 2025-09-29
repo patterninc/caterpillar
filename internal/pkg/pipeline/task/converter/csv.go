@@ -5,6 +5,7 @@ import (
 	ec "encoding/csv"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -15,11 +16,27 @@ type csvColumn struct {
 }
 
 type csv struct {
-	SkipFirst bool         `yaml:"skip_first,omitempty" json:"skip_first,omitempty"`
-	Columns   []*csvColumn `yaml:"columns" json:"columns"`
+	SkipFirst          bool         `yaml:"skip_first,omitempty" json:"skip_first,omitempty"`
+	TakeNamesFromFirst bool         `yaml:"take_names_from_first,omitempty" json:"take_names_from_first,omitempty"`
+	Columns            []*csvColumn `yaml:"columns" json:"columns"`
 }
 
 func (c *csv) convert(data []byte, _ string) ([]byte, error) {
+
+	if c.TakeNamesFromFirst {
+		reader := ec.NewReader(bytes.NewReader(data))
+		header, err := reader.Read()
+		if err != nil {
+			return nil, err
+		}
+		c.Columns = make([]*csvColumn, len(header))
+		for i, name := range header {
+			c.Columns[i] = &csvColumn{Name: strings.ToLower(regexp.MustCompile(`[^a-zA-Z0-9]+`).ReplaceAllString(name, "_"))}
+		}
+		c.SkipFirst = false // in case it was set to true, we already read the first line which is the header, and don't want to skip the next line
+		c.TakeNamesFromFirst = false
+		return nil, nil
+	}
 
 	if c.SkipFirst {
 		c.SkipFirst = false
