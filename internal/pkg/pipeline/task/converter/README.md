@@ -24,7 +24,7 @@ The converter task transforms data between different formats. It receives record
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `skip_first` | bool | `false` | Skip the first record (useful for headers) |
-| `take_column_names_from_first_row` | bool | `false` | Name columns using column headers in CSV.  If setting to true, set skip_first to true also.
+| `take_column_names_from_first_row` | bool | `false` | Name columns using values in first row of CSV.  If setting to true, then skip_first is not needed.
 | `columns` | array | - | Array of column definitions |
 | `columns[].name` | string | - | Name for the column |
 | `columns[].is_numeric` | bool | `false` | Whether the column contains numeric data |
