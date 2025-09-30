@@ -61,12 +61,12 @@ func (f *file) getPathIndex(path string) int {
 
 func getPathsFromGlob(f *file) ([]string, error) {
 
-	glod, err := f.Path.Get(f.CurrentRecord)
+	glob, err := f.Path.Get(f.CurrentRecord)
 	if err != nil {
 		return nil, err
 	}
 
-	paths, err := doublestar.Glob(glod)
+	paths, err := doublestar.Glob(glob)
 	if err != nil {
 		return nil, err
 	}
