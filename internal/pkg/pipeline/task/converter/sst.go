@@ -25,7 +25,6 @@ func (c *sst) convert(data []byte, d string) ([]byte, error) {
 		if line == "" {
 			continue
 		}
-		line = strings.TrimSpace(line)[1 : len(line)-1]
 		kv := strings.SplitN(line, d, 2)
 		if len(kv) != 2 {
 			return nil, errors.New("invalid input for sst converter: expected 'key" + d + "value' format (got: " + line + ")")
