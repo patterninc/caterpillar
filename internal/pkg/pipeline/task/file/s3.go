@@ -5,23 +5,23 @@ import (
 	"io"
 	"strings"
 
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3client "github.com/patterninc/caterpillar/internal/pkg/pipeline/task/file/s3_client"
 )
 
 const (
 	s3Scheme = `s3`
 )
 
-func getS3Reader(f *file) (io.ReadCloser, error) {
+func getS3Reader(f *file, key string) (io.ReadCloser, error) {
 
-	// get bucket and key
-	bucket, key, err := f.parseS3URI()
+	// get bucket
+	bucket, _, err := f.parseS3URI()
 	if err != nil {
 		return nil, err
 	}
 
-	svc, err := f.getS3Client()
+	svc, err := s3client.New(ctx, f.Region)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +42,7 @@ func getS3Reader(f *file) (io.ReadCloser, error) {
 func writeS3File(f *file, reader io.Reader) error {
 
 	// upload file to s3
-	svc, err := f.getS3Client()
+	svc, err := s3client.New(ctx, f.Region)
 	if err != nil {
 		return err
 	}
@@ -79,13 +79,29 @@ func (f *file) parseS3URI() (bucket string, key string, err error) {
 
 }
 
-func (f *file) getS3Client() (*s3.Client, error) {
+func getS3KeysFromGlob(f *file) ([]string, error) {
 
-	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(f.Region))
+	// get bucket and key
+	bucket, glob, err := f.parseS3URI()
 	if err != nil {
 		return nil, err
 	}
 
-	return s3.NewFromConfig(awsConfig), nil
+	svc, err := s3client.New(ctx, f.Region)
+	if err != nil {
+		return nil, err
+	}
+
+	objects, err := svc.GetObjectsWithGlob(ctx, bucket, glob)
+	if err != nil {
+		return nil, err
+	}
+
+	keys := make([]string, 0, len(objects))
+	for _, object := range objects {
+		keys = append(keys, *object.Key)
+	}
+
+	return keys, nil
 
 }

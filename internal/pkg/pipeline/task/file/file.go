@@ -22,13 +22,17 @@ const (
 
 var (
 	ctx     = context.Background()
-	readers = map[string]func(*file) (io.ReadCloser, error){
+	readers = map[string]func(*file, string) (io.ReadCloser, error){
 		s3Scheme:   getS3Reader,
 		fileScheme: getLocalReader,
 	}
 	writers = map[string]func(*file, io.Reader) error{
 		s3Scheme:   writeS3File,
 		fileScheme: writeLocalFile,
+	}
+	globParsers = map[string]func(*file) ([]string, error){
+		s3Scheme:   getS3KeysFromGlob,
+		fileScheme: getPathsFromGlob,
 	}
 )
 
@@ -109,19 +113,33 @@ func (f *file) readFile(output chan<- *record.Record) error {
 		return unknownSchemeError(f.pathScheme)
 	}
 
-	readerCloser, err := readerFunction(f)
+	parserFunction, found := globParsers[f.pathScheme]
+	if !found {
+		return unknownSchemeError(f.pathScheme)
+	}
+
+	paths, err := parserFunction(f)
 	if err != nil {
 		return err
 	}
-	defer readerCloser.Close()
 
-	content, err := io.ReadAll(readerCloser)
-	if err != nil {
-		return err
+	for _, path := range paths {
+
+		readerCloser, err := readerFunction(f, path)
+		if err != nil {
+			return err
+		}
+		defer readerCloser.Close()
+
+		content, err := io.ReadAll(readerCloser)
+		if err != nil {
+			return err
+		}
+
+		// let's write content to output channel
+		f.SendData(ctx, content, output)
+
 	}
-
-	// let's write content to output channel
-	f.SendData(ctx, content, output)
 
 	return nil
 

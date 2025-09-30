@@ -4,6 +4,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/bmatcuk/doublestar"
 )
 
 const (
@@ -12,12 +14,8 @@ const (
 	filePrefixLength = len(filePrefix)
 )
 
-func getLocalReader(f *file) (io.ReadCloser, error) {
+func getLocalReader(f *file, path string) (io.ReadCloser, error) {
 
-	path, err := f.Path.Get(f.CurrentRecord)
-	if err != nil {
-		return nil, err
-	}
 	inputFile, err := os.Open(path[f.getPathIndex(path):])
 	if err != nil {
 		return nil, err
@@ -47,6 +45,7 @@ func writeLocalFile(f *file, reader io.Reader) error {
 	return nil
 
 }
+
 func (f *file) getPathIndex(path string) int {
 
 	// let's figure out if we need to trim filePrefix
@@ -58,5 +57,20 @@ func (f *file) getPathIndex(path string) int {
 	}
 
 	return index
+}
 
+func getPathsFromGlob(f *file) ([]string, error) {
+
+	glod, err := f.Path.Get(f.CurrentRecord)
+	if err != nil {
+		return nil, err
+	}
+
+	paths, err := doublestar.Glob(glod)
+	if err != nil {
+		return nil, err
+	}
+
+	return paths, nil
+	
 }
