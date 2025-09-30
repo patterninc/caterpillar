@@ -36,7 +36,7 @@ The task automatically determines its mode based on the presence of input/output
 ## Path Schemes
 
 The task supports different path schemes:
-- **Local files**: `file:///path/to/file.txt` or `/path/to/file.txt` or 
+- **Local files**: `file:///path/to/file.txt` or `/path/to/file.txt`
 - **S3 files**: `s3://bucket-name/path/to/file.txt`
 
 ## Example Configurations
