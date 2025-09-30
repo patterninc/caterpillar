@@ -10,7 +10,7 @@ The compress task can operate in two modes:
 
 ## Behavior
 
-The compress task processes data based on the `operation` field:
+The compress task processes data based on the `action` field:
 - **Compress**: Converts data to compressed format using the specified algorithm
 - **Decompress**: Converts compressed data back to its original format
 
@@ -23,7 +23,7 @@ The task receives records from its input channel, applies compression/decompress
 | `name` | string | - | Task name for identification |
 | `type` | string | `compress` | Must be "compress" |
 | `format` | string | - | Compression format (gzip, snappy, etc.) |
-| `operation` | string | - | Operation type (compress or decompress) |
+| `action` | string | - | Action type (compress or decompress) |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
 ## Supported Formats
@@ -42,7 +42,7 @@ tasks:
   - name: compress_data
     type: compress
     format: gzip
-    operation: compress
+    action: compress
 ```
 
 ### Decompress gzip data:
@@ -51,7 +51,7 @@ tasks:
   - name: decompress_data
     type: compress
     format: gzip
-    operation: decompress
+    action: decompress
 ```
 
 ### Compress with snappy:
@@ -60,7 +60,7 @@ tasks:
   - name: fast_compress
     type: compress
     format: snappy
-    operation: compress
+    action: compress
 ```
 
 ## Sample Pipelines
