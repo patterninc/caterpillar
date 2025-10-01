@@ -92,7 +92,7 @@ func getS3KeysFromGlob(f *file) ([]string, error) {
 		return nil, err
 	}
 
-	objects, err := svc.GetObjectsWithGlob(ctx, bucket, glob)
+	objects, err := svc.GetObjects(ctx, bucket, glob)
 	if err != nil {
 		return nil, err
 	}
