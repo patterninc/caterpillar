@@ -20,32 +20,14 @@ type csv struct {
 	Columns   []*csvColumn `yaml:"columns" json:"columns"`
 }
 
-func (c *csv) convert(data []byte, _ string) ([]byte, error) {
+// Pre-compile regex for column name sanitization
+var columnNameRegex = regexp.MustCompile(`[^a-zA-Z0-9]+`)
 
+func (c *csv) convert(data []byte, _ string) ([]byte, error) {
+	// Initialize columns if not provided
 	if len(c.Columns) == 0 {
-		if c.SkipFirst {
-			// get column names from the first line
-			reader := ec.NewReader(bytes.NewReader(data))
-			header, err := reader.Read()
-			if err != nil {
-				return nil, err
-			}
-			c.Columns = make([]*csvColumn, len(header))
-			for i, name := range header {
-				c.Columns[i] = &csvColumn{Name: strings.ToLower(regexp.MustCompile(`[^a-zA-Z0-9]+`).ReplaceAllString(name, "_"))}
-			}
-			c.SkipFirst = false // in case it was set to true, we already read the first line which is the header, and don't want to skip the next line
-		} else {
-			// auto-generate column names
-			reader := ec.NewReader(bytes.NewReader(data))
-			record, err := reader.Read()
-			if err != nil {
-				return nil, err
-			}
-			c.Columns = make([]*csvColumn, len(record))
-			for i := range record {
-				c.Columns[i] = &csvColumn{Name: fmt.Sprintf("col%d", i+1)}
-			}
+		if err := c.initializeColumns(data); err != nil {
+			return nil, err
 		}
 		return nil, nil
 	}
@@ -86,6 +68,33 @@ func (c *csv) convert(data []byte, _ string) ([]byte, error) {
 
 	return json.Marshal(record)
 
+}
+
+// initializeColumns sets up column definitions based on the first row of CSV data
+func (c *csv) initializeColumns(data []byte) error {
+	reader := ec.NewReader(bytes.NewReader(data))
+	firstRow, err := reader.Read()
+	if err != nil {
+		return err
+	}
+
+	c.Columns = make([]*csvColumn, len(firstRow))
+
+	if c.SkipFirst {
+		// Use first row as column headers
+		for i, name := range firstRow {
+			sanitizedName := strings.ToLower(columnNameRegex.ReplaceAllString(name, "_"))
+			c.Columns[i] = &csvColumn{Name: sanitizedName}
+		}
+		c.SkipFirst = false // Already processed the header row
+	} else {
+		// Auto-generate column names
+		for i := range firstRow {
+			c.Columns[i] = &csvColumn{Name: fmt.Sprintf("col%d", i+1)}
+		}
+	}
+
+	return nil
 }
 
 func toNumeric(s string) (any, bool) {
