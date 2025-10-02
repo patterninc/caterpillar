@@ -10,6 +10,11 @@ The converter task transforms data from one format to another, enabling interope
 
 The converter task transforms data between different formats. It receives records from its input channel, converts the data from the source format to the target format using the specified options, and sends the converted records to its output channel.
 
+- If skip_first is True and no columns are provided, then the column names in the output will be the values in the first row of the CSV file.
+- If skip_first is True and columns are provided, then the column names in the output will be the values provided (i.e., Provided column names supersede names from first row).
+- If skip_first is False, and no columns are provided, then the column names in the output will be named Col1, Col2, Col3, etc.
+- If skip_first is False, and columns are provided, then the column names in the output will be the values provided.
+
 ## Configuration Fields
 
 | Field | Type | Default | Description |
