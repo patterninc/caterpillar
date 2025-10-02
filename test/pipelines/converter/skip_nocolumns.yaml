@@ -2,7 +2,7 @@ tasks:
   - name: get_google_drive_file
     type: http
     method: GET
-    endpoint: "https://docs.google.com/spreadsheets/d/1_27cTQKHmDOmdEdUaYYLL337EnT8NkRt4BjlOymwJh4/export?format=csv&gid=1328472992"
+    endpoint: "https://docs.google.com/spreadsheets/d/1_27cTQKHmDOmdEdUaYYLL337EnT8NkRt4BjlOymwJh4/export?format=csv&gid=1143854885"
     headers:
       Content-Type: application/x-www-form-urlencoded
       Accept: text/csv
@@ -21,10 +21,10 @@ tasks:
   - name: convert_from_csv
     type: converter
     format: csv
-    take_names_from_first: true
+    skip_first: true
   - name: join
     type: join
   - name: write_to_s3
     type: file
-    path: s3://caterpillar-test-2/jr_sheet_test/jr_sheet_test.json
+    path: s3://caterpillar-test-2/column_names_from_first_row_test/skip_nocolumns_test_results.json
     success_file: true

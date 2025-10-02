@@ -5,6 +5,7 @@ import (
 	ec "encoding/csv"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -20,6 +21,34 @@ type csv struct {
 }
 
 func (c *csv) convert(data []byte, _ string) ([]byte, error) {
+
+	if len(c.Columns) == 0 {
+		if c.SkipFirst {
+			// get column names from the first line
+			reader := ec.NewReader(bytes.NewReader(data))
+			header, err := reader.Read()
+			if err != nil {
+				return nil, err
+			}
+			c.Columns = make([]*csvColumn, len(header))
+			for i, name := range header {
+				c.Columns[i] = &csvColumn{Name: strings.ToLower(regexp.MustCompile(`[^a-zA-Z0-9]+`).ReplaceAllString(name, "_"))}
+			}
+			c.SkipFirst = false // in case it was set to true, we already read the first line which is the header, and don't want to skip the next line
+		} else {
+			// auto-generate column names
+			reader := ec.NewReader(bytes.NewReader(data))
+			record, err := reader.Read()
+			if err != nil {
+				return nil, err
+			}
+			c.Columns = make([]*csvColumn, len(record))
+			for i := range record {
+				c.Columns[i] = &csvColumn{Name: fmt.Sprintf("col%d", i+1)}
+			}
+		}
+		return nil, nil
+	}
 
 	if c.SkipFirst {
 		c.SkipFirst = false
