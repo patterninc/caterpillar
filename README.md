@@ -36,7 +36,7 @@ The system is particularly useful for:
 
 2. **Build the project:**
    ```bash
-   go build -o caterpillar ./cmd/caterpillar/caterpillar.go
+   go build -o caterpillar cmd/caterpillar/caterpillar.go
    ```
 
 3. **Run a pipeline:**

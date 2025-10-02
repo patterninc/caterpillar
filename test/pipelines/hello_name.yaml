@@ -4,7 +4,7 @@ tasks:
     path: names.txt
     context:
       names: '.data | split("\n") | shuffle | .[:10]'
-      origin: '.origin'
+      origin: ".origin"
   - name: split_to_lines
     type: split
   - name: random
