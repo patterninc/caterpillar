@@ -20,19 +20,16 @@ const (
 	defaultSuccessFileName = `_SUCCESS`
 )
 
+type reader interface {
+	read(string) (io.ReadCloser, error)
+	parse(string) ([]string, error)
+}
+
 var (
 	ctx     = context.Background()
-	readers = map[string]func(*file, string) (io.ReadCloser, error){
-		s3Scheme:   getS3Reader,
-		fileScheme: getLocalReader,
-	}
 	writers = map[string]func(*file, io.Reader) error{
 		s3Scheme:   writeS3File,
 		fileScheme: writeLocalFile,
-	}
-	globParsers = map[string]func(*file) ([]string, error){
-		s3Scheme:   getS3KeysFromGlob,
-		fileScheme: getPathsFromGlob,
 	}
 )
 
@@ -106,26 +103,28 @@ func (f *file) Run(input <-chan *record.Record, output chan<- *record.Record) er
 }
 
 func (f *file) readFile(output chan<- *record.Record) error {
-
-	// let's get reader function
-	readerFunction, found := readers[f.pathScheme]
-	if !found {
-		return unknownSchemeError(f.pathScheme)
+	
+	// let's create a reader
+	reader, err := f.newReader()
+	if err != nil {
+		return err
 	}
-
-	parserFunction, found := globParsers[f.pathScheme]
-	if !found {
-		return unknownSchemeError(f.pathScheme)
+	
+	// let's get the glob
+	glob, err := f.Path.Get(f.CurrentRecord)
+	if err != nil {
+		return err
 	}
-
-	paths, err := parserFunction(f)
+	
+	// let's parse the glob to get all paths
+	paths, err := reader.parse(glob)
 	if err != nil {
 		return err
 	}
 
 	for _, path := range paths {
 
-		readerCloser, err := readerFunction(f, path)
+		readerCloser, err := reader.read(path)
 		if err != nil {
 			return err
 		}
@@ -193,6 +192,18 @@ func (f *file) writeSuccessFile() error {
 
 	return writerFunction(successFile, bytes.NewReader([]byte{}))
 
+}
+
+func (f *file) newReader() (reader, error) {
+	if f.pathScheme == `` {
+		return nil, fmt.Errorf("path scheme is not set")
+	}
+
+	if f.pathScheme == fileScheme {
+		return newLocalReader()
+	}
+
+	return newS3Reader(f.Region)
 }
 
 func unknownSchemeError(scheme string) error {

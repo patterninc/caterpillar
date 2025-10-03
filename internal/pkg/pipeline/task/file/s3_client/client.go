@@ -2,6 +2,7 @@ package s3client
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -12,19 +13,11 @@ import (
 	"github.com/bmatcuk/doublestar"
 )
 
-type client struct {
+type Client struct {
 	*s3.Client
-	region string
 }
 
-var c client
-
-func New(ctx context.Context, region string) (*client, error) {
-
-	// return existing client if region matches
-	if c.Client != nil && c.region == region {
-		return &c, nil
-	}
+func New(ctx context.Context, region string) (*Client, error) {
 
 	// load config with specified region
 	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
@@ -32,19 +25,14 @@ func New(ctx context.Context, region string) (*client, error) {
 		return nil, err
 	}
 
-	// create and swap client
-	newClient := client{
+	// create client
+	return &Client{
 		Client: s3.NewFromConfig(awsConfig),
-		region: region,
-	}
-
-	c = newClient
-
-	return &c, nil
+	}, nil
 
 }
 
-func (c *client) GetObjects(ctx context.Context, bucketName, pattern string) ([]types.Object, error) {
+func (c *Client) GetObjects(ctx context.Context, bucketName, pattern string) ([]types.Object, error) {
 
 	var matchingObjects []types.Object
 
@@ -74,6 +62,18 @@ func (c *client) GetObjects(ctx context.Context, bucketName, pattern string) ([]
 	}
 
 	return matchingObjects, nil
+
+}
+
+func ParseURI(path string) (bucket string, key string, err error) {
+
+	parts := strings.SplitN(path[5:], `/`, 2) // f.Path[5:] is to trim `s3://` from the path
+
+	if len(parts) < 2 || parts[0] == `` {
+		return ``, ``, fmt.Errorf("invalid S3 URI: %s", path)
+	}
+
+	return parts[0], parts[1], nil
 
 }
 
