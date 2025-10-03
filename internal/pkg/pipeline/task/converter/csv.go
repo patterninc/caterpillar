@@ -5,6 +5,7 @@ import (
 	ec "encoding/csv"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -29,10 +30,14 @@ func (c *csv) convert(data []byte, _ string) ([]byte, error) {
 		if err := c.initializeColumns(data); err != nil {
 			return nil, err
 		}
-		return nil, nil
-	}
-
-	if c.SkipFirst {
+		// If SkipFirst is true, we've already processed the header row and should skip this data
+		if c.SkipFirst {
+			c.SkipFirst = false // Reset flag after using first row as headers
+			return nil, nil
+		}
+		// If SkipFirst is false, we need to process this first row as data
+		// (columns were auto-generated, so continue processing)
+	} else if c.SkipFirst {
 		c.SkipFirst = false
 		return nil, nil
 	}
@@ -86,9 +91,10 @@ func (c *csv) initializeColumns(data []byte) error {
 			sanitizedName := strings.ToLower(columnNameRegex.ReplaceAllString(name, "_"))
 			c.Columns[i] = &csvColumn{Name: sanitizedName}
 		}
-		c.SkipFirst = false // Already processed the header row
+		// Keep SkipFirst as true so the convert function knows to skip this row
 	} else {
-		// Auto-generate column names
+		log.Println("No columns defined and SkipFirst is false; auto-generating column names as col1, col2, ...")
+
 		for i := range firstRow {
 			c.Columns[i] = &csvColumn{Name: fmt.Sprintf("col%d", i+1)}
 		}

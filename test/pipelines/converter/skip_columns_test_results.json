@@ -1,1 +1,5 @@
-{"providedcolumnname":"MyValue"}
+{"age1":"30","department1":"Engineering","name1":"John Doe","salary1":"55000.75"}
+{"age1":"25","department1":"Marketing","name1":"Jane Smith","salary1":"62000.50"}
+{"age1":"45","department1":"Human Resources","name1":"Bob","salary1":"72000.00"}
+{"age1":"38","department1":"Sales","name1":"Alice Johnson","salary1":"81000.10"}
+{"age1":"29","department1":"Product Development","name1":"Tom","salary1":"50000.00"}

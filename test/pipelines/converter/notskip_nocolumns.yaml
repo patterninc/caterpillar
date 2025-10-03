@@ -1,21 +1,7 @@
 tasks:
-  - name: get_google_drive_file
-    type: http
-    method: GET
-    endpoint: "https://docs.google.com/spreadsheets/d/1_27cTQKHmDOmdEdUaYYLL337EnT8NkRt4BjlOymwJh4/export?format=csv&gid=1143854885"
-    headers:
-      Content-Type: application/x-www-form-urlencoded
-      Accept: text/csv
-    oauth:
-      version: "2.0"
-      issuer: {{ secret "/google_service/issuer" }}
-      scope:
-        - "https://www.googleapis.com/auth/drive"
-        - "https://www.googleapis.com/auth/spreadsheets"
-      audience: "https://oauth2.googleapis.com/token"
-      token_uri: "https://oauth2.googleapis.com/token"
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer"
-      private_key: {{ secret "/google_service/private_key" }}
+  - name: pull_sample_csv
+    type: file
+    path: ./test/pipelines/sample.csv
   - name: split_to_lines
     type: split
   - name: convert_from_csv
@@ -24,7 +10,6 @@ tasks:
     skip_first: false
   - name: join
     type: join
-  - name: write_to_s3
+  - name: write_sample_csv
     type: file
-    path: s3://caterpillar-test-2/column_names_from_first_row_test/notskip_nocolumns_test_results.json
-    success_file: true
+    path: ./test/pipelines/converter/notskip_nocolumns_test_results.json
