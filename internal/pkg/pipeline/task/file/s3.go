@@ -1,6 +1,7 @@
 package file
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -58,12 +59,13 @@ func (r *s3Reader) parse(glob string) ([]string, error) {
 		return nil, err
 	}
 
-	keys := make([]string, 0, len(objects))
+	paths := make([]string, 0, len(objects))
 	for _, object := range objects {
-		keys = append(keys, *object.Key)
+		path := fmt.Sprintf("s3://%s/%s", bucket, *object.Key)
+		paths = append(paths, path)
 	}
 
-	return keys, nil
+	return paths, nil
 
 }
 
