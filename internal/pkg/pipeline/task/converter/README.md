@@ -22,7 +22,7 @@ The converter task transforms data between different formats. It receives record
 | `name` | string | - | Task name for identification |
 | `type` | string | `converter` | Must be "converter" |
 | `format` | string | - | Format to convert to (csv, html, sst) |
-| `delimeter` | string| \t | Used only in sst converter for spliting key and value| 
+| `delimiter` | string| \t | Used only in sst converter for spliting key and value| 
 
 ### CSV Format Options
 
