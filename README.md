@@ -24,7 +24,6 @@ The system is particularly useful for:
 
 - Go 1.24.5 or later
 - AWS CLI configured (for AWS-related tasks)
-- Docker (optional, for containerized deployment)
 
 ### Building and Running
 
@@ -36,20 +35,13 @@ The system is particularly useful for:
 
 2. **Build the project:**
    ```bash
-   go build -o caterpillar cmd/unified-ingestor/unified-ingestor.go
+   go build -o caterpillar cmd/caterpillar/caterpillar.go
    ```
 
 3. **Run a pipeline:**
    ```bash
    ./caterpillar -conf test/pipelines/hello_name.yaml
    ```
-
-### Docker Build
-
-To build a Docker image:
-```bash
-docker build . -f ./build/Dockerfile
-```
 
 ## Core Concepts
 
@@ -204,23 +196,23 @@ tasks:
 
 Caterpillar supports the following tasks, each of which can serve different roles depending on their configuration:
 
-- **`aws_parameter_store`** - Read parameters from AWS Systems Manager Parameter Store
-- **`compress`** - Compress or decompress data using various algorithms
-- **`converter`** - Convert data between different formats (CSV, HTML, JSON, XML, SST)
-- **`delay`** - Add controlled delays between record processing
-- **`echo`** - Print data to console for debugging and monitoring
-- **`file`** - Read from or write to local files and S3 (acts as source or sink)
-- **`flatten`** - Flatten nested JSON structures into single-level key-value pairs
-- **`heimdall`** - Submit jobs to Heimdall data orchestration platform and return results
-- **`http`** - Make HTTP requests with OAuth support and retry logic
-- **`http_server`** - Start an HTTP server to receive incoming data
-- **`join`** - Combine multiple records into a single record
-- **`jq`** - Transform JSON data using JQ queries
-- **`replace`** - Perform regex-based text replacement and transformation
-- **`sample`** - Sample data using various strategies (random, head, tail, nth, percent)
-- **`split`** - Split data by specified delimiters
-- **`sqs`** - Read from or write to AWS SQS queues (acts as source or sink)
-- **`xpath`** - Extract data from XML/HTML using XPath expressions
+- **`aws_parameter_store`** - [Read parameters from AWS Systems Manager Parameter Store](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/aws/parameter_store/README.md)
+- **`compress`** - [Compress or decompress data using various algorithms](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/compress/README.md)
+- **`converter`** - [Convert data between different formats (CSV, HTML, JSON, XML, SST)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/converter/README.md)
+- **`delay`** - [Add controlled delays between record processing](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/delay/README.md)
+- **`echo`** - [Print data to console for debugging and monitoring](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/echo/README.md)
+- **`file`** - [Read from or write to local files and S3 (acts as source or sink)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/file/README.md)
+- **`flatten`** - [Flatten nested JSON structures into single-level key-value pairs](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/flatten/README.md)
+- **`heimdall`** - [Submit jobs to Heimdall data orchestration platform and return results](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/heimdall/README.md)
+- **`http`** - [Make HTTP requests with OAuth support and retry logic](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/http/README.md)
+- **`http_server`** -[Start an HTTP server to receive incoming data](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/http/server/README.md)
+- **`join`** - [Combine multiple records into a single record](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/join/README.md)
+- **`jq`** - [Transform JSON data using JQ queries](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/jq/README.md)
+- **`replace`** - [Perform regex-based text replacement and transformation](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/replace/README.md)
+- **`sample`** - [Sample data using various strategies (random, head, tail, nth, percent)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/sample/README.md)
+- **`split`** - [Split data by specified delimiters](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/split/README.md)
+- **`sqs`** - [Read from or write to AWS SQS queues (acts as source or sink)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/sqs/README.md)
+- **`xpath`** - [Extract data from XML/HTML using XPath expressions](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/xpath/README.md)
 
 
 
