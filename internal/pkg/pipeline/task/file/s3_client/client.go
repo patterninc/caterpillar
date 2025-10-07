@@ -103,14 +103,11 @@ func match(pattern string, objects []types.Object) []types.Object {
 	var matches []types.Object
 
 	for _, obj := range objects {
-		matched, err := doublestar.Match(pattern, *obj.Key)
-		if err != nil {
+		if matched, err := doublestar.Match(pattern, *obj.Key); err != nil || !matched {
 			continue
 		}
 
-		if matched {
-			matches = append(matches, obj)
-		}
+		matches = append(matches, obj)
 	}
 
 	return matches

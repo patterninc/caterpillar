@@ -16,8 +16,10 @@ const (
 
 type localReader struct{}
 
+var lclReader = localReader{}
+
 func newLocalReader(f *file) (reader, error) {
-	return &localReader{}, nil
+	return &lclReader, nil
 }
 
 func (r *localReader) read(path string) (io.ReadCloser, error) {
