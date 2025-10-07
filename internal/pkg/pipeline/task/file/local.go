@@ -16,7 +16,7 @@ const (
 
 type localReader struct{}
 
-func newLocalReader() (reader, error) {
+func newLocalReader(f *file) (reader, error) {
 	return &localReader{}, nil
 }
 

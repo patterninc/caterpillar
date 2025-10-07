@@ -16,9 +16,9 @@ type s3Reader struct {
 	client *s3client.Client
 }
 
-func newS3Reader(region string) (reader, error) {
+func newS3Reader(f *file) (reader, error) {
 
-	c, err := s3client.New(ctx, region)
+	c, err := s3client.New(ctx, f.Region)
 	if err != nil {
 		return nil, err
 	}

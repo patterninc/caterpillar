@@ -27,6 +27,10 @@ type reader interface {
 
 var (
 	ctx     = context.Background()
+	readers = map[string]func(*file) (reader, error){
+		s3Scheme:   newS3Reader,
+		fileScheme: newLocalReader,
+	}
 	writers = map[string]func(*file, io.Reader) error{
 		s3Scheme:   writeS3File,
 		fileScheme: writeLocalFile,
@@ -103,9 +107,14 @@ func (f *file) Run(input <-chan *record.Record, output chan<- *record.Record) er
 }
 
 func (f *file) readFile(output chan<- *record.Record) error {
+
+	newReaderFunction, found := readers[f.pathScheme]
+	if !found {
+		return unknownSchemeError(f.pathScheme)
+	}
 	
 	// let's create a reader
-	reader, err := f.newReader()
+	reader, err := newReaderFunction(f)
 	if err != nil {
 		return err
 	}
@@ -192,18 +201,6 @@ func (f *file) writeSuccessFile() error {
 
 	return writerFunction(successFile, bytes.NewReader([]byte{}))
 
-}
-
-func (f *file) newReader() (reader, error) {
-	if f.pathScheme == `` {
-		return nil, fmt.Errorf("path scheme is not set")
-	}
-
-	if f.pathScheme == fileScheme {
-		return newLocalReader()
-	}
-
-	return newS3Reader(f.Region)
 }
 
 func unknownSchemeError(scheme string) error {
