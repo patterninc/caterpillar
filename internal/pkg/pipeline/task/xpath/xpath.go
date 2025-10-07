@@ -14,6 +14,8 @@ import (
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/converter"
 )
 
+const nodeIndexKey = "node_index"
+
 type xpath struct {
 	task.Base     `yaml:",inline" json:",inline"`
 	Container     string            `yaml:"container" json:"container"`
@@ -50,13 +52,15 @@ func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) e
 			}
 		}
 
-		for _, container := range containerNodes {
+		for i, container := range containerNodes {
 			data, err := x.queryFields(container)
 			if err != nil {
 				return err
 			}
 
 			if len(data) != 0 {
+				index := fmt.Sprintf("%d", i+1)
+				r.SetContextValue(nodeIndexKey, index)
 				x.SendData(r.Context, data, output)
 			}
 		}
