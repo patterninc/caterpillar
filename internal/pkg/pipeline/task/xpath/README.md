@@ -21,6 +21,16 @@ The XPath task extracts structured data from XML and HTML documents using XPath 
 | `ignore_missing` | bool | `true` | Whether to ignore missing fields |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
+## Context Variables
+
+When using a container XPath that matches one or more nodes, the task sets the following context variable for each output record:
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `node_index` | string | 1-based index of the container node (e.g., "1", "2", "3") |
+
+This allows downstream tasks to track which container element the data was extracted from, useful for maintaining order or grouping related data.
+
 ## Example Configurations
 
 ### Extract multiple fields from HTML:
@@ -76,13 +86,15 @@ tasks:
 ## Sample Pipelines
 
 - `test/pipelines/xpath.yaml` - XPath extraction examples
+- `test/pipelines/xpath_with_index.yaml` - Xpath extraction with node index example
 - `test/pipelines/html2json.yaml` - HTML to JSON conversion
 
 ## Use Cases
 
-- **Web scraping**: Extract data from HTML web pages
+- **Web scraping**: Extract data from HTML web pages with node indexing for tracking
 - **XML processing**: Parse and extract data from XML documents
 - **Data extraction**: Extract structured data from semi-structured sources
 - **Content analysis**: Analyze web page content and structure
 - **API response processing**: Extract data from XML API responses
 - **Document processing**: Parse XML-based document formats
+- **Multi-record extraction**: Process multiple similar elements while preserving their order

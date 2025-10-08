@@ -1,0 +1,14 @@
+tasks:
+  - id: read_html
+    type: file
+    path: test/pipelines/sample.html
+  - id: extract_data
+    type: xpath
+    container: "//div[@class='feature-card']"
+    fields:
+      title: "./h3"
+      description: "./p"
+      icon: "./span"
+  - id: echo
+    type: echo
+    only_data: true
