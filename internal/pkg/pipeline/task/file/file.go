@@ -20,11 +20,16 @@ const (
 	defaultSuccessFileName = `_SUCCESS`
 )
 
+type reader interface {
+	read(string) (io.ReadCloser, error)
+	parse(string) ([]string, error)
+}
+
 var (
 	ctx     = context.Background()
-	readers = map[string]func(*file) (io.ReadCloser, error){
-		s3Scheme:   getS3Reader,
-		fileScheme: getLocalReader,
+	readers = map[string]func(*file) (reader, error){
+		s3Scheme:   newS3Reader,
+		fileScheme: newLocalReader,
 	}
 	writers = map[string]func(*file, io.Reader) error{
 		s3Scheme:   writeS3File,
@@ -103,25 +108,46 @@ func (f *file) Run(input <-chan *record.Record, output chan<- *record.Record) er
 
 func (f *file) readFile(output chan<- *record.Record) error {
 
-	// let's get reader function
-	readerFunction, found := readers[f.pathScheme]
+	newReaderFunction, found := readers[f.pathScheme]
 	if !found {
 		return unknownSchemeError(f.pathScheme)
 	}
-
-	readerCloser, err := readerFunction(f)
+	
+	// let's create a reader
+	reader, err := newReaderFunction(f)
 	if err != nil {
 		return err
 	}
-	defer readerCloser.Close()
-
-	content, err := io.ReadAll(readerCloser)
+	
+	// let's get the glob
+	glob, err := f.Path.Get(f.CurrentRecord)
+	if err != nil {
+		return err
+	}
+	
+	// let's parse the glob to get all paths
+	paths, err := reader.parse(glob)
 	if err != nil {
 		return err
 	}
 
-	// let's write content to output channel
-	f.SendData(ctx, content, output)
+	for _, path := range paths {
+
+		readerCloser, err := reader.read(path)
+		if err != nil {
+			return err
+		}
+		defer readerCloser.Close()
+
+		content, err := io.ReadAll(readerCloser)
+		if err != nil {
+			return err
+		}
+
+		// let's write content to output channel
+		f.SendData(ctx, content, output)
+
+	}
 
 	return nil
 
