@@ -1,6 +1,7 @@
 package heimdall
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -59,9 +60,26 @@ func (h *heimdall) Run(input <-chan *record.Record, output chan<- *record.Record
 		defer close(output)
 	}
 
-	// This task is designed to be a data source, so input should be nil
+	// If input is provided, override the job request context
 	if input != nil {
-		return task.ErrNilInput
+		for {
+			r, ok := h.GetRecord(input)
+			if !ok {
+				break
+			}
+
+			// Parse the input record to get dynamic context
+			var jobContext map[string]any
+			if err := json.Unmarshal([]byte(r.Data), &jobContext); err != nil {
+				return err
+			}
+
+			h.JobRequest.Context = jobContext
+			if err := h.submitJob(output); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
 	return h.submitJob(output)
