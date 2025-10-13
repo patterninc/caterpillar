@@ -1,12 +1,11 @@
-name: Release
+name: CI
 
 on:
-  push:
-    tags:
-      - 'v*'
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     
     steps:
@@ -21,13 +20,3 @@ jobs:
     - name: Build caterpillar
       run: |
         go build -o caterpillar ./cmd/caterpillar/caterpillar.go
-        
-    - name: Create Release
-      uses: softprops/action-gh-release@v2
-      with:
-        files: caterpillar
-        generate_release_notes: true
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
