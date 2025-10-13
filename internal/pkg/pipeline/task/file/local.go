@@ -4,6 +4,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/bmatcuk/doublestar"
 )
 
 const (
@@ -12,18 +14,33 @@ const (
 	filePrefixLength = len(filePrefix)
 )
 
-func getLocalReader(f *file) (io.ReadCloser, error) {
+type localReader struct{}
 
-	path, err := f.Path.Get(f.CurrentRecord)
-	if err != nil {
-		return nil, err
-	}
-	inputFile, err := os.Open(path[f.getPathIndex(path):])
+var lclReader = localReader{}
+
+func newLocalReader(f *file) (reader, error) {
+	return &lclReader, nil
+}
+
+func (r *localReader) read(path string) (io.ReadCloser, error) {
+
+	inputFile, err := os.Open(path[getPathIndex(path):])
 	if err != nil {
 		return nil, err
 	}
 
 	return inputFile, nil
+
+}
+
+func (r *localReader) parse(glob string) ([]string, error) {
+
+	paths, err := doublestar.Glob(glob)
+	if err != nil {
+		return nil, err
+	}
+
+	return paths, nil
 
 }
 
@@ -33,7 +50,8 @@ func writeLocalFile(f *file, reader io.Reader) error {
 	if err != nil {
 		return err
 	}
-	outputFile, err := os.Create((path[f.getPathIndex(path):]))
+
+	outputFile, err := os.Create((path[getPathIndex(path):]))
 	if err != nil {
 		return err
 	}
@@ -47,7 +65,8 @@ func writeLocalFile(f *file, reader io.Reader) error {
 	return nil
 
 }
-func (f *file) getPathIndex(path string) int {
+
+func getPathIndex(path string) int {
 
 	// let's figure out if we need to trim filePrefix
 	index := strings.Index(path, filePrefix)
