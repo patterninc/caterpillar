@@ -12,18 +12,18 @@ func sleep(c any, a []any) any {
 		return fmt.Errorf("sleep expects 1 argument")
 	}
 
-	var seconds float64
-	switch v := a[0].(type) {
-	case float64:
-		seconds = v
-	case int:
-		seconds = float64(v)
-	default:
-		return fmt.Errorf("sleep: argument must be a number, got %T", a[0])
+	durationStr, ok := a[0].(string)
+	if !ok {
+		return fmt.Errorf("sleep: argument must be a duration string, got %T", a[0])
 	}
 
-	fmt.Printf("Sleeping for %.0f seconds...\n", seconds)
-	time.Sleep(time.Duration(seconds * float64(time.Second)))
+	dur, err := time.ParseDuration(durationStr)
+	if err != nil {
+		return fmt.Errorf("sleep: invalid duration format '%s': %v", durationStr, err)
+	}
+
+	fmt.Printf("Sleeping for %v...\n", dur)
+	time.Sleep(dur)
 	return c
 }
 
