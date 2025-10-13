@@ -10,6 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.8
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.65.1
 	github.com/babourine/x v1.0.4
+	github.com/bmatcuk/doublestar v1.3.4
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/go-playground/validator/v10 v10.27.0
 	github.com/google/uuid v1.6.0

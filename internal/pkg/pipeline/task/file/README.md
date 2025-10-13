@@ -26,7 +26,7 @@ The task automatically determines its mode based on the presence of input/output
 |-------|------|---------|-------------|
 | `name` | string | - | Task name for identification |
 | `type` | string | `file` | Must be "file" |
-| `path` | string | `/tmp/caterpillar.txt` | File path or S3 URL (s3://bucket/key) |
+| `path` | string | `/tmp/caterpillar.txt` | File path or S3 URL (s3://bucket/key) supports glob patterns in reading mode
 | `region` | string | `us-west-2` | AWS region for S3 operations |
 | `delimiter` | string | `\n` | Delimiter used to separate records when reading |
 | `success_file` | bool | `false` | Whether to create a success file after writing |
