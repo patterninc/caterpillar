@@ -8,7 +8,19 @@ The Heimdall task submits jobs to Heimdall for execution and retrieves the resul
 
 ## Behavior
 
-The Heimdall task submits jobs to the Heimdall platform and retrieves results. It operates as a data source (no input channel required), submits the configured job to Heimdall, and sends the job results to its output channel. The task supports both synchronous and asynchronous job execution with polling for completion.
+The Heimdall task can operate in two modes:
+
+### Source Mode (No Input Channel)
+When used without an input channel, the task acts as a data source. It submits the configured job to Heimdall and sends the job results to its output channel. This is useful for initiating workflows or executing standalone jobs.
+
+### Destination Mode (With Input Channel)
+When used with an input channel, the task acts as a destination. It processes each incoming record by:
+1. Parsing the record data as JSON
+2. Using the parsed data as the job context
+3. Submitting a job to Heimdall with the dynamic context
+4. Sending the job results to the output channel
+
+**Important**: When using heimdall as a destination task, you typically need a `jq` task before it to transform the pipeline data into the proper job context format. The jq task should output a JSON object that will be used as the job's context.
 
 ## Configuration Fields
 
@@ -84,6 +96,36 @@ tasks:
       context:
         query: "SELECT * FROM large_table LIMIT 1000"
 ```
+
+### Using Heimdall as a destination task:
+```yaml
+tasks:
+  - name: fetch_data
+    type: http
+    method: GET
+    endpoint: https://api.example.com/data
+  - name: create_job_context
+    type: jq
+    path: |
+      {
+        "query": "SELECT * FROM " + .table_name + " WHERE id = " + (.id | tostring)
+      }
+  - name: submit_processing_job
+    type: heimdall
+    poll_interval: 10s
+    timeout: 600s
+    job:
+      name: data-processor
+      command_criteria:
+        - type:spark
+      cluster_criteria:
+        - data:prod
+  - name: echo_results
+    type: echo
+    only_data: true
+```
+
+In this example, the `jq` task transforms the HTTP response data into a proper job context object with a query field. The heimdall task then uses this context when submitting the job to Heimdall. Each record processed by the pipeline will trigger a separate Heimdall job with the context derived from the jq transformation.
 
 ## Sample Pipelines
 
