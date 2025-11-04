@@ -77,7 +77,6 @@ func (p *Pipeline) Run() error {
 	wg.Wait()
 
 	if len(errors) > 0 {
-		fmt.Println("there are errors")
 		var errorDetails string
 		for taskName, err := range errors {
 			errorDetails += fmt.Sprintf("Task '%s' failed with error: %s\n", taskName, err)
