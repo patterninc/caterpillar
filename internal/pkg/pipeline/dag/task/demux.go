@@ -1,4 +1,4 @@
-package demux
+package task
 
 import (
 	"context"
@@ -7,15 +7,15 @@ import (
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 )
 
-type Task struct {
+type Demux struct {
 	Name   string
 	ctx    context.Context
 	input  []<-chan *record.Record
 	output chan<- *record.Record
 }
 
-func New(name string, output chan<- *record.Record) *Task {
-	return &Task{
+func NewDemux(name string, output chan<- *record.Record) *Demux {
+	return &Demux{
 		Name:   name,
 		ctx:    context.Background(),
 		input:  make([]<-chan *record.Record, 0),
@@ -23,27 +23,27 @@ func New(name string, output chan<- *record.Record) *Task {
 	}
 }
 
-func (m *Task) AddInputChannel(input <-chan *record.Record) {
-	m.input = append(m.input, input)
+func (d *Demux) AddInputChannel(input <-chan *record.Record) {
+	d.input = append(d.input, input)
 }
 
-func (m *Task) Run() error {
-	if m.output != nil {
-		defer close(m.output)
+func (d *Demux) Run() error {
+	if d.output != nil {
+		defer close(d.output)
 	}
 
 	var wg sync.WaitGroup
 
-	for i := range m.input {
+	for i := range d.input {
 		wg.Add(1)
 		go func(input <-chan *record.Record) {
 			defer wg.Done()
 			for record := range input {
 				r := *record
-				r.Context = m.ctx
-				m.output <- &r
+				r.Context = d.ctx
+				d.output <- &r
 			}
-		}(m.input[i])
+		}(d.input[i])
 	}
 
 	wg.Wait()

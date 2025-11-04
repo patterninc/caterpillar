@@ -4,25 +4,26 @@ import (
 	"fmt"
 	"sync"
 
-	dagparser "github.com/patterninc/caterpillar/internal/pkg/pipeline/dag_parser"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/dag/parser"
+	dagTask "github.com/patterninc/caterpillar/internal/pkg/pipeline/dag/task"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
-	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/mux"
 )
 
-type dag []*dagparser.Node
+type dag []*parser.Node
 
-func (d dag) Run(wg *sync.WaitGroup, locker *sync.Mutex, channelSize int) []error {
-	// First, let's print all nodes with their dependencies
+func (d dag) Run(wg *sync.WaitGroup, locker *sync.Mutex, channelSize int) map[string]error {
 	fmt.Println("\n======================================================")
 	fmt.Println("Final DAG Dependencies:")
 	fmt.Println("======================================================")
 
 	td := d
 	i := 0
+	nodeSet := make(map[string]bool)
 	for i < len(td) {
 		node := td[i]
 		i++
+
 		upstreamNames := make([]string, 0)
 		for _, upNode := range node.Upstream() {
 			upstreamNames = append(upstreamNames, upNode.Task.GetName())
@@ -36,13 +37,24 @@ func (d dag) Run(wg *sync.WaitGroup, locker *sync.Mutex, channelSize int) []erro
 		fmt.Printf("Task: %s\n", node.Task.GetName())
 		fmt.Printf("  Upstream: %v\n", upstreamNames)
 		fmt.Printf("  Downstream: %v\n", downstreamNames)
-		td = append(td, node.Upstream()...)
+
+		nodeSet[node.Task.GetName()] = true
+		for _, node := range node.Upstream() {
+			if !nodeSet[node.Task.GetName()] {
+				td = append(td, node)
+				nodeSet[node.Task.GetName()] = true
+			}
+		}
 	}
 	fmt.Println("======================================================")
 
-	visited := make(map[string]bool)
-	inputs := make(map[string]chan *record.Record)
-	errors := make([]error, 0)
+	nodeSet = make(map[string]bool)
+	errors := make(map[string]error)
+	chanManager := &manager{
+		chanSize: channelSize,
+		inputs:   make(map[string]chan *record.Record),
+		outputs:  make(map[string]chan *record.Record),
+	}
 
 	nodes := d
 	i = 0
@@ -51,79 +63,32 @@ func (d dag) Run(wg *sync.WaitGroup, locker *sync.Mutex, channelSize int) []erro
 		node := nodes[i]
 		i++
 
-		if node.IsRoot() {
-			inputs[node.Task.GetName()] = nil
-		} else {
-			in = inputs[node.Task.GetName()]
-			if in == nil {
-				in = make(chan *record.Record)
-				inputs[node.Task.GetName()] = in
+		in = chanManager.getInputChannel(node, wg, locker, &errors)
+		out = chanManager.getOutputChannel(node, wg, locker, &errors)
+
+		wg.Add(1)
+		go func(in <-chan *record.Record, out chan<- *record.Record, n *parser.Node) {
+			defer wg.Done()
+			if err := n.Task.Run(in, out); err != nil {
+				locker.Lock()
+				errors[n.Task.GetName()] = fmt.Errorf("error in task %s: %w", n.Task.GetName(), err)
+				locker.Unlock()
 			}
-		}
+		}(in, out, node)
 
-		if visited[node.Task.GetName()] {
-			continue
-		}
-
-		if len(node.Downstream()) <= 1 {
-
-			if node.IsLeaf() {
-				out = nil
-			} else {
-				// there's one downstream
-				out = inputs[node.Downstream()[0].Task.GetName()]
-			}
-
-			go func(in chan *record.Record, out chan *record.Record) {
-				defer wg.Done()
-				if err := node.Task.Run(in, out); err != nil {
-					locker.Lock()
-					errors = append(errors, fmt.Errorf("error in task %s: %w", node.Task.GetName(), err))
-					locker.Unlock()
-				}
-			}(in, out)
-		} else {
-			// there are multiple downstreams, the output needs to be muxed
-			muxIn := make(chan *record.Record, channelSize)
-			m := mux.New(fmt.Sprintf("Mux after %s", node.Task.GetName()), muxIn)
-
-			for _, downstreamNode := range node.Downstream() {
-				out := inputs[downstreamNode.Task.GetName()]
-				m.AddOutputChannel(out)
-			}
-
-			wg.Add(1) // wait for mux
-			go func(mux *mux.Mux) {
-				defer wg.Done()
-				if err := mux.Run(); err != nil {
-					locker.Lock()
-					errors = append(errors, fmt.Errorf("error in task %s: %w", node.Task.GetName(), err))
-					locker.Unlock()
-				}
-			}(m)
-
-			go func(in <-chan *record.Record, out chan<- *record.Record) {
-				defer wg.Done()
-				if err := node.Task.Run(in, muxIn); err != nil {
-					locker.Lock()
-					errors = append(errors, fmt.Errorf("error in task %s: %w", node.Task.GetName(), err))
-					locker.Unlock()
-				}
-			}(in, muxIn)
-		}
-
+		nodeSet[node.Task.GetName()] = true
 		for _, node := range node.Upstream() {
-			if !visited[node.Task.GetName()] {
+			if !nodeSet[node.Task.GetName()] {
 				nodes = append(nodes, node)
+				nodeSet[node.Task.GetName()] = true
 			}
 		}
-		visited[node.Task.GetName()] = true
 	}
 	return errors
 }
 
 type dagExpr struct {
-	expr dagparser.Expr
+	expr parser.Expr
 }
 
 func (dx *dagExpr) IsEmpty() bool {
@@ -137,7 +102,7 @@ func (d *dagExpr) UnmarshalYAML(unmarshal func(any) error) error {
 		return err
 	}
 
-	parsedExpr, err := dagparser.ParseDAG(expr)
+	parsedExpr, err := parser.ParseDAG(expr)
 	if err != nil {
 		return err
 	}
@@ -147,7 +112,7 @@ func (d *dagExpr) UnmarshalYAML(unmarshal func(any) error) error {
 }
 
 func buildDAG(expr dagExpr, taskMap map[string]task.Task) dag {
-	dag, err := dagparser.BuildDag(expr.expr, func(name string) task.Task {
+	dag, err := parser.BuildDag(expr.expr, func(name string) task.Task {
 		return taskMap[name]
 	})
 	if err != nil {
@@ -156,4 +121,99 @@ func buildDAG(expr dagExpr, taskMap map[string]task.Task) dag {
 	}
 
 	return dag
+}
+
+type manager struct {
+	chanSize int
+	inputs   map[string]chan *record.Record
+	outputs  map[string]chan *record.Record
+}
+
+// returns the input channel for the given node, from where the node should receive the data from, creating demuxes as necessary
+func (m *manager) getInputChannel(n *parser.Node, wg *sync.WaitGroup, locker *sync.Mutex, errors *map[string]error) chan *record.Record {
+	c := m.inputs[n.Task.GetName()]
+	if c != nil {
+		return c
+	}
+
+	if n.IsRoot() {
+		return nil
+	}
+	
+	if len(n.Upstream()) == 1 {
+		m.getOutputChannel(n.Upstream()[0], wg, locker, errors)
+		c = m.inputs[n.Task.GetName()]
+		return c
+	}
+
+	// there are multiple upstreams, need to demux
+	demuxOut := make(chan *record.Record, m.chanSize)
+	d := dagTask.NewDemux(fmt.Sprintf("Demux before %s", n.Task.GetName()), demuxOut)
+	m.inputs[n.Task.GetName()] = demuxOut
+
+	for _, upNode := range n.Upstream() {
+		upOut := m.outputs[upNode.Task.GetName()]
+		if upOut == nil {
+			upOut = make(chan *record.Record, m.chanSize)
+			m.outputs[upNode.Task.GetName()] = upOut
+		}
+		d.AddInputChannel(upOut)
+	}
+
+	wg.Add(1) // wait for demux
+	go func(demux *dagTask.Demux) {
+		defer wg.Done()
+		if err := demux.Run(); err != nil {
+			locker.Lock()
+			(*errors)[n.Task.GetName()] = fmt.Errorf("error in task %s: %w", n.Task.GetName(), err)
+			locker.Unlock()
+		}
+	}(d)
+
+	return m.inputs[n.Task.GetName()]
+}
+
+// returns the output channel for the given node, where the node should send the data, creating muxes as necessary
+func (m *manager) getOutputChannel(n *parser.Node, wg *sync.WaitGroup, locker *sync.Mutex, errors *map[string]error) chan *record.Record {
+	c := m.outputs[n.Task.GetName()]
+	if c != nil {
+		return c
+	}
+
+	if n.IsLeaf() {
+		return nil
+	}
+
+	if len(n.Downstream()) == 1 {
+		c = make(chan *record.Record, m.chanSize)
+		m.outputs[n.Task.GetName()] = c
+		m.inputs[n.Downstream()[0].Task.GetName()] = c
+		return c
+	}
+
+	// there are multiple downstreams, need to mux
+	muxIn := make(chan *record.Record, m.chanSize)
+	mx := dagTask.NewMux(fmt.Sprintf("Mux after %s", n.Task.GetName()), muxIn)
+	m.outputs[n.Task.GetName()] = muxIn
+
+	for _, downNode := range n.Downstream() {
+		downIn := m.inputs[downNode.Task.GetName()]
+		if downIn == nil {
+			downIn = make(chan *record.Record, m.chanSize)
+			m.inputs[downNode.Task.GetName()] = downIn
+		}
+		mx.AddOutputChannel(downIn)
+	}
+
+	wg.Add(1) // wait for mux
+	go func(mux *dagTask.Mux) {
+		defer wg.Done()
+		if err := mux.Run(); err != nil {
+			locker.Lock()
+			(*errors)[n.Task.GetName()] = fmt.Errorf("error in task %s: %w", n.Task.GetName(), err)
+			locker.Unlock()
+		}
+	}(mx)
+
+	return m.outputs[n.Task.GetName()]
 }

@@ -1,4 +1,4 @@
-package dagparser
+package parser
 
 import (
 	"fmt"

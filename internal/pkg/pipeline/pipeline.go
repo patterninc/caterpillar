@@ -32,7 +32,6 @@ func (p *Pipeline) Run() error {
 
 	// sync
 	var wg sync.WaitGroup
-	wg.Add(tasksCount)
 
 	// data streams
 	var input, output chan *record.Record
@@ -48,8 +47,10 @@ func (p *Pipeline) Run() error {
 		// DAG execution
 		dag := buildDAG(p.DAG, taskMap)
 
-		dag.Run(&wg, &locker, p.ChannelSize)
+		errors = dag.Run(&wg, &locker, p.ChannelSize)
 	} else {
+		wg.Add(tasksCount)
+
 		for i := tasksCount - 1; i >= 0; i-- {
 			if i != 0 {
 				input = make(chan *record.Record, p.ChannelSize)
@@ -72,10 +73,8 @@ func (p *Pipeline) Run() error {
 		}
 	}
 
-	fmt.Println("Pipeline is running...")
 	// wait for all tasks completion
 	wg.Wait()
-	fmt.Println("Pipeline execution completed.")
 
 	if len(errors) > 0 {
 		fmt.Println("there are errors")

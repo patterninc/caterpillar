@@ -1,4 +1,4 @@
-package mux
+package task
 
 import (
 	"context"
@@ -13,7 +13,7 @@ type Mux struct {
 	outputs []chan<- *record.Record
 }
 
-func New(name string, input <-chan *record.Record) *Mux {
+func NewMux(name string, input <-chan *record.Record) *Mux {
 	return &Mux{
 		Name:    name,
 		ctx:     context.Background(),
@@ -27,12 +27,11 @@ func (m *Mux) AddOutputChannel(output chan<- *record.Record) {
 }
 
 func (m *Mux) Run() error {
-
-	// defer func() {
-	// 	for _, output := range m.outputs {
-	// 		close(output)
-	// 	}
-	// }()
+	defer func() {
+		for _, output := range m.outputs {
+			close(output)
+		}
+	}()
 
 	for record := range m.input {
 		r := *record
@@ -42,5 +41,6 @@ func (m *Mux) Run() error {
 			output <- &r
 		}
 	}
+
 	return nil
 }

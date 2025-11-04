@@ -1,7 +1,7 @@
 tasks:
   - name: read_local_file
     type: file
-    path: hello.txt
+    path: test/pipelines/dag.txt
   - name: split
     type: split
   - name: say_hello
