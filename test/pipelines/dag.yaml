@@ -1,0 +1,22 @@
+tasks:
+  - name: read_local_file
+    type: file
+    path: hello.txt
+  - name: split
+    type: split
+  - name: say_hello
+    type: jq
+    path: |
+      "Hello, " + .name + "!" 
+  - name: echo_1
+    type: echo
+    only_data: true
+  - name: say_bye
+    type: jq
+    path: .name | ascii_downcase | "bye, " + . + "."
+  - name: echo_2
+    type: echo
+    only_data: true
+
+dag: |
+  read_local_file >> split >> [say_hello >> echo_1, say_bye] >> echo_2
