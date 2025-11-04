@@ -193,17 +193,6 @@ func BuildDag(expr Expr, getTask func(name string) task.Task) ([]*Node, error) {
 
 	// Execute the resolution to build the DAG
 	return expr.ResolveRight(wrappedGetTask)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// // Convert registry to slice
-	// allNodes := make([]*Node, 0, len(nodeRegistry))
-	// for _, node := range nodeRegistry {
-	// 	allNodes = append(allNodes, node)
-	// }
-
-	// return allNodes, nil
 }
 
 // Global registry to track nodes during construction
