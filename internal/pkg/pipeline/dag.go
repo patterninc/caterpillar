@@ -111,16 +111,15 @@ func (d *dagExpr) UnmarshalYAML(unmarshal func(any) error) error {
 	return nil
 }
 
-func buildDAG(expr dagExpr, taskMap map[string]task.Task) dag {
+func buildDAG(expr dagExpr, taskMap map[string]task.Task) (dag, error) {
 	dag, err := parser.BuildDag(expr.expr, func(name string) task.Task {
 		return taskMap[name]
 	})
 	if err != nil {
-		fmt.Printf("error building dag: %v\n", err)
-		return nil
+		return nil, err
 	}
 
-	return dag
+	return dag, nil
 }
 
 type manager struct {

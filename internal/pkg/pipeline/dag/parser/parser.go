@@ -31,6 +31,14 @@ func (p *Parser) parseTerm() (Expr, error) {
 	if p.eat(TokenLBracket) {
 		exprs := make([]Expr, 0)
 
+		// Handle empty brackets
+		if p.current().Type == TokenRBracket {
+			if !p.eat(TokenRBracket) {
+				return nil, errors.New("expected ], got: " + p.current().Value)
+			}
+			return nil, errors.New("empty tuples are not allowed")
+		}
+
 		for {
 			expr, err := p.parseExpression()
 			if err != nil {
@@ -38,8 +46,16 @@ func (p *Parser) parseTerm() (Expr, error) {
 			}
 			exprs = append(exprs, expr)
 
-			if !p.eat(TokenComma) || p.current().Type == TokenRBracket {
+			if p.eat(TokenComma) {
+				// After eating a comma, we must have another expression or closing bracket
+				if p.current().Type == TokenRBracket {
+					return nil, errors.New("trailing comma not allowed in tuple")
+				}
+				continue
+			} else if p.current().Type == TokenRBracket {
 				break
+			} else {
+				return nil, errors.New("expected ',' or ']' in tuple, got: " + p.current().Value)
 			}
 		}
 

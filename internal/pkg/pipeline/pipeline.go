@@ -45,7 +45,10 @@ func (p *Pipeline) Run() error {
 			taskMap[t.GetName()] = t
 		}
 		// DAG execution
-		dag := buildDAG(p.DAG, taskMap)
+		dag, err := buildDAG(p.DAG, taskMap)
+		if err != nil {
+			return fmt.Errorf("error building DAG: %w", err)
+		}
 
 		errors = dag.Run(&wg, &locker, p.ChannelSize)
 	} else {
