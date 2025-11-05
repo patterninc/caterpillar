@@ -16,8 +16,8 @@ Breaks down the input DAG expression into a stream of tokens:
 **Token Types:**
 - `IDENTIFIER`: Task names (e.g., `task1`, `extract_data`)
 - `ARROW`: Flow operator (`>>`)
-- `LBRACKET`: Left parenthesis (`[`)
-- `RBRACKET`: Right parenthesis (`]`)
+- `LBRACKET`: Left bracket (`[`)
+- `RBRACKET`: Right bracket (`]`)
 - `COMMA`: Tuple separator (`,`)
 - `EOF`: End of input
 
@@ -47,8 +47,8 @@ Creates a tree (abstract syntax tree) structure representing the pipeline depend
 | `task1` | Single task | task1 executes |
 | `task1 >> task2` | Sequential | task1 then task2 |
 | `[task1, task2]` | Parallel | task1 and task2 simultaneously |
-| `task1 >> (task2, task3)` | Fan-out | task1 feeds both task2 and task3 |
-| `(task1, task2) >> task3` | Fan-in | Both task1 and task2 feed task3 |
+| `task1 >> [task2, task3]` | Fan-out | task1 feeds both task2 and task3 |
+| `[task1, task2] >> task3` | Fan-in | Both task1 and task2 feed task3 |
 
 ### Complex Examples
 

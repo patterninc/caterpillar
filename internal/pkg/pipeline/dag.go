@@ -138,7 +138,6 @@ func (m *manager) getInputChannel(n *parser.Node, wg *sync.WaitGroup, locker *sy
 	if n.IsRoot() {
 		return nil
 	}
-	
 	if len(n.Upstream()) == 1 {
 		m.getOutputChannel(n.Upstream()[0], wg, locker, errors)
 		c = m.inputs[n.Task.GetName()]
