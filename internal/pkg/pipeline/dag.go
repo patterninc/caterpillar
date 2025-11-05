@@ -147,7 +147,7 @@ func (m *manager) getInputChannel(n *parser.Node, wg *sync.WaitGroup, locker *sy
 
 	// there are multiple upstreams, need to demux
 	demuxOut := make(chan *record.Record, m.chanSize)
-	d := dagTask.NewDemux(fmt.Sprintf("Demux before %s", n.Task.GetName()), demuxOut)
+	d := dagTask.NewDemux(fmt.Sprintf("demux_%s", n.Task.GetName()), demuxOut)
 	m.inputs[n.Task.GetName()] = demuxOut
 
 	for _, upNode := range n.Upstream() {
@@ -192,7 +192,7 @@ func (m *manager) getOutputChannel(n *parser.Node, wg *sync.WaitGroup, locker *s
 
 	// there are multiple downstreams, need to mux
 	muxIn := make(chan *record.Record, m.chanSize)
-	mx := dagTask.NewMux(fmt.Sprintf("Mux after %s", n.Task.GetName()), muxIn)
+	mx := dagTask.NewMux(fmt.Sprintf("mux_%s", n.Task.GetName()), muxIn)
 	m.outputs[n.Task.GetName()] = muxIn
 
 	for _, downNode := range n.Downstream() {
