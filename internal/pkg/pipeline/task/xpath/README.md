@@ -8,7 +8,11 @@ The XPath task applies XPath queries to XML/HTML data to extract specific elemen
 
 ## Behavior
 
-The XPath task extracts structured data from XML and HTML documents using XPath expressions. It receives records from its input channel, optionally selects container elements using a container XPath, then extracts multiple fields using field-specific XPath expressions. The extracted data is returned as JSON with field names as keys. The task can handle missing fields gracefully when `ignore_missing` is enabled.
+The XPath task extracts structured data from XML and HTML documents using XPath expressions. It receives records from its input channel, optionally selects container elements using a container XPath, then extracts multiple fields using field-specific XPath expressions. The extracted data is returned as JSON with field names as keys.
+
+**Important**: Each field value is returned as an **array**, even if there's only one matching node. This allows the task to handle cases where multiple nodes match the same XPath expression. If no nodes match a field's XPath expression:
+- When `ignore_missing` is `true` (default): the field is set to `null`
+- When `ignore_missing` is `false`: the task returns an error
 
 ## Configuration Fields
 
