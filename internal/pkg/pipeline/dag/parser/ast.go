@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -31,10 +32,6 @@ func (i *Ident) resolve(getTask func(name string) task.Task) ([]*Node, error) {
 		if node, exists := globalNodeRegistry[i.Name]; exists {
 			return []*Node{node}, nil
 		}
-		// This shouldn't happen if wrappedGetTask is used properly
-		node := &Node{Task: task}
-		globalNodeRegistry[i.Name] = node
-		return []*Node{node}, nil
 	}
 
 	// Fallback for when registry is not available
@@ -77,22 +74,10 @@ func (b *BinOp) resolve(getTask func(name string) task.Task) ([]*Node, []*Node, 
 	for _, leftNode := range leftNodes {
 		for _, rightNode := range rightNodes {
 			// Check if downstream connection already exists
-			downstreamExists := false
-			for _, existing := range leftNode.downstream {
-				if existing == rightNode {
-					downstreamExists = true
-					break
-				}
-			}
+			downstreamExists := slices.Contains(leftNode.downstream, rightNode)
 
 			// Check if upstream connection already exists
-			upstreamExists := false
-			for _, existing := range rightNode.upstream {
-				if existing == leftNode {
-					upstreamExists = true
-					break
-				}
-			}
+			upstreamExists := slices.Contains(rightNode.upstream, leftNode)
 
 			// Only add connections if they don't already exist
 			if !downstreamExists {
@@ -192,7 +177,85 @@ func BuildDag(expr Expr, getTask func(name string) task.Task) ([]*Node, error) {
 	globalNodeRegistry = nodeRegistry
 
 	// Execute the resolution to build the DAG
-	return expr.ResolveRight(wrappedGetTask)
+	nodes, err := expr.ResolveRight(wrappedGetTask)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check for circular dependencies
+	if err := detectCycles(nodeRegistry); err != nil {
+		return nil, err
+	}
+
+	return nodes, nil
+}
+
+// detectCycles performs a depth-first search to detect cycles in the DAG
+func detectCycles(nodeRegistry map[string]*Node) error {
+	// Track visit states: 0 = unvisited, 1 = visiting, 2 = visited
+	visitState := make(map[string]int)
+
+	// Initialize all nodes as unvisited
+	for name := range nodeRegistry {
+		visitState[name] = 0
+	}
+
+	// Check each unvisited node for cycles
+	for name, node := range nodeRegistry {
+		if visitState[name] == 0 {
+			if err := dfsDetectCycle(node, visitState, make([]string, 0)); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// dfsDetectCycle performs depth-first search to detect cycles
+func dfsDetectCycle(node *Node, visitState map[string]int, path []string) error {
+	nodeName := node.Task.GetName()
+
+	// If we're currently visiting this node, we found a cycle
+	if visitState[nodeName] == 1 {
+		// Find where the cycle starts in the path
+		cycleStart := -1
+		for i, pathNode := range path {
+			if pathNode == nodeName {
+				cycleStart = i
+				break
+			}
+		}
+
+		var cyclePath []string
+		if cycleStart >= 0 {
+			cyclePath = append(path[cycleStart:], nodeName)
+		} else {
+			cyclePath = append(path, nodeName)
+		}
+
+		return fmt.Errorf("circular dependency detected: %v", cyclePath)
+	}
+
+	// If already fully visited, no cycle through this path
+	if visitState[nodeName] == 2 {
+		return nil
+	}
+
+	// Mark as currently visiting
+	visitState[nodeName] = 1
+	newPath := append(path, nodeName)
+
+	// Visit all downstream nodes
+	for _, downstream := range node.downstream {
+		if err := dfsDetectCycle(downstream, visitState, newPath); err != nil {
+			return err
+		}
+	}
+
+	// Mark as fully visited
+	visitState[nodeName] = 2
+	return nil
 }
 
 // Global registry to track nodes during construction
