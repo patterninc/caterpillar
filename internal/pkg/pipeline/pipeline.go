@@ -12,12 +12,12 @@ const (
 )
 
 type Pipeline struct {
-	Tasks       tasks `yaml:"tasks,omitempty" json:"tasks,omitempty"`
-	ChannelSize int   `yaml:"channel_size,omitempty" json:"channel_size,omitempty"`
+	Tasks       tasks   `yaml:"tasks,omitempty" json:"tasks,omitempty"`
+	ChannelSize int     `yaml:"channel_size,omitempty" json:"channel_size,omitempty"`
+	DAG         dagExpr `yaml:"dag" json:"dag"`
 }
 
 func (p *Pipeline) Run() error {
-
 	tasksCount := len(p.Tasks)
 
 	if tasksCount == 0 {
@@ -31,33 +31,38 @@ func (p *Pipeline) Run() error {
 
 	// sync
 	var wg sync.WaitGroup
-	wg.Add(tasksCount)
 
 	// data streams
 	var input, output chan *record.Record
 
 	var locker sync.Mutex
-	var errors = make(map[string]error)
+	errors := make(map[string]error)
 
-	for i := tasksCount - 1; i >= 0; i-- {
-		if i != 0 {
-			input = make(chan *record.Record, p.ChannelSize)
-		} else {
-			input = nil
-		}
-		go func(in <-chan *record.Record, out chan<- *record.Record) {
-			defer wg.Done()
-			if err := p.Tasks[i].Run(in, out); err != nil {
-				// FIXME: add better error processing
-				fmt.Printf("error in %s: %s\n", p.Tasks[i].GetName(), err)
-				if p.Tasks[i].GetFailOnError() {
-					defer locker.Unlock()
-					locker.Lock()
-					errors[p.Tasks[i].GetName()] = err
-				}
+	if !p.DAG.IsEmpty() {
+		fmt.Println("post order:", p.DAG)
+	} else {
+		wg.Add(tasksCount)
+
+		for i := tasksCount - 1; i >= 0; i-- {
+			if i != 0 {
+				input = make(chan *record.Record, p.ChannelSize)
+			} else {
+				input = nil
 			}
-		}(input, output)
-		output = input
+			go func(in <-chan *record.Record, out chan<- *record.Record) {
+				defer wg.Done()
+				if err := p.Tasks[i].Run(in, out); err != nil {
+					// FIXME: add better error processing
+					fmt.Printf("error in %s: %s\n", p.Tasks[i].GetName(), err)
+					if p.Tasks[i].GetFailOnError() {
+						defer locker.Unlock()
+						locker.Lock()
+						errors[p.Tasks[i].GetName()] = err
+					}
+				}
+			}(input, output)
+			output = input
+		}
 	}
 
 	// wait for all tasks completion
@@ -72,5 +77,4 @@ func (p *Pipeline) Run() error {
 	}
 
 	return nil
-
 }
