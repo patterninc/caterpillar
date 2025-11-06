@@ -1,6 +1,3 @@
-## PR Details
-Clickup Link - 
-
 ### Description 
 
 #### Types of changes
