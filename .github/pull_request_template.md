@@ -15,7 +15,6 @@
 <!--- If you're unsure about any of these, don't hesitate to ask. We're here to help! -->
 
 - [ ] My code follows the code style of this project.
-  <!--- Ruby style guide https://github.com/rubocop/ruby-style-guide -->
   <!--- Go Style Guide https://github.com/uber-go/guide/blob/master/style.md -->
 - [ ] My change requires a change to the documentation and I have updated the documentation accordingly.
 - [ ] I have added tests to cover my changes.
