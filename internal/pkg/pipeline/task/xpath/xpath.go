@@ -75,23 +75,26 @@ func (x *xpath) queryFields(container *html.Node) ([]byte, error) {
 	result := make(map[string]any)
 
 	for field, xpathExpr := range x.Fields {
-		node := htmlquery.FindOne(container, xpathExpr)
+		nodes := htmlquery.Find(container, xpathExpr)
 
-		if node == nil && !x.IgnoreMissing {
+		if len(nodes) == 0 && !x.IgnoreMissing {
 			return nil, fmt.Errorf("field '%s' not found for xpath: %s", field, xpathExpr)
 		}
 
-		if node == nil {
+		if len(nodes) == 0 {
 			result[field] = nil
 			continue
 		}
 
-		if isNonLeaf(node) || isEmpty(node) {
-			result[field] = converter.ConvertHtmlNode(node)
-			continue
+		values := make([]any, 0, len(nodes))
+		for _, node := range nodes {
+			if isNonLeaf(node) || isEmpty(node) {
+				values = append(values, converter.ConvertHtmlNode(node))
+			} else {
+				values = append(values, strings.TrimSpace(htmlquery.InnerText(node)))
+			}
 		}
-
-		result[field] = strings.TrimSpace(htmlquery.InnerText(node))
+		result[field] = values
 	}
 
 	jsonData, err := json.MarshalIndent(result, "", "  ")
