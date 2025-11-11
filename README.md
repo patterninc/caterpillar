@@ -228,6 +228,92 @@ tasks:
     type: echo
 ```
 
+### Task Concurrency
+
+Many tasks support concurrent processing, allowing multiple workers to process records in parallel for improved throughput.
+
+#### Overview
+
+When `task_concurrency` is set to a value greater than 1, the pipeline creates multiple concurrent workers for that task. Each worker independently reads from the input channel and processes records, significantly improving performance for I/O-bound operations like HTTP requests or file operations.
+
+#### How It Works
+
+```yaml
+tasks:
+  - name: fetch_data
+    type: http
+    task_concurrency: 10  # Creates 10 concurrent workers
+    endpoint: https://api.example.com/data
+```
+
+**Execution Flow:**
+1. Pipeline creates 10 worker goroutines
+2. All workers read from the same input channel (competing consumers)
+3. Each worker processes records independently
+4. Pipeline orchestrator closes the output channel after all workers finish
+
+**Example with 100 records:**
+- With `task_concurrency: 1` → Processes 100 records sequentially
+- With `task_concurrency: 10` → 10 workers each process ~10 records concurrently
+
+#### Tasks Supporting Concurrency
+
+The following tasks support the `task_concurrency` parameter:
+
+- **`compress`** - Concurrent compression/decompression
+- **`converter`** - Concurrent format conversion
+- **`file`** - Concurrent file read/write operations
+- **`flatten`** - Concurrent JSON flattening
+- **`heimdall`** - Concurrent job submissions
+- **`http`** - Concurrent HTTP requests
+- **`jq`** - Concurrent JSON transformations
+- **`replace`** - Concurrent text replacements
+- **`sample`** - Concurrent sampling operations
+- **`xpath`** - Concurrent XPath extractions
+
+#### Configuration Examples
+
+**Basic Concurrency:**
+```yaml
+tasks:
+  - name: transform_data
+    type: jq
+    path: '.data | { id: .id, name: .name }'
+    task_concurrency: 5  # 5 concurrent transformations
+```
+
+**High-Throughput HTTP Pipeline:**
+```yaml
+tasks:
+  - name: read_queue
+    type: sqs
+    queue_url: https://sqs.us-west-2.amazonaws.com/123456789012/my-queue
+    exit_on_empty: true
+  
+  - name: extract_urls
+    type: jq
+    path: '.url'
+    task_concurrency: 10
+  
+  - name: fetch_content
+    type: http
+    task_concurrency: 20  # 20 concurrent HTTP requests
+  
+  - name: save_results
+    type: file
+    path: ./output/{{ macro "uuid" }}.json
+    task_concurrency: 10  # 10 concurrent file writes
+```
+
+#### Important Notes
+
+- Default concurrency is 1 (sequential processing)
+- Concurrency is per-task, not per-pipeline
+- Workers share the same input/output channels
+- Context variables are preserved across concurrent workers
+- Error handling respects `fail_on_error` setting
+- The pipeline orchestrator manages channel lifecycle automatically
+
 ### Task Configuration
 Each task supports common configuration options:
 
@@ -235,7 +321,8 @@ Each task supports common configuration options:
 tasks:
   - name: my_task
     type: http
-    fail_on_error: true  # Stop pipeline on error
+    fail_on_error: true        # Stop pipeline on error
+    task_concurrency: 10       # Process with 10 concurrent workers
     context:
       extracted_value: .data.value  # Set context for downstream tasks
 ```
