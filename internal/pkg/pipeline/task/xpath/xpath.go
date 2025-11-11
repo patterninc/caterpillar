@@ -33,10 +33,6 @@ func (x *xpath) SupportsTaskConcurrency() bool {
 
 func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	for {
 		r, ok := x.GetRecord(input)
 		if !ok {

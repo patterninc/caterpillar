@@ -63,10 +63,6 @@ func (f *file) SupportsTaskConcurrency() bool {
 
 func (f *file) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	// let's check if we read file or we write file...
 	if input != nil && output != nil {
 		return task.ErrPresentInputOutput

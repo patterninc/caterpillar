@@ -54,10 +54,6 @@ func (s *sample) SupportsTaskConcurrency() bool {
 
 func (s *sample) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	// if this task is firs or last in the pipeline, let's bail...
 	if input == nil || output == nil {
 		return ErrInvalidConfig

@@ -122,10 +122,6 @@ func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 
 func (h *httpCore) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	// if we have input, treat each value as a URL and try to get data from it...
 	if input != nil {
 		for {

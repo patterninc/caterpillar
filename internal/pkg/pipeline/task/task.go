@@ -91,10 +91,6 @@ func (b *Base) GetInputCount() int {
 
 func (b *Base) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	for r := range input {
 		b.SendRecord(r, output)
 	}

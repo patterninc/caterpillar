@@ -22,10 +22,6 @@ func (f *flatten) SupportsTaskConcurrency() bool {
 
 func (f *flatten) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	for {
 		r, ok := f.GetRecord(input)
 		if !ok {

@@ -71,10 +71,14 @@ func (p *Pipeline) Run() error {
 			}(i, input, output)
 		}
 
-		go func(wg *sync.WaitGroup) {
+		// Pipeline orchestrator closes the output channel after all workers complete
+		go func(wg *sync.WaitGroup, out chan<- *record.Record) {
 			wg.Wait()
+			if out != nil {
+				close(out)
+			}
 			mainWg.Done()
-		}(&taskWg)
+		}(&taskWg, output)
 
 		output = input
 	}

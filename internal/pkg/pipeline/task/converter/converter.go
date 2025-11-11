@@ -64,10 +64,6 @@ func (c *core) SupportsTaskConcurrency() bool {
 
 func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	for {
 		r, ok := c.GetRecord(input)
 		if !ok {
