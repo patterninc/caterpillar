@@ -56,7 +56,7 @@ func (b *Base) GetTaskConcurrency() int {
 	return b.TaskConcurrency
 }
 
-// SupportsTaskConcurrency:  returns true if the task supports concurrency
+// SupportsTaskConcurrency: returns true if the task supports concurrency
 // By default, tasks do not support concurrency unless explicitly overridden
 // in the task implementation.
 func (b *Base) SupportsTaskConcurrency() bool {
