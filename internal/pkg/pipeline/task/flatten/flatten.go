@@ -16,6 +16,10 @@ func New() (task.Task, error) {
 	return &flatten{}, nil
 }
 
+func (f *flatten) SupportsTaskConcurrency() bool {
+	return true
+}
+
 func (f *flatten) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
 	if output != nil {

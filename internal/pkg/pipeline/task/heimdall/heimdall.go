@@ -53,6 +53,10 @@ func New() (task.Task, error) {
 	return h, nil
 }
 
+func (h *heimdall) SupportsTaskConcurrency() bool {
+	return true
+}
+
 func (h *heimdall) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
 	// close channel when done

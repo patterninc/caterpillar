@@ -86,6 +86,11 @@ func (t *tasks) UnmarshalYAML(unmarshal func(any) error) error {
 			return err
 		}
 
+		// Validate that concurrency is not set for tasks that don't support it
+		if t.GetTaskConcurrency() > 1 && !t.SupportsTaskConcurrency() {
+			return fmt.Errorf("task '%s' (type: %s) does not support concurrency, but concurrency value %d was specified", t.GetName(), b.Type, t.GetTaskConcurrency())
+		}
+
 		result = append(result, t)
 	}
 

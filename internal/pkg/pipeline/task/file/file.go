@@ -57,6 +57,10 @@ func New() (task.Task, error) {
 	}, nil
 }
 
+func (f *file) SupportsTaskConcurrency() bool {
+	return true
+}
+
 func (f *file) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
 	if output != nil {
@@ -112,19 +116,19 @@ func (f *file) readFile(output chan<- *record.Record) error {
 	if !found {
 		return unknownSchemeError(f.pathScheme)
 	}
-	
+
 	// let's create a reader
 	reader, err := newReaderFunction(f)
 	if err != nil {
 		return err
 	}
-	
+
 	// let's get the glob
 	glob, err := f.Path.Get(f.CurrentRecord)
 	if err != nil {
 		return err
 	}
-	
+
 	// let's parse the glob to get all paths
 	paths, err := reader.parse(glob)
 	if err != nil {

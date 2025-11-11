@@ -28,6 +28,10 @@ func New() (task.Task, error) {
 	}, nil
 }
 
+func (c *core) SupportsTaskConcurrency() bool {
+	return true
+}
+
 func (c *core) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	type raw core
 

@@ -58,6 +58,10 @@ func (c *core) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 }
 
+func (c *core) SupportsTaskConcurrency() bool {
+	return true
+}
+
 func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
 	if output != nil {

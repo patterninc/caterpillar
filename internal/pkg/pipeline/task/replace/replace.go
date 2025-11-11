@@ -17,6 +17,10 @@ func New() (task.Task, error) {
 	return &replace{}, nil
 }
 
+func (r *replace) SupportsTaskConcurrency() bool {
+	return true
+}
+
 func (r *replace) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
 	if output != nil {

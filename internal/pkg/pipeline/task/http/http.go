@@ -65,6 +65,10 @@ type result struct {
 	Headers map[string][]string `json:"headers"`
 }
 
+func (h *httpCore) SupportsTaskConcurrency() bool {
+	return true
+}
+
 func New() (task.Task, error) {
 
 	expectedStatuses, err := status.New(defaultExpectedStatuses)

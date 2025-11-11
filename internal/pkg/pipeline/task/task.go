@@ -27,14 +27,17 @@ type Task interface {
 	GetName() string
 	GetInputCount() int
 	GetFailOnError() bool
+	GetTaskConcurrency() int
+	SupportsTaskConcurrency() bool
 }
 
 type Base struct {
-	Name          string               `yaml:"name,omitempty" json:"name,omitempty"`
-	Type          string               `yaml:"type,omitempty" json:"type,omitempty"`
-	FailOnError   bool                 `yaml:"fail_on_error,omitempty" json:"fail_on_error,omitempty"`
-	Context       map[string]*jq.Query `yaml:"context,omitempty" json:"context,omitempty"`
-	CurrentRecord *record.Record       // make record context available to entire task
+	Name            string               `yaml:"name,omitempty" json:"name,omitempty"`
+	Type            string               `yaml:"type,omitempty" json:"type,omitempty"`
+	FailOnError     bool                 `yaml:"fail_on_error,omitempty" json:"fail_on_error,omitempty"`
+	TaskConcurrency int                  `yaml:"task_concurrency,omitempty" json:"task_concurrency,omitempty"`
+	Context         map[string]*jq.Query `yaml:"context,omitempty" json:"context,omitempty"`
+	CurrentRecord   *record.Record       // make record context available to entire task
 
 	recordIndex int
 	inputCount  int
@@ -47,6 +50,17 @@ func (b *Base) GetFailOnError() bool {
 
 func (b *Base) GetName() string {
 	return b.Name
+}
+
+func (b *Base) GetTaskConcurrency() int {
+	return b.TaskConcurrency
+}
+
+// SupportsTaskConcurrency:  returns true if the task supports concurrency
+// By default, tasks do not support concurrency unless explicitly overridden
+// in the task implementation.
+func (b *Base) SupportsTaskConcurrency() bool {
+	return false
 }
 
 func (b *Base) GetRecord(input <-chan *record.Record) (*record.Record, bool) {
