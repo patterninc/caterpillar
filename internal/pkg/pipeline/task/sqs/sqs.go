@@ -11,7 +11,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	qs "github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
 
@@ -74,25 +73,15 @@ func (s *sqs) extractRegionFromQueueURL() string {
 func (s *sqs) getSQSClient() (*qs.Client, error) {
 	region := s.extractRegionFromQueueURL()
 
-	awsConfig, _ := config.LoadDefaultConfig(ctx,
-		config.WithRegion(region),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")),
-	)
-
-	awsConfig.EndpointResolver = aws.EndpointResolverFunc(func(service, region string) (aws.Endpoint, error) {
-		return aws.Endpoint{
-			URL: "http://localhost:4566",
-		}, nil
-	})
+	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return nil, err
+	}
 
 	return qs.NewFromConfig(awsConfig), nil
 }
 
 func (s *sqs) Run(input <-chan *record.Record, output chan<- *record.Record) error {
-
-	if output != nil {
-		defer close(output)
-	}
 
 	client, err := s.getSQSClient()
 	if err != nil {

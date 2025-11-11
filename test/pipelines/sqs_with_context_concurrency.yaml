@@ -1,0 +1,14 @@
+tasks:
+  - name: get_data_from_queue
+    type: sqs
+    queue_url: http://sqs.us-west-2.amazonaws.com/123456789000/input_queue
+    exit_on_empty: true
+    context:
+      asin: ".asin"
+  - name: echo
+    type: echo
+    only_data: true
+  - name: file_with_context
+    type: file
+    path: ./output/{{ macro "uuid" }}_record.txt
+    task_concurrency: 20

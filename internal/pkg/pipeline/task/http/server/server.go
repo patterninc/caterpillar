@@ -51,10 +51,6 @@ func New() (task.Task, error) {
 
 func (s *server) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	// input channel must be nil
 	if input != nil {
 		return task.ErrPresentInput
