@@ -48,10 +48,6 @@ func New() (task.Task, error) {
 	}, nil
 }
 
-func (s *sample) SupportsTaskConcurrency() bool {
-	return true
-}
-
 func (s *sample) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
 	// if this task is first or last in the pipeline, let's bail...

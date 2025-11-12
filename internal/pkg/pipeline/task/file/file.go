@@ -57,10 +57,6 @@ func New() (task.Task, error) {
 	}, nil
 }
 
-func (f *file) SupportsTaskConcurrency() bool {
-	return true
-}
-
 func (f *file) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
 	// let's check if we read file or we write file...

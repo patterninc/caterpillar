@@ -262,10 +262,8 @@ The following tasks support the `task_concurrency` parameter:
 
 - **`compress`** - Concurrent compression/decompression
 - **`converter`** - Concurrent format conversion
-- **`file`** - Concurrent file read/write operations
 - **`flatten`** - Concurrent JSON flattening
 - **`heimdall`** - Concurrent job submissions
-- **`http`** - Concurrent HTTP requests
 - **`jq`** - Concurrent JSON transformations
 - **`replace`** - Concurrent text replacements
 - **`sample`** - Concurrent sampling operations

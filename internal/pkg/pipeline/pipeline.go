@@ -44,14 +44,7 @@ func (p *Pipeline) Run() error {
 			input = nil
 		}
 
-		// Only use concurrency if the task supports it
-		taskConcurrency := defaultTaskConcurrency
-		if p.Tasks[i].SupportsTaskConcurrency() {
-			taskConcurrency = p.Tasks[i].GetTaskConcurrency()
-			if taskConcurrency <= 0 {
-				taskConcurrency = defaultTaskConcurrency
-			}
-		}
+		taskConcurrency := p.Tasks[i].GetTaskConcurrency()
 
 		var taskWg sync.WaitGroup
 		taskWg.Add(taskConcurrency)

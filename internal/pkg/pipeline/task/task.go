@@ -53,6 +53,9 @@ func (b *Base) GetName() string {
 }
 
 func (b *Base) GetTaskConcurrency() int {
+	if b.TaskConcurrency <= 0 {
+		return 1
+	}
 	return b.TaskConcurrency
 }
 
