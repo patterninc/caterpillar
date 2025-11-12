@@ -27,10 +27,6 @@ func New() (task.Task, error) {
 	return &xpath{IgnoreMissing: true}, nil
 }
 
-func (x *xpath) SupportsTaskConcurrency() bool {
-	return true
-}
-
 func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
 	for {

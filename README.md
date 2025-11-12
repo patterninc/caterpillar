@@ -247,18 +247,6 @@ When `task_concurrency` is set to a value greater than 1, the pipeline creates m
 - With `task_concurrency: 1` → Processes 100 records sequentially
 - With `task_concurrency: 10` → 10 workers each process ~10 records concurrently
 
-#### Tasks Supporting Concurrency
-
-The following tasks support the `task_concurrency` parameter:
-
-- **`compress`** - Concurrent compression/decompression
-- **`converter`** - Concurrent format conversion
-- **`flatten`** - Concurrent JSON flattening
-- **`heimdall`** - Concurrent job submissions
-- **`jq`** - Concurrent JSON transformations
-- **`replace`** - Concurrent text replacements
-- **`xpath`** - Concurrent XPath extractions
-
 #### Configuration Examples
 
 **Basic Concurrency:**

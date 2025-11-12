@@ -28,7 +28,6 @@ type Task interface {
 	GetInputCount() int
 	GetFailOnError() bool
 	GetTaskConcurrency() int
-	SupportsTaskConcurrency() bool
 }
 
 type Base struct {
@@ -57,13 +56,6 @@ func (b *Base) GetTaskConcurrency() int {
 		return 1
 	}
 	return b.TaskConcurrency
-}
-
-// SupportsTaskConcurrency: returns true if the task supports concurrency
-// By default, tasks do not support concurrency unless explicitly overridden
-// in the task implementation.
-func (b *Base) SupportsTaskConcurrency() bool {
-	return false
 }
 
 func (b *Base) GetRecord(input <-chan *record.Record) (*record.Record, bool) {

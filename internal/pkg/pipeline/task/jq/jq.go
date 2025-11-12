@@ -20,10 +20,6 @@ func New() (task.Task, error) {
 	return &jq{}, nil
 }
 
-func (j *jq) SupportsTaskConcurrency() bool {
-	return true
-}
-
 func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
 	if input != nil && output != nil {
