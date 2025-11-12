@@ -282,7 +282,6 @@ tasks:
     type: jq
     path: '.url'
     task_concurrency: 10
-  
   - name: save_results
     type: file
     path: ./output/{{ macro "uuid" }}.json
@@ -297,6 +296,18 @@ tasks:
 - Error handling respects `fail_on_error` setting
 - The pipeline orchestrator manages channel lifecycle automatically
 
+### Task Configuration
+Each task supports common configuration options:
+
+```yaml
+tasks:
+  - name: my_task
+    type: http
+    fail_on_error: true        # Stop pipeline on error
+    task_concurrency: 10       # Process with 10 concurrent workers
+    context:
+      extracted_value: .data.value  # Set context for downstream tasks
+```
 
 ### Error Handling
 Tasks can be configured to fail the entire pipeline on error:
