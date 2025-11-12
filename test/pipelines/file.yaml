@@ -1,7 +1,7 @@
 tasks:
   - name: pull_hello_world
     type: file
-    path: names.txt
+    path: test/pipelines/names.txt
   - name: split_to_lines
     type: split
   - name: echo
