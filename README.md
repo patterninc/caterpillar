@@ -236,15 +236,6 @@ Many tasks support concurrent processing, allowing multiple workers to process r
 
 When `task_concurrency` is set to a value greater than 1, the pipeline creates multiple concurrent workers for that task. Each worker independently reads from the input channel and processes records, significantly improving performance for I/O-bound operations like HTTP requests or file operations.
 
-#### How It Works
-
-```yaml
-tasks:
-  - name: fetch_data
-    type: http
-    task_concurrency: 10  # Creates 10 concurrent workers
-    endpoint: https://api.example.com/data
-```
 
 **Execution Flow:**
 1. Pipeline creates 10 worker goroutines
@@ -292,14 +283,9 @@ tasks:
     path: '.url'
     task_concurrency: 10
   
-  - name: fetch_content
-    type: http
-    task_concurrency: 20  # 20 concurrent HTTP requests
-  
   - name: save_results
     type: file
     path: ./output/{{ macro "uuid" }}.json
-    task_concurrency: 10  # 10 concurrent file writes
 ```
 
 #### Important Notes
@@ -311,18 +297,6 @@ tasks:
 - Error handling respects `fail_on_error` setting
 - The pipeline orchestrator manages channel lifecycle automatically
 
-### Task Configuration
-Each task supports common configuration options:
-
-```yaml
-tasks:
-  - name: my_task
-    type: http
-    fail_on_error: true        # Stop pipeline on error
-    task_concurrency: 10       # Process with 10 concurrent workers
-    context:
-      extracted_value: .data.value  # Set context for downstream tasks
-```
 
 ### Error Handling
 Tasks can be configured to fail the entire pipeline on error:
