@@ -18,6 +18,7 @@ type core struct {
 }
 
 type mapper struct {
+	Name      string `yaml:"name" json:"name"`
 	Format    string `yaml:"format" json:"format"`
 	Delimiter string `yaml:"delimiter,omitempty" json:"delimiter,omitempty" default:"\t"`
 }
@@ -53,6 +54,7 @@ func (c *core) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 	c.convert = obj.convert
 	c.Delimiter = m.Delimiter
+	c.Base.Name = m.Name
 
 	return nil
 

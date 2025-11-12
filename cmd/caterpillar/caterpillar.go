@@ -20,7 +20,6 @@ func init() {
 	flag.StringVar(&configFile, `conf`, ``, `config file`)
 	flag.Parse()
 
-	configFile = "/Users/ivanhladush/git/caterpillar/test/pipelines/convert_file.yaml"
 	if configFile == `` {
 		executableName, err := os.Executable()
 		if err != nil {

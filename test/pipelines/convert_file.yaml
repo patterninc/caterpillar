@@ -21,5 +21,11 @@ tasks:
   - name: echo2
     type: echo
     only_data: true
+  - name: echo3
+    type: echo
+    only_data: true
+  - name: echo4
+    type: echo
+    only_data: true
 
-dag: read_csv_file  >> split_to_lines >> convert_from_csv >> echo
+dag: read_csv_file >> [split_to_lines,echo3]  >> [convert_from_csv,echo] >> [echo2,echo4]

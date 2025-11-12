@@ -1,12 +1,8 @@
 package pipeline
 
 import (
-	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
-	"time"
-	"unicode"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
@@ -17,15 +13,10 @@ const (
 	defaultChannelSize = 10e3
 )
 
-// todo
-// - parse DAG from YAML
-// - execute DAG
-// - handle errors properly
-// - write tests
 type Pipeline struct {
 	Tasks       tasks `yaml:"tasks,omitempty" json:"tasks,omitempty"`
 	ChannelSize int   `yaml:"channel_size,omitempty" json:"channel_size,omitempty"`
-	DAG         *Node `yaml:"dag,omitempty" json:"dag,omitempty"`
+	DAG         *DAG  `yaml:"dag,omitempty" json:"dag,omitempty"`
 	taskByName  map[string]task.Task
 	wg          *sync.WaitGroup
 	locker      *sync.Mutex
@@ -36,7 +27,7 @@ func (p *Pipeline) Init() error {
 	if p.DAG != nil {
 		p.tasksToMap()
 	}
-	
+
 	p.wg = &sync.WaitGroup{}
 	p.locker = &sync.Mutex{}
 	p.errors = make(map[string]error)
@@ -70,7 +61,6 @@ func (p *Pipeline) Run() error {
 	}
 
 	// sync
-
 	if p.DAG == nil {
 		p.wg.Add(tasksCount)
 
@@ -97,9 +87,11 @@ func (p *Pipeline) Run() error {
 			}(input, output)
 			output = input
 		}
-
 	} else {
-		p.dfs(p.DAG,nil)
+		_, err := p.executeDag(p.DAG, nil)
+		if err != nil {
+			return err
+		}
 	}
 	// wait for all tasks completion
 	p.wg.Wait()
@@ -116,70 +108,6 @@ func (p *Pipeline) Run() error {
 
 }
 
-type Node struct {
-	Name     string  `json:"name,omitempty"`
-	Items    []*Node `json:"items,omitempty"`
-	Children []*Node `json:"children,omitempty"`
-}
-
-func parseInput(input string) (string, *Node) {
-	if len(input) == 0 {
-		return "", &Node{}
-	}
-	inputString := strings.ReplaceAll(input, " ", "")
-	inputString = strings.ReplaceAll(inputString, ">>", ">")
-	inputString = inputString + "@"
-	currentItem := &Node{}
-	currentName := ""
-	stack := []*Node{{
-		Items: []*Node{currentItem},
-	}}
-
-	// groupLevel := 0
-	for _, c := range inputString {
-		if unicode.IsLetter(c) || unicode.IsDigit(c) || c == '_' || c == '-' {
-			currentName += string(c)
-			continue
-		}
-		if len(currentName) > 0 {
-			currentItem.Items = append(currentItem.Items, &Node{
-				Name: currentName,
-			})
-			currentName = ""
-		}
-		switch c {
-		case '@':
-			break
-		case ',':
-			parent := stack[len(stack)-1]
-			newItem := &Node{}
-			parent.Items = append(parent.Items, newItem)
-			currentItem = newItem
-		case '[':
-			newItem := &Node{}
-			currentItem.Items = append(currentItem.Items, newItem)
-			stack = append(stack, currentItem)
-			currentItem = newItem
-		case '>':
-			newItem := &Node{}
-			currentItem.Children = []*Node{newItem}
-			currentItem = newItem
-		case ']':
-			currentItem = stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-		default:
-			// unknown character
-			panic("unknown character: " + string(c))
-		}
-	}
-	ans := stack[0]
-	res, err := json.Marshal(ans)
-	if err != nil {
-		panic(err)
-	}
-	return string(res), ans
-}
-
 func (p *Pipeline) tasksToMap() {
 	taskMap := make(map[string]task.Task)
 	for i := range p.Tasks {
@@ -188,131 +116,128 @@ func (p *Pipeline) tasksToMap() {
 	p.taskByName = taskMap
 }
 
-
-func (p *Pipeline) dfs(item *Node, input chan *record.Record) (chan *record.Record, error) {
-	// process a single task
-	// This type of task never has children or items
+func (p *Pipeline) executeDag(item *DAG, input <-chan *record.Record) (<-chan *record.Record, error) {
+	// Process a single task
 	if item.Name != "" {
-		task, found := p.taskByName[item.Name]
-		if !found {
-			return nil, fmt.Errorf("task not found: %s", item.Name)
-		}
-		output := make(chan *record.Record, p.ChannelSize)
-		p.wg.Add(1)
-		go func(in <-chan *record.Record, out chan<- *record.Record) {
-			defer p.wg.Done()
-			if err := task.Run(in, out); err != nil {
-				// FIXME: add better error processing
-				fmt.Printf("error in %s: %s\n", task.GetName(), err)
-				if task.GetFailOnError() {
-					defer p.locker.Unlock()
-					p.locker.Lock()
-					p.errors[task.GetName()] = err
-				}
-			}
-			println("closing output channel for task:", task.GetName())
-		}(input, output)
-		return output, nil
+		return p.runTask(item.Name, input)
 	}
 
-	itemsInputChannels := make([]chan *record.Record, 0)
-	itemsOutputChannels := make([]chan *record.Record, 0)
+	// Process items in parallel first
+	itemsOutput, err := p.processItems(item.Items, input)
+	if err != nil {
+		return nil, err
+	}
 
-	time.Sleep(time.Second)
-	// process all items in parallel
-	for _, it := range item.Items {
-		var inChan chan *record.Record
+	// Then process children with items output
+	return p.processChildren(item.Children, itemsOutput)
+}
+
+func (p *Pipeline) runTask(taskName string, input <-chan *record.Record) (<-chan *record.Record, error) {
+	task, found := p.taskByName[taskName]
+	if !found {
+		return nil, fmt.Errorf("task not found: %s", taskName)
+	}
+
+	output := make(chan *record.Record, p.ChannelSize)
+	p.wg.Add(1)
+
+	go func() {
+		defer p.wg.Done()
+
+		if err := task.Run(input, output); err != nil {
+			fmt.Printf("error in %s: %s\n", task.GetName(), err)
+			if task.GetFailOnError() {
+				p.locker.Lock()
+				p.errors[task.GetName()] = err
+				p.locker.Unlock()
+			}
+		}
+	}()
+
+	return output, nil
+}
+
+func (p *Pipeline) processItems(items []*DAG, input <-chan *record.Record) (<-chan *record.Record, error) {
+	// Create input channels for parallel processing
+	inputChannels := make([]chan *record.Record, len(items))
+	outputChannels := make([]<-chan *record.Record, len(items))
+
+	for i, item := range items {
 		if input != nil {
-			inChan = make(chan *record.Record, p.ChannelSize)
-			itemsInputChannels = append(itemsInputChannels, inChan)
+			inputChannels[i] = make(chan *record.Record, p.ChannelSize)
 		}
-		outChan, err := p.dfs(it, inChan)
+		outChan, err := p.executeDag(item, inputChannels[i])
 		if err != nil {
 			return nil, err
 		}
-		itemsOutputChannels = append(itemsOutputChannels, outChan)
+		outputChannels[i] = outChan
 	}
-	// send message to all items input channels
-	go func() {
-		for rec := range input {
-			println("distributing record to items")
-			for _, inChan := range itemsInputChannels {
-				inChan <- rec
-			}
-		}
-		for _, inChan := range itemsInputChannels {
-			close(inChan)
-		}
-	}()
 
-	itemsOutputChannel := make(chan *record.Record, p.ChannelSize)
-	
-	// collect all items outputs and merge them into one channel
-	go func() {
-		var wg sync.WaitGroup
-		wg.Add(len(itemsOutputChannels))
-		for _, outChan := range itemsOutputChannels {
-			go func(c chan *record.Record) {
-				defer wg.Done()
-				for rec := range c {
-					itemsOutputChannel <- rec
-				}
-			}(outChan)
-		}
-		wg.Wait()
-		close(itemsOutputChannel)
-	}()
+	// Distribute input to all parallel branches
+	go p.distributeToChannels(input, inputChannels)
 
-	// process all children in parallel
-	childrenInputChannels := make([]chan *record.Record, 0)
-	childrenOutputChannels := make([]chan *record.Record, 0)
+	// Merge outputs from all parallel branches
+	return p.mergeChannels(outputChannels), nil
+}
 
-	for _, ch := range item.Children {
-		inChan := make(chan *record.Record, p.ChannelSize)
-		childrenInputChannels = append(childrenInputChannels, inChan)
-		outChan, err := p.dfs(ch, inChan)
+func (p *Pipeline) processChildren(children []*DAG, input <-chan *record.Record) (<-chan *record.Record, error) {
+	if len(children) == 0 {
+		return input, nil
+	}
+
+	currentOutput := input
+	for _, child := range children {
+		nextOutput, err := p.executeDag(child, currentOutput)
 		if err != nil {
 			return nil, err
 		}
-		childrenOutputChannels = append(childrenOutputChannels, outChan)
+		currentOutput = nextOutput
 	}
 
-	// send message to all children input channels
-	go func() {
-		for rec := range itemsOutputChannel {
-			for _, inChan := range childrenInputChannels {
-				inChan <- rec
+	return currentOutput, nil
+}
+
+func (p *Pipeline) distributeToChannels(input <-chan *record.Record, outputs []chan *record.Record) {
+	defer func() {
+		for _, ch := range outputs {
+			close(ch)
+		}
+	}()
+
+	for rec := range input {
+		for _, ch := range outputs {
+			select {
+			case ch <- rec:
+			default:
+				// Handle potential deadlock by using select with default
+				go func(ch chan *record.Record, rec *record.Record) {
+					ch <- rec
+				}(ch, rec)
 			}
 		}
-		for _, inChan := range childrenInputChannels {
-			close(inChan)
-		}
-	}()
+	}
+}
 
-	childrenOutputChannel := make(chan *record.Record, p.ChannelSize)
-	
-	// collect all children outputs and merge them into one channel
+func (p *Pipeline) mergeChannels(inputs []<-chan *record.Record) <-chan *record.Record {
+	output := make(chan *record.Record, p.ChannelSize)
+
+	var wg sync.WaitGroup
+	wg.Add(len(inputs))
+
+	for _, input := range inputs {
+		go func(in <-chan *record.Record) {
+			defer wg.Done()
+			for rec := range in {
+				output <- rec
+			}
+		}(input)
+	}
+
 	go func() {
-		var wg sync.WaitGroup
-		wg.Add(len(childrenOutputChannels))
-		for _, outChan := range childrenOutputChannels {
-			go func(c chan *record.Record) {
-				defer wg.Done()
-				for rec := range c {
-					childrenOutputChannel <- rec
-				}
-			}(outChan)
-		}
 		wg.Wait()
-		close(childrenOutputChannel)
+		close(output)
 	}()
-	return childrenOutputChannel, nil
+
+	return output
 }
 
-func (t *Node) UnmarshalYAML(value *yaml.Node) error {
-
-	_, n := parseInput(value.Value)
-	*t = *n // copy parsed node into the receiver. Passing pointer to parseInput to avoid extra allocations
-	return nil
-
-}
