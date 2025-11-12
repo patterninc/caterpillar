@@ -266,7 +266,6 @@ The following tasks support the `task_concurrency` parameter:
 - **`heimdall`** - Concurrent job submissions
 - **`jq`** - Concurrent JSON transformations
 - **`replace`** - Concurrent text replacements
-- **`sample`** - Concurrent sampling operations
 - **`xpath`** - Concurrent XPath extractions
 
 #### Configuration Examples
