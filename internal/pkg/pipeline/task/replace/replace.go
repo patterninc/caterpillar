@@ -19,10 +19,6 @@ func New() (task.Task, error) {
 
 func (r *replace) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	rx, err := regexp.Compile(r.Expression)
 	if err != nil {
 		return err

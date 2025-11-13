@@ -23,10 +23,6 @@ func New() (task.Task, error) {
 }
 func (s *split) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	for {
 		r, ok := s.GetRecord(input)
 		if !ok {

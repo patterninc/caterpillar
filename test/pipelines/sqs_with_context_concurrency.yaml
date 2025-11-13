@@ -1,0 +1,12 @@
+tasks:
+  - name: read_queue
+    type: sqs
+    queue_url: https://sqs.us-west-2.amazonaws.com/123456789012/my-queue
+    exit_on_empty: true
+  - name: extract_urls
+    type: jq
+    path: '.url'
+    task_concurrency: 10
+  - name: save_results
+    type: file
+    path: ./output/{{ macro "uuid" }}.json
