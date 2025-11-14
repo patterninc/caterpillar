@@ -36,10 +36,10 @@ type Base struct {
 	FailOnError     bool                 `yaml:"fail_on_error,omitempty" json:"fail_on_error,omitempty"`
 	TaskConcurrency int                  `yaml:"task_concurrency,omitempty" json:"task_concurrency,omitempty"`
 	Context         map[string]*jq.Query `yaml:"context,omitempty" json:"context,omitempty"`
-	CurrentRecord   *record.Record       // make record context available to entire task
 
 	recordIndex int
 	inputCount  int
+	initOnce    sync.Once // For thread-safe initialization in concurrent tasks
 	sync.RWMutex
 }
 
@@ -58,6 +58,11 @@ func (b *Base) GetTaskConcurrency() int {
 	return b.TaskConcurrency
 }
 
+// InitOnce provides access to the sync.Once for thread-safe initialization
+func (b *Base) InitOnce(fn func()) {
+	b.initOnce.Do(fn)
+}
+
 func (b *Base) GetRecord(input <-chan *record.Record) (*record.Record, bool) {
 
 	if input == nil {
@@ -69,9 +74,9 @@ func (b *Base) GetRecord(input <-chan *record.Record) (*record.Record, bool) {
 		b.Lock()
 		defer b.Unlock()
 		b.inputCount++
-		b.CurrentRecord = record
+		return record, true
 	}
-	return record, ok
+	return nil, false
 
 }
 
@@ -97,9 +102,8 @@ func (b *Base) Run(input <-chan *record.Record, output chan<- *record.Record) er
 func (b *Base) SendData(ctx context.Context, data []byte, output chan<- *record.Record) /* we should return error here */ {
 
 	b.Lock()
-	defer b.Unlock()
-
 	b.recordIndex++
+	b.Unlock()
 
 	record := &record.Record{
 		ID:      b.recordIndex,

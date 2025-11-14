@@ -58,30 +58,47 @@ func (h *heimdall) Run(input <-chan *record.Record, output chan<- *record.Record
 	// If input is provided, override the job request context
 	if input != nil {
 		for {
-			r, ok := h.GetRecord(input)
+			rc, ok := h.GetRecord(input)
 			if !ok {
 				break
 			}
 
 			// Parse the input record to get dynamic context
 			var jobContext map[string]any
-			if err := json.Unmarshal([]byte(r.Data), &jobContext); err != nil {
+			if err := json.Unmarshal([]byte(rc.Data), &jobContext); err != nil {
 				return err
 			}
 
-			h.JobRequest.Context = jobContext
-			if err := h.submitJob(output); err != nil {
+			// Clone the job request to avoid race condition with concurrent goroutines
+			jobReq := &jobRequest{
+				Name:    h.JobRequest.Name,
+				Version: h.JobRequest.Version,
+				Context: jobContext,
+			}
+			if err := h.submitJob(jobReq, output); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 
-	return h.submitJob(output)
+	return h.submitJob(h.JobRequest, output)
 
 }
 
-func (h *heimdall) submitJob(output chan<- *record.Record) error {
+func (h *heimdall) submitJob(jobReq *jobRequest, output chan<- *record.Record) error {
+
+	// Lock to safely swap job request (in case API method reads from it)
+	h.Lock()
+	originalJobReq := h.JobRequest
+	h.JobRequest = jobReq
+	h.Unlock()
+
+	defer func() {
+		h.Lock()
+		h.JobRequest = originalJobReq
+		h.Unlock()
+	}()
 
 	response := &response{}
 

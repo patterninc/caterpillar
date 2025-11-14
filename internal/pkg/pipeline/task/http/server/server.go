@@ -51,14 +51,16 @@ func New() (task.Task, error) {
 
 func (s *server) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
+	// Initialize defaults once, thread-safe across all goroutines
+	s.InitOnce(func() {
+		if s.Port <= 0 {
+			s.Port = defaultPort
+		}
+	})
+
 	// input channel must be nil
 	if input != nil {
 		return task.ErrPresentInput
-	}
-
-	// validate and set default port if not provided
-	if s.Port <= 0 {
-		s.Port = defaultPort
 	}
 
 	// Create individual handlers for each configured path

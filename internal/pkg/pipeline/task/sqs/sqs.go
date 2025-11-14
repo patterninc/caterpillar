@@ -83,11 +83,19 @@ func (s *sqs) getSQSClient() (*qs.Client, error) {
 
 func (s *sqs) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	client, err := s.getSQSClient()
-	if err != nil {
-		return err
+	// Initialize client once, thread-safe across all goroutines
+	var initErr error
+	s.InitOnce(func() {
+		client, err := s.getSQSClient()
+		if err != nil {
+			initErr = err
+			return
+		}
+		s.client = client
+	})
+	if initErr != nil {
+		return initErr
 	}
-	s.client = client
 
 	if input != nil {
 		return s.sendMessages(input)

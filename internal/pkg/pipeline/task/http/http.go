@@ -118,43 +118,50 @@ func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 
 func (h *httpCore) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
+	// Initialize timeout once, thread-safe across all goroutines
+	h.InitOnce(func() {
+		if h.Timeout <= 0 {
+			h.Timeout = defaultTimeout
+		}
+	})
+
 	// if we have input, treat each value as a URL and try to get data from it...
 	if input != nil {
 		for {
-			r, ok := h.GetRecord(input)
+			rc, ok := h.GetRecord(input)
 			if !ok {
 				break
 			}
 
 			// let's get our http object
-			newHttp, err := h.newFromInput(r.Data)
+			newHttp, err := h.newFromInput(rc.Data)
 			if err != nil {
 				return err
 			}
-			if err := newHttp.processItem(r.Context, output); err != nil {
+			if err := newHttp.processItem(rc, output); err != nil {
 				return err
 			}
 		}
 	}
 
 	// now we'll process the task configured item itself...
-	return h.processItem(ctx, output)
+	return h.processItem(nil, output)
 
 }
 
-func (h *httpCore) processItem(ctx context.Context, output chan<- *record.Record) error {
+func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) error {
 
 	// let's set the endpoint from which we start
 	endpoint := h.Endpoint
 
-	// let's set timeout
-	if h.Timeout <= 0 {
-		h.Timeout = defaultTimeout
-	}
-
 	// if we do not have the endpoint, bail
 	if endpoint == `` {
 		return nil
+	}
+
+	// create a default record context if none provided
+	if rc == nil {
+		rc = &record.Record{Context: ctx}
 	}
 
 	// TODO: perhaps expose the starting page number as a parameter for the task
@@ -169,7 +176,7 @@ func (h *httpCore) processItem(ctx context.Context, output chan<- *record.Record
 		}
 
 		if output != nil {
-			h.SendData(ctx, []byte(result.Data), output)
+			h.SendData(rc.Context, []byte(result.Data), output)
 		}
 
 		// if we do not have a way to define the next page, we bail...
@@ -180,7 +187,7 @@ func (h *httpCore) processItem(ctx context.Context, output chan<- *record.Record
 		// we move to the next page
 		pageID++
 
-		nextPage, err := h.NextPage.GetJQ(h.CurrentRecord)
+		nextPage, err := h.NextPage.GetJQ(rc)
 		if err != nil {
 			return err
 		}

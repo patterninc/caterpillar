@@ -31,7 +31,7 @@ var (
 		s3Scheme:   newS3Reader,
 		fileScheme: newLocalReader,
 	}
-	writers = map[string]func(*file, io.Reader) error{
+	writers = map[string]func(*file, *record.Record, io.Reader) error{
 		s3Scheme:   writeS3File,
 		fileScheme: writeLocalFile,
 	}
@@ -44,8 +44,6 @@ type file struct {
 	SuccessFileName config.String `yaml:"success_file_name,omitempty" json:"success_file_name,omitempty"`
 	Region          string        `yaml:"region,omitempty" json:"region,omitempty"`
 	Delimiter       string        `yaml:"delimiter,omitempty" json:"delimiter,omitempty"`
-
-	pathScheme string
 }
 
 func New() (task.Task, error) {
@@ -62,22 +60,6 @@ func (f *file) Run(input <-chan *record.Record, output chan<- *record.Record) er
 	// let's check if we read file or we write file...
 	if input != nil && output != nil {
 		return task.ErrPresentInputOutput
-	}
-
-	// let's figure out the scheme of our path
-	path, err := f.Path.Get(f.CurrentRecord)
-	if err != nil {
-		return err
-	}
-	parsedURL, err := url.Parse(path)
-	if err != nil {
-		return err
-	}
-
-	// we use fileScheme as default
-	f.pathScheme = parsedURL.Scheme
-	if f.pathScheme == `` {
-		f.pathScheme = fileScheme
 	}
 
 	// do we send data to output?
@@ -104,19 +86,29 @@ func (f *file) Run(input <-chan *record.Record, output chan<- *record.Record) er
 
 func (f *file) readFile(output chan<- *record.Record) error {
 
-	newReaderFunction, found := readers[f.pathScheme]
-	if !found {
-		return unknownSchemeError(f.pathScheme)
-	}
-
-	// let's create a reader
-	reader, err := newReaderFunction(f)
+	// let's get the glob
+	glob, err := f.Path.Get(nil)
 	if err != nil {
 		return err
 	}
 
-	// let's get the glob
-	glob, err := f.Path.Get(f.CurrentRecord)
+	// Determine the scheme from the path
+	parsedURL, err := url.Parse(glob)
+	if err != nil {
+		return err
+	}
+	pathScheme := parsedURL.Scheme
+	if pathScheme == `` {
+		pathScheme = fileScheme
+	}
+
+	newReaderFunction, found := readers[pathScheme]
+	if !found {
+		return unknownSchemeError(pathScheme)
+	}
+
+	// let's create a reader
+	reader, err := newReaderFunction(f)
 	if err != nil {
 		return err
 	}
@@ -140,8 +132,11 @@ func (f *file) readFile(output chan<- *record.Record) error {
 			return err
 		}
 
+		// Create a default record with context
+		rc := &record.Record{Context: ctx}
+
 		// let's write content to output channel
-		f.SendData(ctx, content, output)
+		f.SendData(rc.Context, content, output)
 
 	}
 
@@ -152,15 +147,32 @@ func (f *file) readFile(output chan<- *record.Record) error {
 func (f *file) writeFile(input <-chan *record.Record) error {
 
 	for {
-		item, ok := f.GetRecord(input)
+		rc, ok := f.GetRecord(input)
 		if !ok {
 			break
 		}
-		writerFunction, found := writers[f.pathScheme]
-		if !found {
-			return unknownSchemeError(f.pathScheme)
+
+		// Evaluate the path with the record context
+		path, err := f.Path.Get(rc)
+		if err != nil {
+			return err
 		}
-		if err := writerFunction(f, bytes.NewReader(item.Data)); err != nil {
+
+		// Determine the scheme from the evaluated path
+		parsedURL, err := url.Parse(path)
+		if err != nil {
+			return err
+		}
+		pathScheme := parsedURL.Scheme
+		if pathScheme == `` {
+			pathScheme = fileScheme
+		}
+
+		writerFunction, found := writers[pathScheme]
+		if !found {
+			return unknownSchemeError(pathScheme)
+		}
+		if err := writerFunction(f, rc, bytes.NewReader(rc.Data)); err != nil {
 			return err
 		}
 	}
@@ -171,12 +183,12 @@ func (f *file) writeFile(input <-chan *record.Record) error {
 
 func (f *file) writeSuccessFile() error {
 
-	successFileName, err := f.SuccessFileName.Get(f.CurrentRecord)
+	successFileName, err := f.SuccessFileName.Get(nil)
 	if err != nil {
 		return err
 	}
 
-	path, err := f.Path.Get(f.CurrentRecord)
+	path, err := f.Path.Get(nil)
 	if err != nil {
 		return err
 	}
@@ -185,9 +197,19 @@ func (f *file) writeSuccessFile() error {
 		successFileName = path[0:i+1] + successFileName
 	}
 
-	writerFunction, found := writers[f.pathScheme]
+	// Determine the scheme from the path
+	parsedURL, err := url.Parse(path)
+	if err != nil {
+		return err
+	}
+	pathScheme := parsedURL.Scheme
+	if pathScheme == `` {
+		pathScheme = fileScheme
+	}
+
+	writerFunction, found := writers[pathScheme]
 	if !found {
-		return unknownSchemeError(f.pathScheme)
+		return unknownSchemeError(pathScheme)
 	}
 
 	successFile := &file{
@@ -195,7 +217,7 @@ func (f *file) writeSuccessFile() error {
 		Region: f.Region,
 	}
 
-	return writerFunction(successFile, bytes.NewReader([]byte{}))
+	return writerFunction(successFile, nil, bytes.NewReader([]byte{}))
 
 }
 
