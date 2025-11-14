@@ -35,8 +35,8 @@ func parseInput(input string) (*DAG, error) {
 	inputString = strings.ReplaceAll(inputString, "\n", "")
 	inputString = strings.ReplaceAll(inputString, "\t", "")
 
-	// Validate input for invalid patterns
-	if err := validatePattern(inputString); err != nil {
+	// Validate input for invalid characters and patterns
+	if err := validateInput(inputString); err != nil {
 		return nil, fmt.Errorf("invalid DAG input, contains invalid patterns: %s", err.Error())
 	}
 	// Validate groups are well-formed
@@ -101,14 +101,22 @@ func isNameChar(c rune) bool {
 	return unicode.IsLetter(c) || unicode.IsDigit(c) || c == '_' || c == '-'
 }
 
-// Check for invalid patterns: empty brackets, consecutive commas, trailing commas
-func validatePattern(input string) error {
-	re, err := regexp.Compile(`\[\s*\]|\[[^,\[\]]+\]|\[[^\[\]]*,\s*\]|\[\s*,[^\[\]]*\]|,\s*,`)
+// Check for invalid patterns: empty brackets, consecutive commas, trailing commas, leading arrows
+func validateInput(input string) error {
+	invalidChars, err := regexp.Compile(`[^a-zA-Z0-9_\-\[\],>\s]`)
 	if err != nil {
 		return fmt.Errorf("failed to compile regex: %s", err.Error())
 	}
-	if re.MatchString(input) {
-		return fmt.Errorf("empty brackets, consecutive commas, trailing commas are not allowed")
+	if invalidChars.MatchString(input) {
+		return fmt.Errorf("invalid characters found")
+	}
+
+	invalidPatterns, err := regexp.Compile(`\[\s*\]|\[[^,\[\]]+\]|\[[^\[\]]*,\s*\]|\[\s*,[^\[\]]*\]|,\s*,|^>{1,2}`)
+	if err != nil {
+		return fmt.Errorf("failed to compile regex: %s", err.Error())
+	}
+	if invalidPatterns.MatchString(input) {
+		return fmt.Errorf("empty brackets, consecutive commas, trailing commas, or leading arrows are not allowed")
 	}
 	return nil
 }
