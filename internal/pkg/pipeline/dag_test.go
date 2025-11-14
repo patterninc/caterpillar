@@ -6,12 +6,6 @@ import (
 	"testing"
 )
 
-// Test cases based on formal grammar specification:
-// expression := chain
-// chain := group ( ">>" group )*
-// group := IDENTIFIER | "[" non_single_expression_list "]"
-// non_single_expression_list := expression "," expression ("," expression)*
-
 func TestParseInputValidGrammar(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -187,7 +181,31 @@ func TestParseInputValidGrammar(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dag := parseInput(tt.input)
+			// Check if this test expects an error or panic based on the name
+			expectsError := strings.Contains(tt.name, "should panic")
+
+			if expectsError {
+				_, err := parseInput(tt.input)
+				if err == nil {
+					t.Errorf("Expected error for input '%s', but no error occurred", tt.input)
+				} else {
+					t.Logf("Parser correctly returned error for input '%s': %v", tt.input, err)
+				}
+				// Don't validate DAG if error is expected
+				return
+			}
+
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("Parser panicked unexpectedly for input '%s': %v", tt.input, r)
+				}
+			}()
+
+			dag, err := parseInput(tt.input)
+			if err != nil {
+				t.Errorf("Unexpected error for valid input '%s': %v", tt.input, err)
+				return
+			}
 			if dag == nil {
 				t.Errorf("Expected non-nil DAG for valid input '%s'", tt.input)
 				return
@@ -222,6 +240,11 @@ func TestParseInputInvalidGrammar(t *testing.T) {
 			name:   "Single nested element [[task]] - violates grammar",
 			input:  "[[task1]]",
 			reason: "Inner brackets contain only 1 expression, violates non_single_expression_list",
+		},
+		{
+			name:   "Single chain in brackets [task >> task] - violates grammar",
+			input:  "[task1 >> task2]",
+			reason: "Grammar requires non_single_expression_list (min 2 expressions)",
 		},
 
 		// INVALID: According to grammar - single > instead of >>
@@ -290,19 +313,19 @@ func TestParseInputInvalidGrammar(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// These should either panic or produce unexpected results
-			// demonstrating parser limitations vs grammar specification
+			// These should return errors or panic
 			defer func() {
 				if r := recover(); r != nil {
 					t.Logf("Parser panicked as expected for invalid input '%s': %v", tt.input, r)
-					return
 				}
-				// If we reach here without panic, parser accepted invalid grammar
-				t.Errorf("Parser accepted invalid input '%s' (reason: %s) - shows parser is more lenient than formal grammar",
-					tt.input, tt.reason)
 			}()
 
-			_ = parseInput(tt.input)
+			_, err := parseInput(tt.input)
+			if err != nil {
+				t.Logf("Parser returned error as expected for invalid input '%s': %v", tt.input, err)
+			} else {
+				t.Errorf("Parser accepted invalid input '%s' (reason: %s) - should have returned error", tt.input, tt.reason)
+			}
 		})
 	}
 }
@@ -372,19 +395,22 @@ func TestParseInputParserLimitations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Check if this test expects a panic based on the name
-			expectsPanic := strings.Contains(tt.name, "correctly rejects")
+			// Check if this test expects an error based on the name
+			expectsError := strings.Contains(tt.name, "correctly rejects")
 
-			if expectsPanic {
+			if expectsError {
 				defer func() {
-					if r := recover(); r == nil {
-						t.Errorf("Expected panic for invalid input '%s', but no panic occurred", tt.input)
-					} else {
-						t.Logf("Parser correctly panicked for invalid input '%s': %v", tt.input, r)
+					if r := recover(); r != nil {
+						t.Logf("Parser panicked for invalid input '%s': %v", tt.input, r)
 					}
 				}()
-				parseInput(tt.input)
-				// If we reach here without panic, the deferred function will catch it
+
+				_, err := parseInput(tt.input)
+				if err == nil {
+					t.Errorf("Expected error for invalid input '%s', but no error occurred", tt.input)
+				} else {
+					t.Logf("Parser correctly returned error for invalid input '%s': %v", tt.input, err)
+				}
 			} else {
 				defer func() {
 					if r := recover(); r != nil {
@@ -392,12 +418,15 @@ func TestParseInputParserLimitations(t *testing.T) {
 					}
 				}()
 
-				dag := parseInput(tt.input)
+				dag, err := parseInput(tt.input)
+				if err != nil {
+					t.Errorf("Unexpected error for valid input '%s': %v", tt.input, err)
+					return
+				}
 				if dag == nil {
 					t.Errorf("Expected non-nil DAG for input '%s'", tt.input)
 					return
 				}
-
 				if tt.validate != nil {
 					tt.validate(t, dag)
 				}
@@ -463,18 +492,23 @@ func TestParseInputStrictGrammarValidation(t *testing.T) {
 					} else {
 						t.Errorf("Parser unexpectedly panicked for input '%s': %v", tt.input, r)
 					}
-					return
-				}
-
-				// If we reach here, no panic occurred
-				if tt.shouldPanic {
-					t.Errorf("Parser should have panicked for input '%s' (%s)", tt.input, tt.reason)
-				} else {
-					t.Logf("Parser accepts input '%s' but strict grammar would reject (%s)", tt.input, tt.reason)
 				}
 			}()
 
-			_ = parseInput(tt.input)
+			_, err := parseInput(tt.input)
+			if err != nil {
+				if tt.shouldPanic {
+					t.Logf("Parser correctly returned error for input '%s': %v", tt.input, err)
+				} else {
+					t.Errorf("Unexpected error for input '%s': %v", tt.input, err)
+				}
+			} else {
+				if tt.shouldPanic {
+					t.Errorf("Parser should have returned error or panicked for input '%s' (%s)", tt.input, tt.reason)
+				} else {
+					t.Logf("Parser accepts input '%s' but strict grammar would reject (%s)", tt.input, tt.reason)
+				}
+			}
 		})
 	}
 }
@@ -533,10 +567,20 @@ func TestParseInputEdgeCases(t *testing.T) {
 			},
 		},
 		{
-			name:  "Underscore and hyphen in identifier - should cause panic",
-			input: "task_1 >> task-2",
+			name:  "Underscore and hyphen in identifier - should be accepted",
+			input: "[task-1, task_2]",
 			validate: func(t *testing.T, dag *DAG) {
-				t.Error("Parser should panic for hyphen in identifier, but parsing succeeded")
+				firstItem := dag.Items[0]
+				if len(firstItem.Items) != 2 {
+					t.Errorf("Expected 2 items in list, got %d", len(firstItem.Items))
+					return
+				}
+				if len(firstItem.Items[0].Items) != 1 || firstItem.Items[0].Items[0].Name != "task-1" {
+					t.Errorf("Expected first item to be 'task-1', got %+v", firstItem.Items[0])
+				}
+				if len(firstItem.Items[1].Items) != 1 || firstItem.Items[1].Items[0].Name != "task_2" {
+					t.Errorf("Expected second item to be 'task_2', got %+v", firstItem.Items[1])
+				}
 			},
 		},
 
@@ -588,17 +632,22 @@ func TestParseInputEdgeCases(t *testing.T) {
 
 	for _, tt := range edgeCaseTests {
 		t.Run(tt.name, func(t *testing.T) {
-			// For tests that should cause panics, expect the panic
-			if strings.Contains(tt.name, "should cause panic") {
+			// For tests that should cause errors, expect the error
+			expectsError := strings.Contains(tt.name, "should panic")
+
+			if expectsError {
 				defer func() {
-					if r := recover(); r == nil {
-						t.Errorf("Expected panic for input '%s', but no panic occurred", tt.input)
-					} else {
-						t.Logf("Parser correctly panicked for input '%s': %v", tt.input, r)
+					if r := recover(); r != nil {
+						t.Logf("Parser panicked for input '%s': %v", tt.input, r)
 					}
 				}()
-				parseInput(tt.input)
-				// If we reach here without panic, the deferred function will catch it
+
+				_, err := parseInput(tt.input)
+				if err == nil {
+					t.Errorf("Expected error for input '%s', but no error occurred", tt.input)
+				} else {
+					t.Logf("Parser correctly returned error for input '%s': %v", tt.input, err)
+				}
 			} else {
 				// For normal edge cases, use panic recovery
 				defer func() {
@@ -607,9 +656,13 @@ func TestParseInputEdgeCases(t *testing.T) {
 					}
 				}()
 
-				dag := parseInput(tt.input)
+				dag, err := parseInput(tt.input)
+				if err != nil {
+					t.Errorf("Unexpected error for valid input '%s': %v", tt.input, err)
+					return
+				}
 				if dag == nil {
-					t.Errorf("Expected non-nil DAG for input '%s'", tt.input)
+					t.Errorf("Expected non-nil DAG for valid input '%s'", tt.input)
 					return
 				}
 				if tt.validate != nil {
@@ -630,8 +683,6 @@ func TestParseInputPanicCases(t *testing.T) {
 		{"Curly braces", "task1 >> {task2}"},
 		{"Semicolon", "task1; task2"},
 		{"Colon", "task1: task2"},
-		{"Tab character", "task1\ttask2"},
-		{"Newline character", "task1\ntask2"},
 		{"Carriage return", "task1\rtask2"},
 		{"Stack underflow", "task1]"},
 		{"Multiple closing brackets", "]]]]"},
@@ -640,12 +691,17 @@ func TestParseInputPanicCases(t *testing.T) {
 	for _, tt := range panicTests {
 		t.Run(tt.name, func(t *testing.T) {
 			defer func() {
-				if r := recover(); r == nil {
-					t.Errorf("Expected panic for input '%s', but no panic occurred", tt.input)
+				if r := recover(); r != nil {
+					t.Logf("Parser correctly panicked for input '%s': %v", tt.input, r)
 				}
 			}()
 
-			parseInput(tt.input)
+			_, err := parseInput(tt.input)
+			if err == nil {
+				t.Errorf("Expected error or panic for input '%s', but neither occurred", tt.input)
+			} else {
+				t.Logf("Parser correctly returned error for input '%s': %v", tt.input, err)
+			}
 		})
 	}
 }

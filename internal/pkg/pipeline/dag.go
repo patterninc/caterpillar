@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -20,26 +19,33 @@ type DAG struct {
 }
 
 func (t *DAG) UnmarshalYAML(value *yaml.Node) error {
-	d := parseInput(value.Value)
+	d, err := parseInput(value.Value)
+	if err != nil {
+		return err
+	}
 	*t = *d // copy parsed node into the receiver. Passing pointer to parseInput to avoid extra allocations
 	return nil
 }
 
-func parseInput(input string) *DAG {
+func parseInput(input string) (*DAG, error) {
 	if len(input) == 0 {
-		return &DAG{}
+		return &DAG{}, nil
 	}
 	inputString := strings.ReplaceAll(input, " ", "")
 	inputString = strings.ReplaceAll(inputString, "\n", "")
 	inputString = strings.ReplaceAll(inputString, "\t", "")
-	if isInvalidInput(inputString) {
-		panic("invalid DAG input: " + input)
+
+	// Validate input for invalid patterns
+	if err := validatePattern(inputString); err != nil {
+		return nil, fmt.Errorf("invalid DAG input, contains invalid patterns: %s", err.Error())
 	}
-	if !validateGroups(inputString) {
-		panic("invalid DAG input, errors in groups: " + input)
+	// Validate groups are well-formed
+	if err := validateGroups(inputString); err != nil {
+		return nil, fmt.Errorf("invalid DAG input, errors in groups: %v", err)
 	}
+	// Normalize consecutive arrows for parsing
 	inputString = strings.ReplaceAll(inputString, ">>", ">")
-	
+
 	currentItem := &DAG{}
 	currentName := ""
 	stack := []*DAG{{
@@ -81,73 +87,81 @@ func parseInput(input string) *DAG {
 		}
 	}
 
-	jsonData, err := json.Marshal(stack[0])
-	if err != nil {
-		panic("failed to marshal DAG to JSON: " + err.Error())
+	// Add any remaining name at the end
+	if len(currentName) > 0 {
+		currentItem.Items = append(currentItem.Items, &DAG{
+			Name: currentName,
+		})
 	}
-	fmt.Println(string(jsonData))
-	return stack[0]
+
+	return stack[0], nil
 }
 
 func isNameChar(c rune) bool {
 	return unicode.IsLetter(c) || unicode.IsDigit(c) || c == '_' || c == '-'
 }
 
-func isInvalidInput(input string) bool {
-	// Check for invalid patterns: empty brackets, consecutive commas, trailing commas
+// Check for invalid patterns: empty brackets, consecutive commas, trailing commas
+func validatePattern(input string) error {
 	re, err := regexp.Compile(`\[\s*\]|\[[^,\[\]]+\]|\[[^\[\]]*,\s*\]|\[\s*,[^\[\]]*\]|,\s*,`)
 	if err != nil {
-		panic("failed to compile regex: " + err.Error())
+		return fmt.Errorf("failed to compile regex: %s", err.Error())
 	}
-	return re.MatchString(input)
+	if re.MatchString(input) {
+		return fmt.Errorf("empty brackets, consecutive commas, trailing commas are not allowed")
+	}
+	return nil
 }
 
-func validateGroups(input string) bool {
-	stack := []rune{} // stack to track opening brackets
+func validateGroups(input string) error {
+	bracketCount := 0
 	arrowCount := 0
+
 	for _, c := range input {
 		switch c {
 		case '[':
-			stack = append(stack, c)
+			bracketCount++
 			// >[ is invalid
 			if arrowCount == 1 {
-				return false
+				return fmt.Errorf("invalid group: >[ pattern found")
 			}
-			arrowCount = 0 // >>[ is valid
+			// >>[ is valid
+			arrowCount = 0
 		case ']':
-			if len(stack) == 0 {
-				return false
+			bracketCount--
+			if bracketCount < 0 {
+				return fmt.Errorf("unmatched closing brace ']' found")
 			}
-			top := stack[len(stack)-1]
-			if c == ']' && top != '[' {
-				return false
-			}
-			stack = stack[:len(stack)-1]
 			// >] and >>] are invalid
 			if arrowCount == 1 {
-				return false
+				return fmt.Errorf("invalid group: >] pattern found")
 			}
 		case ',':
-			// stack is zero, comma outside brackets
-			if len(stack) == 0 {
-				return false
+			// bracket count is zero, comma outside brackets
+			if bracketCount == 0 {
+				return fmt.Errorf("comma outside brackets found")
 			}
 			// >, and >>, are invalid
 			if arrowCount == 1 {
-				return false
+				return fmt.Errorf("invalid group: >, pattern found")
 			}
 		case '>':
 			arrowCount++
 			if arrowCount > 2 {
-				return false
+				return fmt.Errorf("more than two consecutive > found")
 			}
 		default:
 			if arrowCount == 1 {
-				return false
+				return fmt.Errorf("single > found")
 			}
 			arrowCount = 0
 		}
 	}
 
-	return len(stack) == 0
+	// Check for unclosed brackets
+	if bracketCount > 0 {
+		return fmt.Errorf("unmatched opening brace '[' found")
+	}
+
+	return nil
 }
