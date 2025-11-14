@@ -141,7 +141,7 @@ func validateGroups(input string) error {
 				return fmt.Errorf("unmatched closing brace ']' found")
 			}
 			// >] and >>] are invalid
-			if arrowCount == 1 {
+			if arrowCount > 0 {
 				return fmt.Errorf("invalid group: >] pattern found")
 			}
 		case ',':
@@ -150,7 +150,7 @@ func validateGroups(input string) error {
 				return fmt.Errorf("comma outside brackets found")
 			}
 			// >, and >>, are invalid
-			if arrowCount == 1 {
+			if arrowCount > 0 {
 				return fmt.Errorf("invalid group: >, pattern found")
 			}
 		case '>':

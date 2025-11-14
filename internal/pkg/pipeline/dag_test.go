@@ -304,7 +304,6 @@ func TestParseInputInvalidGrammar(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// These should return errors or panic
 			defer func() {
 				if r := recover(); r != nil {
 					t.Logf("Parser panicked as expected for invalid input '%s': %v", tt.input, r)
@@ -327,47 +326,47 @@ func TestParseInputParserLimitations(t *testing.T) {
 		input    string
 		validate func(*testing.T, *DAG)
 	}{
-		// Cases where parser accepts things that violate strict grammar
+		// Cases where parser correctly rejects invalid grammar
 		{
 			name:  "Parser correctly rejects empty brackets [] per grammar",
 			input: "[]",
 			validate: func(t *testing.T, dag *DAG) {
-				t.Error("Parser should return error for empty brackets as they violate grammar")
+				t.Error("This should not be reached as parser should return error")
 			},
 		},
 		{
 			name:  "Parser correctly rejects single item in brackets per grammar",
 			input: "[task1]",
 			validate: func(t *testing.T, dag *DAG) {
-				t.Error("Parser should return error for single item in brackets as grammar requires minimum 2 expressions")
+				t.Error("This should not be reached as parser should return error")
 			},
 		},
 		{
 			name:  "Parser correctly rejects single > operator per grammar",
 			input: "task1 > task2",
 			validate: func(t *testing.T, dag *DAG) {
-				t.Error("Parser should return error for single > operator as grammar only allows >>")
+				t.Error("This should not be reached as parser should return error")
 			},
 		},
 		{
 			name:  "Parser correctly rejects commas outside brackets per grammar",
 			input: "task1, task2",
 			validate: func(t *testing.T, dag *DAG) {
-				t.Error("Parser should return error for comma outside brackets as grammar only allows commas within brackets")
+				t.Error("This should not be reached as parser should return error")
 			},
 		},
 		{
 			name:  "Parser correctly rejects trailing commas per grammar",
 			input: "[task1, task2,]",
 			validate: func(t *testing.T, dag *DAG) {
-				t.Error("Parser should return error for trailing comma as grammar forbids empty expressions")
+				t.Error("This should not be reached as parser should return error")
 			},
 		},
 		{
 			name:  "Parser correctly rejects nested single items per grammar",
 			input: "[[task1]]",
 			validate: func(t *testing.T, dag *DAG) {
-				t.Error("Parser should return error for nested single items as grammar requires minimum 2 expressions in brackets")
+				t.Error("This should not be reached as parser should return error")
 			},
 		},
 		{
@@ -390,12 +389,6 @@ func TestParseInputParserLimitations(t *testing.T) {
 			expectsError := strings.Contains(tt.name, "correctly rejects")
 
 			if expectsError {
-				defer func() {
-					if r := recover(); r != nil {
-						t.Logf("Parser panicked for invalid input '%s': %v", tt.input, r)
-					}
-				}()
-
 				_, err := parseInput(tt.input)
 				if err == nil {
 					t.Errorf("Expected error for invalid input '%s', but no error occurred", tt.input)
@@ -439,37 +432,37 @@ func TestParseInputStrictGrammarValidation(t *testing.T) {
 		{
 			name:        "Empty brackets should be rejected by strict grammar",
 			input:       "[]",
-			shouldError: true, // Parser correctly rejects this
+			shouldError: true,
 			reason:      "Grammar requires non_single_expression_list with min 2 expressions",
 		},
 		{
 			name:        "Single item in brackets should be rejected by strict grammar",
 			input:       "[task1]",
-			shouldError: true, // Parser correctly rejects this
+			shouldError: true,
 			reason:      "Grammar requires non_single_expression_list with min 2 expressions",
 		},
 		{
 			name:        "Comma outside brackets should be rejected by strict grammar",
 			input:       "task1, task2",
-			shouldError: true, // Parser correctly rejects this
+			shouldError: true,
 			reason:      "Grammar only allows comma within brackets",
 		},
 		{
 			name:        "Single > should be rejected by strict grammar",
 			input:       "task1 > task2",
-			shouldError: true, // Parser correctly rejects this
+			shouldError: true,
 			reason:      "Grammar only specifies >> operator",
 		},
 		{
 			name:        "Special characters should return error",
 			input:       "task1 $ task2",
-			shouldError: true, // Parser returns error for invalid characters
+			shouldError: true,
 			reason:      "Grammar doesn't include special characters",
 		},
 		{
-			name:        "Unmatched brackets should cause panic",
+			name:        "Unmatched brackets should cause error",
 			input:       "task1]",
-			shouldError: true, // Parser should error on stack underflow
+			shouldError: true,
 			reason:      "Grammar requires matched brackets",
 		},
 	}
@@ -491,7 +484,7 @@ func TestParseInputStrictGrammarValidation(t *testing.T) {
 				}
 			} else {
 				if tt.shouldError {
-					t.Errorf("Parser should have returned error or panicked for input '%s' (%s)", tt.input, tt.reason)
+					t.Errorf("Parser should have returned error for input '%s' (%s)", tt.input, tt.reason)
 				} else {
 					t.Logf("Parser accepts input '%s' but strict grammar would reject (%s)", tt.input, tt.reason)
 				}
@@ -506,7 +499,6 @@ func TestParseInputEdgeCases(t *testing.T) {
 		input    string
 		validate func(*testing.T, *DAG)
 	}{
-		// Whitespace edge cases that should cause panics
 		{
 			name:  "Tab characters - parser strips them",
 			input: "task1\t>>\ttask2",
@@ -621,12 +613,6 @@ func TestParseInputEdgeCases(t *testing.T) {
 			expectsError := strings.Contains(tt.name, "should return error")
 
 			if expectsError {
-				defer func() {
-					if r := recover(); r != nil {
-						t.Logf("Parser panicked for input '%s': %v", tt.input, r)
-					}
-				}()
-
 				_, err := parseInput(tt.input)
 				if err == nil {
 					t.Errorf("Expected error for input '%s', but no error occurred", tt.input)
@@ -634,10 +620,10 @@ func TestParseInputEdgeCases(t *testing.T) {
 					t.Logf("Parser correctly returned error for input '%s': %v", tt.input, err)
 				}
 			} else {
-				// For normal edge cases, use panic recovery
+				// For normal edge cases, should not panic
 				defer func() {
 					if r := recover(); r != nil {
-						t.Logf("Parser panicked for input '%s': %v", tt.input, r)
+						t.Errorf("Parser unexpectedly panicked for input '%s': %v", tt.input, r)
 					}
 				}()
 
