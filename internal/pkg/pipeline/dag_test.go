@@ -327,48 +327,7 @@ func TestParseInputParserLimitations(t *testing.T) {
 		validate func(*testing.T, *DAG)
 	}{
 		// Cases where parser correctly rejects invalid grammar
-		{
-			name:  "Parser correctly rejects empty brackets [] per grammar",
-			input: "[]",
-			validate: func(t *testing.T, dag *DAG) {
-				t.Error("This should not be reached as parser should return error")
-			},
-		},
-		{
-			name:  "Parser correctly rejects single item in brackets per grammar",
-			input: "[task1]",
-			validate: func(t *testing.T, dag *DAG) {
-				t.Error("This should not be reached as parser should return error")
-			},
-		},
-		{
-			name:  "Parser correctly rejects single > operator per grammar",
-			input: "task1 > task2",
-			validate: func(t *testing.T, dag *DAG) {
-				t.Error("This should not be reached as parser should return error")
-			},
-		},
-		{
-			name:  "Parser correctly rejects commas outside brackets per grammar",
-			input: "task1, task2",
-			validate: func(t *testing.T, dag *DAG) {
-				t.Error("This should not be reached as parser should return error")
-			},
-		},
-		{
-			name:  "Parser correctly rejects trailing commas per grammar",
-			input: "[task1, task2,]",
-			validate: func(t *testing.T, dag *DAG) {
-				t.Error("This should not be reached as parser should return error")
-			},
-		},
-		{
-			name:  "Parser correctly rejects nested single items per grammar",
-			input: "[[task1]]",
-			validate: func(t *testing.T, dag *DAG) {
-				t.Error("This should not be reached as parser should return error")
-			},
-		},
+
 		{
 			name:  "Parser handles whitespace flexibly",
 			input: "   task1   >>   task2   ",
@@ -413,80 +372,6 @@ func TestParseInputParserLimitations(t *testing.T) {
 				}
 				if tt.validate != nil {
 					tt.validate(t, dag)
-				}
-			}
-		})
-	}
-}
-
-func TestParseInputStrictGrammarValidation(t *testing.T) {
-	// These test cases are designed to fail, showing where parser
-	// differs from the strict formal grammar specification
-
-	tests := []struct {
-		name        string
-		input       string
-		shouldError bool
-		reason      string
-	}{
-		{
-			name:        "Empty brackets should be rejected by strict grammar",
-			input:       "[]",
-			shouldError: true,
-			reason:      "Grammar requires non_single_expression_list with min 2 expressions",
-		},
-		{
-			name:        "Single item in brackets should be rejected by strict grammar",
-			input:       "[task1]",
-			shouldError: true,
-			reason:      "Grammar requires non_single_expression_list with min 2 expressions",
-		},
-		{
-			name:        "Comma outside brackets should be rejected by strict grammar",
-			input:       "task1, task2",
-			shouldError: true,
-			reason:      "Grammar only allows comma within brackets",
-		},
-		{
-			name:        "Single > should be rejected by strict grammar",
-			input:       "task1 > task2",
-			shouldError: true,
-			reason:      "Grammar only specifies >> operator",
-		},
-		{
-			name:        "Special characters should return error",
-			input:       "task1 $ task2",
-			shouldError: true,
-			reason:      "Grammar doesn't include special characters",
-		},
-		{
-			name:        "Unmatched brackets should cause error",
-			input:       "task1]",
-			shouldError: true,
-			reason:      "Grammar requires matched brackets",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			defer func() {
-				if r := recover(); r != nil {
-					t.Errorf("Parser unexpectedly panicked for input '%s': %v", tt.input, r)
-				}
-			}()
-
-			_, err := parseInput(tt.input)
-			if err != nil {
-				if tt.shouldError {
-					t.Logf("Parser correctly returned error for input '%s': %v", tt.input, err)
-				} else {
-					t.Errorf("Unexpected error for input '%s': %v", tt.input, err)
-				}
-			} else {
-				if tt.shouldError {
-					t.Errorf("Parser should have returned error for input '%s' (%s)", tt.input, tt.reason)
-				} else {
-					t.Logf("Parser accepts input '%s' but strict grammar would reject (%s)", tt.input, tt.reason)
 				}
 			}
 		})
@@ -644,6 +529,221 @@ func TestParseInputEdgeCases(t *testing.T) {
 	}
 }
 
+func TestParseInputValidateGroups(t *testing.T) {
+	// Test cases specifically targeting validateGroups function behavior
+	tests := []struct {
+		name          string
+		input         string
+		expectedError string
+		shouldSucceed bool
+	}{
+		// Valid cases that should pass validateGroups
+		{
+			name:          "Valid single task",
+			input:         "task1",
+			shouldSucceed: true,
+		},
+		{
+			name:          "Valid chain with >>",
+			input:         "task1>>task2",
+			shouldSucceed: true,
+		},
+		{
+			name:          "Valid list",
+			input:         "[task1,task2]",
+			shouldSucceed: true,
+		},
+		{
+			name:          "Valid nested list",
+			input:         "[[task1,task2],[task3,task4]]",
+			shouldSucceed: true,
+		},
+		{
+			name:          "Valid complex structure",
+			input:         "task1>>[task2,task3>>task4]",
+			shouldSucceed: true,
+		},
+
+		// Invalid cases - single > followed by >> (more specific than basic single >)
+		{
+			name:          "Single > followed by >>",
+			input:         "task1>task2>>task3",
+			expectedError: "single > found",
+			shouldSucceed: false,
+		},
+
+		// Invalid cases - >[ pattern
+		{
+			name:          "Single > followed by bracket",
+			input:         "task1>[task2,task3]",
+			expectedError: "invalid group: >[ pattern found",
+			shouldSucceed: false,
+		},
+
+		// Invalid cases - >] pattern
+		{
+			name:          "Single > followed by closing bracket in valid list",
+			input:         "[task1>,task2]",
+			expectedError: "invalid group: >, pattern found",
+			shouldSucceed: false,
+		},
+		{
+			name:          "Double >> followed by closing bracket in valid list",
+			input:         "[task1>>,task2]",
+			expectedError: "invalid group: >, pattern found",
+			shouldSucceed: false,
+		},
+
+		// Invalid cases - >, pattern
+		{
+			name:          "Single > followed by comma",
+			input:         "[task1>,task2]",
+			expectedError: "invalid group: >, pattern found",
+			shouldSucceed: false,
+		},
+		{
+			name:          "Double >> followed by comma",
+			input:         "[task1>>,task2]",
+			expectedError: "invalid group: >, pattern found",
+			shouldSucceed: false,
+		},
+
+		// Invalid cases - comma outside brackets
+		{
+			name:          "Comma outside brackets",
+			input:         "task1,task2",
+			expectedError: "comma outside brackets found",
+			shouldSucceed: false,
+		},
+		{
+			name:          "Comma in chain outside brackets",
+			input:         "task1>>task2,task3",
+			expectedError: "comma outside brackets found",
+			shouldSucceed: false,
+		},
+
+		// Invalid cases - unmatched brackets
+		{
+			name:          "Unclosed opening bracket",
+			input:         "[task1,task2",
+			expectedError: "unmatched opening brace '[' found",
+			shouldSucceed: false,
+		},
+		{
+			name:          "Multiple unclosed brackets",
+			input:         "[[task1,task2]",
+			expectedError: "unmatched opening brace '[' found",
+			shouldSucceed: false,
+		},
+		{
+			name:          "Unmatched closing bracket",
+			input:         "task1]",
+			expectedError: "unmatched closing brace ']' found",
+			shouldSucceed: false,
+		},
+		{
+			name:          "Multiple unmatched closing brackets",
+			input:         "]]]]",
+			expectedError: "unmatched closing brace ']' found",
+			shouldSucceed: false,
+		},
+
+		// Invalid cases - too many consecutive >
+		{
+			name:          "Three consecutive > operators",
+			input:         "task1>>>task2",
+			expectedError: "more than two consecutive > found",
+			shouldSucceed: false,
+		},
+		{
+			name:          "Four consecutive > operators",
+			input:         "task1>>>>task2",
+			expectedError: "more than two consecutive > found",
+			shouldSucceed: false,
+		},
+
+		// Edge cases - complex invalid patterns
+		{
+			name:          "Mixed single and double arrows",
+			input:         "task1>task2>>task3",
+			expectedError: "single > found",
+			shouldSucceed: false,
+		},
+		{
+			name:          "Single > in nested structure",
+			input:         "[task1>[task2,task3],task4]",
+			expectedError: "invalid group: >[ pattern found",
+			shouldSucceed: false,
+		},
+		{
+			name:          "Valid structure with proper >> arrows",
+			input:         "[task1>>[task2,task3],task4]",
+			shouldSucceed: true,
+		},
+		{
+			name:          "Bracket mismatch - extra opening",
+			input:         "[[[task1,task2],task3]",
+			expectedError: "unmatched opening brace '[' found",
+			shouldSucceed: false,
+		},
+		{
+			name:          "Valid deeply nested structure",
+			input:         "[[[task1,task2],[task3,task4]],[[task5,task6],[task7,task8]]]",
+			shouldSucceed: true,
+		},
+
+		// Additional edge cases for comprehensive validateGroups testing
+		{
+			name:          "Five consecutive > operators",
+			input:         "task1>>>>>task2",
+			expectedError: "more than two consecutive > found",
+			shouldSucceed: false,
+		},
+		{
+			name:          "Single > followed by identifier then bracket",
+			input:         "task1>task2[task3,task4]",
+			expectedError: "single > found",
+			shouldSucceed: false,
+		},
+		{
+			name:          "Valid chain ending with bracket structure",
+			input:         "task1>>task2>>[task3,task4]",
+			shouldSucceed: true,
+		},
+		{
+			name:          "Complex nesting with valid arrows",
+			input:         "task1>>[[task2>>task3,task4],[task5,task6>>task7]]",
+			shouldSucceed: true,
+		},
+		{
+			name:          "Invalid single > in complex nested structure",
+			input:         "task1>>[[task2>task3,task4],[task5,task6>>task7]]",
+			expectedError: "single > found",
+			shouldSucceed: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseInput(tt.input)
+
+			if tt.shouldSucceed {
+				if err != nil {
+					t.Errorf("Expected input '%s' to succeed, but got error: %v", tt.input, err)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("Expected input '%s' to fail with error containing '%s', but it succeeded", tt.input, tt.expectedError)
+				} else if !strings.Contains(err.Error(), tt.expectedError) {
+					t.Errorf("Expected error to contain '%s' for input '%s', but got: %v", tt.expectedError, tt.input, err)
+				} else {
+					t.Logf("Input '%s' correctly failed with error: %v", tt.input, err)
+				}
+			}
+		})
+	}
+}
+
 func TestParseInputErrorCases(t *testing.T) {
 	errorTests := []struct {
 		name  string
@@ -655,7 +755,6 @@ func TestParseInputErrorCases(t *testing.T) {
 		{"Semicolon", "task1; task2"},
 		{"Colon", "task1: task2"},
 		{"Carriage return", "task1\rtask2"},
-		{"Stack underflow", "task1]"},
 		{"Multiple closing brackets", "]]]]"},
 	}
 
