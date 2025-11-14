@@ -53,6 +53,7 @@ func (b *Base) GetName() string {
 
 func (b *Base) GetTaskConcurrency() int {
 	if b.TaskConcurrency <= 0 {
+		fmt.Printf(`WARN: defaulting task_concurrency to 1 for task %s`, b.Name)
 		return 1
 	}
 	return b.TaskConcurrency
