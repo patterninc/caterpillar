@@ -576,7 +576,7 @@ func TestParseInputValidateGroups(t *testing.T) {
 		{
 			name:          "Single > followed by bracket",
 			input:         "task1>[task2,task3]",
-			expectedError: "invalid group: >[ pattern found",
+			expectedError: "single > found",
 			shouldSucceed: false,
 		},
 
@@ -584,7 +584,7 @@ func TestParseInputValidateGroups(t *testing.T) {
 		{
 			name:          "Single > followed by closing bracket in valid list",
 			input:         "[task1>,task2]",
-			expectedError: "invalid group: >, pattern found",
+			expectedError: "single > found",
 			shouldSucceed: false,
 		},
 		{
@@ -598,7 +598,7 @@ func TestParseInputValidateGroups(t *testing.T) {
 		{
 			name:          "Single > followed by comma",
 			input:         "[task1>,task2]",
-			expectedError: "invalid group: >, pattern found",
+			expectedError: "single > found",
 			shouldSucceed: false,
 		},
 		{
@@ -672,7 +672,7 @@ func TestParseInputValidateGroups(t *testing.T) {
 		{
 			name:          "Single > in nested structure",
 			input:         "[task1>[task2,task3],task4]",
-			expectedError: "invalid group: >[ pattern found",
+			expectedError: "single > found",
 			shouldSucceed: false,
 		},
 		{

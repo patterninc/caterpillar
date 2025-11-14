@@ -123,47 +123,46 @@ func validateInput(input string) error {
 
 func validateGroups(input string) error {
 	bracketCount := 0
-	arrowCount := 0
+	i := 0
 
-	for _, c := range input {
-		switch c {
+	for i < len(input) {
+		isPrevArrow := i>0 && input[i-1] == '>'
+		isNextArrow := i<len(input)-1 && input[i+1] == '>'
+
+		switch input[i] {
 		case '[':
 			bracketCount++
-			// >[ is invalid
-			if arrowCount == 1 {
-				return fmt.Errorf("invalid group: >[ pattern found")
+			if isNextArrow {
+				return fmt.Errorf("invalid group: [> pattern found")
 			}
-			// >>[ is valid
-			arrowCount = 0
 		case ']':
 			bracketCount--
 			if bracketCount < 0 {
 				return fmt.Errorf("unmatched closing brace ']' found")
 			}
-			// >] and >>] are invalid
-			if arrowCount > 0 {
+			if isPrevArrow {
 				return fmt.Errorf("invalid group: >] pattern found")
 			}
 		case ',':
-			// bracket count is zero, comma outside brackets
 			if bracketCount == 0 {
 				return fmt.Errorf("comma outside brackets found")
 			}
-			// >, and >>, are invalid
-			if arrowCount > 0 {
+			if isPrevArrow {
 				return fmt.Errorf("invalid group: >, pattern found")
 			}
+			if isNextArrow {
+				return fmt.Errorf("invalid group: ,> pattern found")
+			}
 		case '>':
-			arrowCount++
-			if arrowCount > 2 {
+			if isPrevArrow && isNextArrow {
 				return fmt.Errorf("more than two consecutive > found")
 			}
-		default:
-			if arrowCount == 1 {
+			if !isPrevArrow && !isNextArrow {
 				return fmt.Errorf("single > found")
 			}
-			arrowCount = 0
 		}
+
+		i++
 	}
 
 	// Check for unclosed brackets
