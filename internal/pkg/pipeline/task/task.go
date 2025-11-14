@@ -74,9 +74,8 @@ func (b *Base) GetRecord(input <-chan *record.Record) (*record.Record, bool) {
 		b.Lock()
 		defer b.Unlock()
 		b.inputCount++
-		return record, true
 	}
-	return nil, false
+	return record, ok
 
 }
 
