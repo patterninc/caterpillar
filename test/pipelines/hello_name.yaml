@@ -1,7 +1,7 @@
 tasks:
   - name: get_list_of_names_with_context
     type: file
-    path: names.txt
+    path: test/pipelines/names.txt
     context:
       names: '.data | split("\n") | shuffle | .[:10]'
       origin: ".origin"
