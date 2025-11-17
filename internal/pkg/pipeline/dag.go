@@ -19,40 +19,48 @@ type DAG struct {
 }
 
 func (t *DAG) UnmarshalYAML(value *yaml.Node) error {
-	d, err := parseInput(value.Value)
+	if len(value.Value) == 0 {
+		return fmt.Errorf("zero length DAG expression")
+	}
+
+	// clean input string by removing whitespace characters
+	input := cleanInput(value.Value)
+
+	// validate input string for correct syntax
+	if err := validateInput(input); err != nil {
+		return fmt.Errorf("invalid DAG input: %v", err)
+	}
+	if err := validateGroups(input); err != nil {
+		return fmt.Errorf("invalid DAG groups: %v", err)
+	}
+
+	// prepare input for parsing - normalize consecutive arrows
+	input = strings.ReplaceAll(input, ">>", ">")
+
+	// parse input string to DAG structure
+	d, err := parseInput(input)
 	if err != nil {
 		return err
 	}
+
 	*t = *d // copy parsed node into the receiver. Passing pointer to parseInput to avoid extra allocations
 	return nil
 }
 
-func parseInput(input string) (*DAG, error) {
-	if len(input) == 0 {
-		return &DAG{}, nil
-	}
+func cleanInput(input string) string {
 	inputString := strings.ReplaceAll(input, " ", "")
 	inputString = strings.ReplaceAll(inputString, "\n", "")
-	inputString = strings.ReplaceAll(inputString, "\t", "")
+	return strings.ReplaceAll(inputString, "\t", "")
+}
 
-	// Validate input for invalid characters and patterns
-	if err := validateInput(inputString); err != nil {
-		return nil, fmt.Errorf("invalid DAG input, contains invalid patterns: %s", err.Error())
-	}
-	// Validate groups are well-formed
-	if err := validateGroups(inputString); err != nil {
-		return nil, fmt.Errorf("invalid DAG input, errors in groups: %v", err)
-	}
-	// Normalize consecutive arrows for parsing
-	inputString = strings.ReplaceAll(inputString, ">>", ">")
-
+func parseInput(input string) (*DAG, error) {
 	currentItem := &DAG{}
 	currentName := ""
 	stack := []*DAG{{
 		Items: []*DAG{currentItem},
 	}}
 
-	for _, c := range inputString {
+	for _, c := range input {
 		if isNameChar(c) {
 			currentName += string(c)
 			continue
@@ -103,6 +111,7 @@ func isNameChar(c rune) bool {
 
 // Check for invalid patterns: empty brackets, consecutive commas, trailing commas, leading arrows
 func validateInput(input string) error {
+	// Check for invalid characters
 	invalidChars, err := regexp.Compile(`[^a-zA-Z0-9_\-\[\],>\s]`)
 	if err != nil {
 		return fmt.Errorf("failed to compile regex: %s", err.Error())
@@ -111,6 +120,7 @@ func validateInput(input string) error {
 		return fmt.Errorf("invalid characters found")
 	}
 
+	// Check for invalid patterns
 	invalidPatterns, err := regexp.Compile(`\[\s*\]|\[[^,\[\]]+\]|\[[^\[\]]*,\s*\]|\[\s*,[^\[\]]*\]|,\s*,|^>{1,2}`)
 	if err != nil {
 		return fmt.Errorf("failed to compile regex: %s", err.Error())
@@ -118,6 +128,7 @@ func validateInput(input string) error {
 	if invalidPatterns.MatchString(input) {
 		return fmt.Errorf("empty brackets, consecutive commas, trailing commas, or leading arrows are not allowed")
 	}
+
 	return nil
 }
 
@@ -126,39 +137,39 @@ func validateGroups(input string) error {
 	i := 0
 
 	for i < len(input) {
-		isPrevArrow := i>0 && input[i-1] == '>'
-		isNextArrow := i<len(input)-1 && input[i+1] == '>'
+		isPrevArrow := i > 0 && input[i-1] == '>'
+		isNextArrow := i < len(input)-1 && input[i+1] == '>'
 
 		switch input[i] {
 		case '[':
 			bracketCount++
 			if isNextArrow {
-				return fmt.Errorf("invalid group: [> pattern found")
+				return fmt.Errorf("error at index %d, invalid group: [> pattern found", i)
 			}
 		case ']':
 			bracketCount--
 			if bracketCount < 0 {
-				return fmt.Errorf("unmatched closing brace ']' found")
+				return fmt.Errorf("error at index %d, unmatched closing brace ']' found", i)
 			}
 			if isPrevArrow {
-				return fmt.Errorf("invalid group: >] pattern found")
+				return fmt.Errorf("error at index %d, invalid group: >] pattern found", i)
 			}
 		case ',':
 			if bracketCount == 0 {
-				return fmt.Errorf("comma outside brackets found")
+				return fmt.Errorf("error at index %d, comma outside brackets found", i)
 			}
 			if isPrevArrow {
-				return fmt.Errorf("invalid group: >, pattern found")
+				return fmt.Errorf("error at index %d, invalid group: >, pattern found", i)
 			}
 			if isNextArrow {
-				return fmt.Errorf("invalid group: ,> pattern found")
+				return fmt.Errorf("error at index %d, invalid group: ,> pattern found", i)
 			}
 		case '>':
 			if isPrevArrow && isNextArrow {
-				return fmt.Errorf("more than two consecutive > found")
+				return fmt.Errorf("error at index %d, more than two consecutive > found", i)
 			}
 			if !isPrevArrow && !isNextArrow {
-				return fmt.Errorf("single > found")
+				return fmt.Errorf("error at index %d, single > found", i)
 			}
 		}
 
