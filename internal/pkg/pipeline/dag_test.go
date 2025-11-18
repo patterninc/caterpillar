@@ -48,7 +48,7 @@ func TestCleanInput(t *testing.T) {
 		},
 		{
 			name:     "Complex nested with whitespace",
-			input:    "[ task1 >> task2 , task3 ]",
+			input:    "[      task1 >> task2  , task3                                ]",
 			expected: "[task1>>task2,task3]",
 		},
 	}
