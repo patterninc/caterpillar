@@ -23,19 +23,16 @@ func (t *DAG) UnmarshalYAML(value *yaml.Node) error {
 		return fmt.Errorf("zero length DAG expression")
 	}
 
-	// clean input string by removing whitespace characters
-	input := cleanInput(value.Value)
+	input := value.Value
 
 	// validate input string for correct syntax
 	if err := validateInput(input); err != nil {
-		return fmt.Errorf("invalid DAG input: %v", err)
-	}
-	if err := validateGroups(input); err != nil {
 		return fmt.Errorf("invalid DAG groups: %v", err)
 	}
 
-	// prepare input for parsing - normalize consecutive arrows
-	input = strings.ReplaceAll(input, ">>", ">")
+	// clean input string by removing whitespace characters
+	// and normalizing consecutive arrows
+	input = cleanInput(input)
 
 	// parse input string to DAG structure
 	d, err := parseInput(input)
@@ -50,7 +47,8 @@ func (t *DAG) UnmarshalYAML(value *yaml.Node) error {
 func cleanInput(input string) string {
 	inputString := strings.ReplaceAll(input, " ", "")
 	inputString = strings.ReplaceAll(inputString, "\n", "")
-	return strings.ReplaceAll(inputString, "\t", "")
+	inputString = strings.ReplaceAll(inputString, "\t", "")
+	return strings.ReplaceAll(inputString, ">>", ">")
 }
 
 func parseInput(input string) (*DAG, error) {
@@ -109,9 +107,9 @@ func isNameChar(c rune) bool {
 	return unicode.IsLetter(c) || unicode.IsDigit(c) || c == '_' || c == '-'
 }
 
-// Check for invalid patterns: empty brackets, consecutive commas, trailing commas, leading arrows
+// Validate the input check for invalid characters and group syntax
 func validateInput(input string) error {
-	// Check for invalid characters
+	// check for invalid characters
 	invalidChars, err := regexp.Compile(`[^a-zA-Z0-9_\-\[\],>\s]`)
 	if err != nil {
 		return fmt.Errorf("failed to compile regex: %s", err.Error())
@@ -120,31 +118,31 @@ func validateInput(input string) error {
 		return fmt.Errorf("invalid characters found")
 	}
 
-	// Check for invalid patterns
-	invalidPatterns, err := regexp.Compile(`\[\s*\]|\[[^,\[\]]+\]|\[[^\[\]]*,\s*\]|\[\s*,[^\[\]]*\]|,\s*,|^>{1,2}`)
-	if err != nil {
-		return fmt.Errorf("failed to compile regex: %s", err.Error())
-	}
-	if invalidPatterns.MatchString(input) {
-		return fmt.Errorf("empty brackets, consecutive commas, trailing commas, or leading arrows are not allowed")
-	}
-
-	return nil
-}
-
-func validateGroups(input string) error {
+	// validate groups
 	bracketCount := 0
 	i := 0
+	lastChar := rune(0)
 
 	for i < len(input) {
 		isPrevArrow := i > 0 && input[i-1] == '>'
 		isNextArrow := i < len(input)-1 && input[i+1] == '>'
+
+		if isNameChar(rune(input[i])) || input[i] == ' ' || input[i] == '\n' || input[i] == '\t' {
+			i++
+			continue
+		}
 
 		switch input[i] {
 		case '[':
 			bracketCount++
 			if isNextArrow {
 				return fmt.Errorf("error at index %d, invalid group: [> pattern found", i)
+			}
+			if input[i+1] == ']' {
+				return fmt.Errorf("error at index %d, empty group '[]' found", i)
+			}
+			if input[i+1] == ',' {
+				return fmt.Errorf("error at index %d, invalid group: [, pattern found", i)
 			}
 		case ']':
 			bracketCount--
@@ -153,6 +151,9 @@ func validateGroups(input string) error {
 			}
 			if isPrevArrow {
 				return fmt.Errorf("error at index %d, invalid group: >] pattern found", i)
+			}
+			if lastChar == '[' {
+				return fmt.Errorf("error at index %d, single identifier group '[identifier]' found", i)
 			}
 		case ',':
 			if bracketCount == 0 {
@@ -164,7 +165,16 @@ func validateGroups(input string) error {
 			if isNextArrow {
 				return fmt.Errorf("error at index %d, invalid group: ,> pattern found", i)
 			}
+			if input[i+1] == ']' {
+				return fmt.Errorf("error at index %d, invalid group: ,] pattern found", i)
+			}
+			if input[i+1] == ',' {
+				return fmt.Errorf("error at index %d, consecutive commas found", i)
+			}
 		case '>':
+			if isPrevArrow && i <= 1 {
+				return fmt.Errorf("error at index %d, leading >> found", i)
+			}
 			if isPrevArrow && isNextArrow {
 				return fmt.Errorf("error at index %d, more than two consecutive > found", i)
 			}
@@ -173,6 +183,7 @@ func validateGroups(input string) error {
 			}
 		}
 
+		lastChar = rune(input[i])
 		i++
 	}
 

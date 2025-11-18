@@ -24,22 +24,22 @@ func TestCleanInput(t *testing.T) {
 		{
 			name:     "String with spaces",
 			input:    "task1 >> task2",
-			expected: "task1>>task2",
+			expected: "task1>task2",
 		},
 		{
 			name:     "String with tabs",
 			input:    "task1\t>>\ttask2",
-			expected: "task1>>task2",
+			expected: "task1>task2",
 		},
 		{
 			name:     "String with newlines",
 			input:    "task1\n>>\ntask2",
-			expected: "task1>>task2",
+			expected: "task1>task2",
 		},
 		{
 			name:     "Mixed whitespace",
 			input:    " task1 \t >> \n task2 ",
-			expected: "task1>>task2",
+			expected: "task1>task2",
 		},
 		{
 			name:     "List with spaces",
@@ -49,16 +49,14 @@ func TestCleanInput(t *testing.T) {
 		{
 			name:     "Complex nested with whitespace",
 			input:    "[      task1 >> task2  , task3                                ]",
-			expected: "[task1>>task2,task3]",
+			expected: "[task1>task2,task3]",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := cleanInput(tt.input)
-			if result != tt.expected {
-				t.Errorf("cleanInput(%q) = %q, expected %q", tt.input, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -101,6 +99,16 @@ func TestValidateInput(t *testing.T) {
 			input:    "task1>>task2>>task3",
 			expected: nil,
 		},
+		{
+			name:     "Nested list",
+			input:    "[[task1,task2],[task3,task4]]",
+			expected: nil,
+		},
+		{
+			name:     "Complex structure",
+			input:    "task1>>[task2,task3>>task4]",
+			expected: nil,
+		},
 
 		// Invalid cases - invalid characters
 		{
@@ -122,85 +130,6 @@ func TestValidateInput(t *testing.T) {
 			name:     "Curly braces",
 			input:    "{task1,task2}",
 			expected: fmt.Errorf("invalid characters found"),
-		},
-
-		// Invalid cases - invalid patterns
-		{
-			name:     "Empty brackets",
-			input:    "[]",
-			expected: fmt.Errorf("empty brackets, consecutive commas, trailing commas, or leading arrows are not allowed"),
-		},
-		{
-			name:     "Single item in brackets",
-			input:    "[task1]",
-			expected: fmt.Errorf("empty brackets, consecutive commas, trailing commas, or leading arrows are not allowed"),
-		},
-		{
-			name:     "Trailing comma",
-			input:    "[task1,task2,]",
-			expected: fmt.Errorf("empty brackets, consecutive commas, trailing commas, or leading arrows are not allowed"),
-		},
-		{
-			name:     "Leading comma",
-			input:    "[,task1,task2]",
-			expected: fmt.Errorf("empty brackets, consecutive commas, trailing commas, or leading arrows are not allowed"),
-		},
-		{
-			name:     "Consecutive commas",
-			input:    "[task1,,task2]",
-			expected: fmt.Errorf("empty brackets, consecutive commas, trailing commas, or leading arrows are not allowed"),
-		},
-		{
-			name:     "Leading >>",
-			input:    ">>task1",
-			expected: fmt.Errorf("empty brackets, consecutive commas, trailing commas, or leading arrows are not allowed"),
-		},
-		{
-			name:     "Leading >",
-			input:    ">task1",
-			expected: fmt.Errorf("empty brackets, consecutive commas, trailing commas, or leading arrows are not allowed"),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			testValidationFunction(t, "validateInput", tt.input, tt.expected, validateInput)
-		})
-	}
-}
-
-// Test validateGroups function
-func TestValidateGroups(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected error
-	}{
-		// Valid cases
-		{
-			name:     "Simple task",
-			input:    "task1",
-			expected: nil,
-		},
-		{
-			name:     "Chain with >>",
-			input:    "task1>>task2",
-			expected: nil,
-		},
-		{
-			name:     "List",
-			input:    "[task1,task2]",
-			expected: nil,
-		},
-		{
-			name:     "Nested list",
-			input:    "[[task1,task2],[task3,task4]]",
-			expected: nil,
-		},
-		{
-			name:     "Complex structure",
-			input:    "task1>>[task2,task3>>task4]",
-			expected: nil,
 		},
 
 		// Invalid cases - single >
@@ -265,11 +194,48 @@ func TestValidateGroups(t *testing.T) {
 			input:    "task1>>>>>task2",
 			expected: fmt.Errorf("error at index 6, more than two consecutive > found"),
 		},
+
+		// Invalid cases - invalid patterns
+		{
+			name:     "Empty brackets",
+			input:    "[]",
+			expected: fmt.Errorf("error at index 0, empty group '[]' found"),
+		},
+		{
+			name:     "Single item in brackets",
+			input:    "[task1]",
+			expected: fmt.Errorf("error at index 6, single identifier group '[identifier]' found"),
+		},
+		{
+			name:     "Trailing comma",
+			input:    "[task1,task2,]",
+			expected: fmt.Errorf("error at index 12, invalid group: ,] pattern found"),
+		},
+		{
+			name:     "Leading comma",
+			input:    "[,task1,task2]",
+			expected: fmt.Errorf("error at index 0, invalid group: [, pattern found"),
+		},
+		{
+			name:     "Consecutive commas",
+			input:    "[task1,,task2]",
+			expected: fmt.Errorf("error at index 6, consecutive commas found"),
+		},
+		{
+			name:     "Leading >>",
+			input:    ">>task1",
+			expected: fmt.Errorf("error at index 1, leading >> found"),
+		},
+		{
+			name:     "Leading >",
+			input:    ">task1",
+			expected: fmt.Errorf("error at index 0, single > found"),
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			testValidationFunction(t, "validateGroups", tt.input, tt.expected, validateGroups)
+			testValidationFunction(t, "validateInput", tt.input, tt.expected, validateInput)
 		})
 	}
 }
@@ -462,7 +428,5 @@ func testParserOutput(t *testing.T, dag *DAG, input, expected string) {
 	}
 	actual := string(actualBytes)
 
-	if actual != expected {
-		t.Errorf("For input '%s':\nExpected: %s\nActual:   %s", input, expected, actual)
-	}
+	assert.Equal(t, expected, actual, fmt.Sprintf("For input '%s':\nExpected: %s\nActual:   %s", input, expected, actual))
 }
