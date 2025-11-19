@@ -1,0 +1,111 @@
+tasks:
+# Step 1: Get data from Google Sheet including header row for column count
+  - name: get_google_drive_file
+    type: http
+    method: GET
+    endpoint: "https://sheets.googleapis.com/v4/spreadsheets/1GUX7kfcUwdODTSUc6QAYl6Uqti0Y0UoHTsvHxz4FI6k?ranges=Keywords!a1:zz999999&fields=sheets(data(rowData(values(userEnteredFormat/numberFormat,userEnteredValue))))"
+    headers:
+      Content-Type: application/x-www-form-urlencoded
+      Accept: text/csv
+    oauth:
+      version: "2.0"
+      issuer: {{ secret "/google_service/issuer" }}
+      scope: 
+        - "https://www.googleapis.com/auth/drive"
+        - "https://www.googleapis.com/auth/spreadsheets"
+      audience: "https://oauth2.googleapis.com/token"
+      token_uri: "https://oauth2.googleapis.com/token"
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer"
+      private_key: {{ secret "/google_service/private_key" }}
+# Step 2: Extract and format row data, ensuring all rows have the correct number of columns.  Nulls are added to rows with missing columns, allowing for a total of 52 (2 * 26) columns per row.
+  - name: extract_rows
+    type: jq  
+    explode: true
+    path: |
+      .sheets[].data[].rowData as $all_rows |
+      ($all_rows[0].values | length) as $expected_count |
+      $all_rows[1:] | map(
+        ([.values[] | 
+          if .userEnteredValue.stringValue then 
+            .userEnteredValue.stringValue
+          elif .userEnteredValue.boolValue != null then
+            (.userEnteredValue.boolValue | tostring)
+          elif .userEnteredValue.numberValue then
+            if .userEnteredFormat.numberFormat.type == "DATE" then
+              (.userEnteredValue.numberValue - 25569) * 86400
+            else
+              .userEnteredValue.numberValue
+            end
+          else 
+            null
+          end
+        ] + [
+          null,null,null,null,null,null,null,null,null,null,
+          null,null,null,null,null,null,null,null,null,null,
+          null,null,null,null,null,null,null,null,null,null,
+          null,null,null,null,null,null,null,null,null,null,
+          null,null,null,null,null,null,null,null,null,null,
+          null,null
+        ])[:$expected_count] | 
+        select(any(. != null))
+      )
+# Step 3: Replace newline characters with spaces in string values
+  - name: replace_newlines_in_strings
+    type: jq
+    path: |
+      map(if type == "string" then gsub("\n"; " ") else . end)
+# Step 4: Replace tab characters with spaces in string values
+  - name: replace_tabs_in_strings
+    type: jq
+    path: |
+      map(if type == "string" then gsub("\t"; " ") else . end)
+# Step 5: Replace single quotes in string values with two single quotes to prevent SQL errors
+  - name: escape_single_quotes
+    type: jq
+    path: |
+      map(if type == "string" then (. | gsub("'"; "''")) else . end)
+# Step 6: Replace double quotes with escaped double quote
+  - name: escape_double_quotes
+    type: jq
+    path: |
+      map(if type == "string" then (. | gsub("\""; "\\\"")) else . end)
+# Step 7: Format complete rows as SQL VALUES tuples (first column as integer, rest as strings)
+  - name: format_sql_values
+    type: jq
+    as_raw: true
+    path: |
+      "(" + (. | to_entries | map(if .key == 0 then (if .value == null then "NULL" else (.value | tostring) end) elif .value == null then "NULL" else "'" + (.value | tostring) + "'" end) | join(",")) + ")"
+# Step 8: Batch VALUES into groups of 2 and create separate INSERT statements
+  - name: batch_and_create_inserts
+    type: join
+    number: 100 # Batch size for records per INSERT
+    size: 2097152 # 2MB max size per batch in bytes
+    delimiter: ", "
+# Step 9: Clean up any newlines introduced by join operation
+  - name: cleanup_join_newlines
+    type: replace
+    expression: "\n"
+    replacement: " "
+# Step 10: Add SQL INSERT header and wrap in JSON for each batch
+  - name: create_json_query
+    type: replace
+    expression: "^"
+    replacement: "{\"query\":\"INSERT INTO adhoc.global_keyword_list_jr VALUES "
+# Step 11: Close JSON structure  
+  - name: close_json
+    type: replace
+    expression: "$"
+    replacement: "\"}" 
+# Step 12: Execute the SQL using Heimdall
+  - name: insert_into_table_heimdall
+    type: heimdall
+    # endpoint: http://localhost:9090
+    # headers:
+    #   X-Pattern-User: {{ env "JOB_USER"}}
+    job:
+      command_criteria:
+        - type:trino
+      cluster_criteria:
+        - data:prod
+    fail_on_error: true
+    poll_interval: 1s
