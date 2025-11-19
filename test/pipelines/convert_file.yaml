@@ -1,7 +1,7 @@
 tasks:
   - name: read_csv_file
     type: file
-    path: /Users/ivanhladush/git/caterpillar/test/pipelines/sample.csv
+    path: test/pipelines/sample.csv
   - name: split_to_lines
     type: split
   - name: convert_from_csv
