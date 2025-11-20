@@ -1,7 +1,7 @@
 tasks:
   - name: get_list_of_names
     type: file
-    path: names.txt
+    path: test/pipelines/names.txt
   - name: split_to_lines
     type: split
     delimiter: "\n"

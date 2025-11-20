@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	defaultChannelSize = 10e3
+	defaultChannelSize     = 10e3
+	defaultTaskConcurrency = 1
 )
 
 type Pipeline struct {
@@ -67,24 +68,45 @@ func (p *Pipeline) Run() error {
 		// data streams
 		var input, output chan *record.Record
 
+		var locker sync.Mutex
+		errors := make(map[string]error)
+
 		for i := tasksCount - 1; i >= 0; i-- {
 			if i != 0 {
 				input = make(chan *record.Record, p.ChannelSize)
 			} else {
 				input = nil
 			}
-			go func(in <-chan *record.Record, out chan<- *record.Record) {
-				defer p.wg.Done()
-				if err := p.Tasks[i].Run(in, out); err != nil {
-					// FIXME: add better error processing
-					fmt.Printf("error in %s: %s\n", p.Tasks[i].GetName(), err)
-					if p.Tasks[i].GetFailOnError() {
-						defer p.locker.Unlock()
-						p.locker.Lock()
-						p.errors[p.Tasks[i].GetName()] = err
+
+			taskConcurrency := p.Tasks[i].GetTaskConcurrency()
+
+			var taskWg sync.WaitGroup
+			taskWg.Add(taskConcurrency)
+
+			for c := 0; c < taskConcurrency; c++ {
+				go func(taskIndex int, in <-chan *record.Record, out chan<- *record.Record) {
+					defer taskWg.Done()
+					if err := p.Tasks[taskIndex].Run(in, out); err != nil {
+						// FIXME: add better error processing
+						fmt.Printf("error in %s: %s\n", p.Tasks[taskIndex].GetName(), err)
+						if p.Tasks[taskIndex].GetFailOnError() {
+							defer locker.Unlock()
+							locker.Lock()
+							errors[p.Tasks[taskIndex].GetName()] = err
+						}
 					}
+				}(i, input, output)
+			}
+
+			// Pipeline orchestrator closes the output channel after all workers complete
+			go func(wg *sync.WaitGroup, out chan<- *record.Record) {
+				wg.Wait()
+				if out != nil {
+					close(out)
 				}
-			}(input, output)
+				p.wg.Done()
+			}(&taskWg, output)
+
 			output = input
 		}
 	} else {

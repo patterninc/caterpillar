@@ -22,10 +22,6 @@ func New() (task.Task, error) {
 
 func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	if input != nil && output != nil {
 		for {
 			r, ok := j.GetRecord(input)

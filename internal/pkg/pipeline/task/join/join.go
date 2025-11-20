@@ -42,10 +42,6 @@ func New() (task.Task, error) {
 
 func (j *join) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	if input == nil || output == nil {
 		return ErrIncorrectInputOutput
 	}

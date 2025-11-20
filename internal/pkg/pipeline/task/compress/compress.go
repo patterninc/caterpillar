@@ -50,10 +50,6 @@ func (c *core) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	if input == nil {
 		return task.ErrNilInput
 	}

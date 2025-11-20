@@ -36,10 +36,6 @@ func New() (task.Task, error) {
 
 func (p *parameterStore) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	awsConfig, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return err

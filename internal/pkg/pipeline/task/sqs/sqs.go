@@ -83,10 +83,6 @@ func (s *sqs) getSQSClient() (*qs.Client, error) {
 
 func (s *sqs) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	client, err := s.getSQSClient()
 	if err != nil {
 		return err

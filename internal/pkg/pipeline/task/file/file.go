@@ -59,10 +59,6 @@ func New() (task.Task, error) {
 
 func (f *file) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	// let's check if we read file or we write file...
 	if input != nil && output != nil {
 		return task.ErrPresentInputOutput
@@ -112,19 +108,19 @@ func (f *file) readFile(output chan<- *record.Record) error {
 	if !found {
 		return unknownSchemeError(f.pathScheme)
 	}
-	
+
 	// let's create a reader
 	reader, err := newReaderFunction(f)
 	if err != nil {
 		return err
 	}
-	
+
 	// let's get the glob
 	glob, err := f.Path.Get(f.CurrentRecord)
 	if err != nil {
 		return err
 	}
-	
+
 	// let's parse the glob to get all paths
 	paths, err := reader.parse(glob)
 	if err != nil {

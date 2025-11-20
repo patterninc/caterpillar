@@ -55,11 +55,6 @@ func New() (task.Task, error) {
 
 func (h *heimdall) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
-	// close channel when done
-	if output != nil {
-		defer close(output)
-	}
-
 	// If input is provided, override the job request context
 	if input != nil {
 		for {

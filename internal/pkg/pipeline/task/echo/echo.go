@@ -23,10 +23,6 @@ func New() (task.Task, error) {
 
 func (e *echo) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	for {
 		r, ok := e.GetRecord(input)
 		if !ok {

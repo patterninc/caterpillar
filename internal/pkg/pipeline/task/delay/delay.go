@@ -25,10 +25,6 @@ func New() (task.Task, error) {
 
 func (d *delay) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	if output != nil {
-		defer close(output)
-	}
-
 	for {
 		r, ok := d.GetRecord(input)
 		if !ok {
