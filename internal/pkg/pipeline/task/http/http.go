@@ -155,7 +155,7 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 
 	// create a default record context if none provided
 	if rc == nil {
-		rc = &record.Record{Context: ctx}
+		rc = &record.Record{Context: context.Background()}
 	}
 
 	// TODO: perhaps expose the starting page number as a parameter for the task
