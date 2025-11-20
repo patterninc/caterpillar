@@ -1,7 +1,7 @@
 tasks:
   - name: read_sample_data
     type: file
-    path: names.txt
+    path: test/pipelines/names.txt
   - name: split_to_lines
     type: split
     delimiter: "\n"

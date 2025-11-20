@@ -1,7 +1,7 @@
 tasks:
   - name: pull_names_from_s3
     type: file
-    path: names.txt
+    path: test/pipelines/names.txt
   - name: compress_file
     type: compress
     format: gzip
