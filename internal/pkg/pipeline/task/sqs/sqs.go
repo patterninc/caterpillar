@@ -53,6 +53,23 @@ func New() (task.Task, error) {
 
 }
 
+// Init initializes the SQS client before pipeline execution
+// This is called once during task unmarshaling, before any goroutines are spawned
+func (s *sqs) Init() error {
+	if s.QueueURL == "" {
+		return fmt.Errorf("queue_url is required")
+	}
+
+	region := s.extractRegionFromQueueURL()
+	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	s.client = qs.NewFromConfig(awsConfig)
+	return nil
+}
+
 func (s *sqs) extractRegionFromQueueURL() string {
 	// Split the URL by dots to extract the region
 	// https://sqs.us-west-2.amazonaws.com/84212345678/test-sqs
@@ -69,34 +86,9 @@ func (s *sqs) extractRegionFromQueueURL() string {
 	return defaultRegion
 }
 
-// getSQSClient creates an SQS client with the region extracted from the queue URL
-func (s *sqs) getSQSClient() (*qs.Client, error) {
-	region := s.extractRegionFromQueueURL()
-
-	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
-	if err != nil {
-		return nil, err
-	}
-
-	return qs.NewFromConfig(awsConfig), nil
-}
-
 func (s *sqs) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	// Initialize client once, thread-safe across all goroutines
-	var initErr error
-	s.InitOnce(func() {
-		client, err := s.getSQSClient()
-		if err != nil {
-			initErr = err
-			return
-		}
-		s.client = client
-	})
-	if initErr != nil {
-		return initErr
-	}
-
+	// Client is already initialized in RunPreHook - just use it
 	if input != nil {
 		return s.sendMessages(input)
 	}

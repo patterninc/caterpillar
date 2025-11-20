@@ -77,6 +77,7 @@ func New() (task.Task, error) {
 		ExpectedStatuses: expectedStatuses,
 		MaxRetries:       defaultMaxRetries,
 		RetryDelay:       defaultDelay,
+		Timeout:          defaultTimeout,
 	}, nil
 
 }
@@ -117,13 +118,6 @@ func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 }
 
 func (h *httpCore) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
-
-	// Initialize timeout once, thread-safe across all goroutines
-	h.InitOnce(func() {
-		if h.Timeout <= 0 {
-			h.Timeout = defaultTimeout
-		}
-	})
 
 	// if we have input, treat each value as a URL and try to get data from it...
 	if input != nil {

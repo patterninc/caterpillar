@@ -49,14 +49,16 @@ func New() (task.Task, error) {
 	}, nil
 }
 
-func (s *server) Run(input <-chan *record.Record, output chan<- *record.Record) error {
+// Init prints a warning if task_concurrency is set for http_server
+func (s *server) GetTaskConcurrency() int {
+	if s.Base.TaskConcurrency > 1 {
+		fmt.Printf("WARN: task_concurrency (%d) is not supported for task '%s'. Only one server instance will run.\n",
+			s.Base.TaskConcurrency, s.Base.Type)
+	}
+	return 1
+}
 
-	// Initialize defaults once, thread-safe across all goroutines
-	s.InitOnce(func() {
-		if s.Port <= 0 {
-			s.Port = defaultPort
-		}
-	})
+func (s *server) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
 	// input channel must be nil
 	if input != nil {

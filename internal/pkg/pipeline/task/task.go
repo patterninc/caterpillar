@@ -11,7 +11,6 @@ import (
 )
 
 const (
-	timeNowFormat            = `2006-01-02 15:04:05`
 	ErrUnsupportedFieldValue = `invalid value for field %s: %s`
 )
 
@@ -25,9 +24,9 @@ var (
 type Task interface {
 	Run(<-chan *record.Record, chan<- *record.Record) error
 	GetName() string
-	GetInputCount() int
 	GetFailOnError() bool
 	GetTaskConcurrency() int
+	Init() error // Called once after unmarshaling, before pipeline execution
 }
 
 type Base struct {
@@ -38,8 +37,6 @@ type Base struct {
 	Context         map[string]*jq.Query `yaml:"context,omitempty" json:"context,omitempty"`
 
 	recordIndex int
-	inputCount  int
-	initOnce    sync.Once // For thread-safe initialization in concurrent tasks
 	sync.RWMutex
 }
 
@@ -52,16 +49,16 @@ func (b *Base) GetName() string {
 }
 
 func (b *Base) GetTaskConcurrency() int {
-	if b.TaskConcurrency <= 0 {
+	if b.TaskConcurrency < 0 {
 		fmt.Printf(`WARN: defaulting task_concurrency to 1 for task %s`, b.Name)
-		return 1
 	}
-	return b.TaskConcurrency
+	return max(1, b.TaskConcurrency)
 }
 
-// InitOnce provides access to the sync.Once for thread-safe initialization
-func (b *Base) InitOnce(fn func()) {
-	b.initOnce.Do(fn)
+// Init is called once after unmarshaling, before pipeline execution
+// Default implementation does nothing. Tasks can override this for initialization.
+func (b *Base) Init() error {
+	return nil
 }
 
 func (b *Base) GetRecord(input <-chan *record.Record) (*record.Record, bool) {
@@ -71,21 +68,7 @@ func (b *Base) GetRecord(input <-chan *record.Record) (*record.Record, bool) {
 	}
 
 	record, ok := <-input
-	if ok {
-		b.Lock()
-		defer b.Unlock()
-		b.inputCount++
-	}
 	return record, ok
-
-}
-
-func (b *Base) GetInputCount() int {
-
-	b.RLock()
-	defer b.RUnlock()
-
-	return b.inputCount
 
 }
 
@@ -102,8 +85,9 @@ func (b *Base) Run(input <-chan *record.Record, output chan<- *record.Record) er
 func (b *Base) SendData(ctx context.Context, data []byte, output chan<- *record.Record) /* we should return error here */ {
 
 	b.Lock()
+	defer b.Unlock()
+
 	b.recordIndex++
-	b.Unlock()
 
 	record := &record.Record{
 		ID:      b.recordIndex,

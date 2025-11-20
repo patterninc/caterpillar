@@ -25,6 +25,7 @@ type parameterStore struct {
 	GetParameters map[string]string    `yaml:"get,omitempty" json:"get,omitempty"`
 	Secure        bool                 `yaml:"secure,omitempty" json:"secure,omitempty"`
 	Overwrite     *bool                `yaml:"overwrite,omitempty" json:"overwrite,omitempty"`
+	client        *ssm.Client
 }
 
 func New() (task.Task, error) {
@@ -34,15 +35,25 @@ func New() (task.Task, error) {
 	}, nil
 }
 
-func (p *parameterStore) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
+func (p *parameterStore) GetTaskConcurrency() int {
+	if p.Base.TaskConcurrency > 1 {
+		fmt.Printf("WARN: task_concurrency (%d) is not supported for task '%s'. Only one ssm client instance will run.\n",
+			p.Base.TaskConcurrency, p.Base.Type)
+	}
+	return 1
+}
 
+func (p *parameterStore) Init() error {
 	awsConfig, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return err
 	}
 
-	// Create SSM client
-	svc := ssm.NewFromConfig(awsConfig)
+	p.client = ssm.NewFromConfig(awsConfig)
+	return nil
+}
+
+func (p *parameterStore) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
 	for {
 		r, ok := p.GetRecord(input)
@@ -72,7 +83,7 @@ func (p *parameterStore) Run(input <-chan *record.Record, output chan<- *record.
 				putParameterInput.Type = types.ParameterTypeSecureString
 			}
 
-			if _, err := svc.PutParameter(ctx, putParameterInput); err != nil {
+			if _, err := p.client.PutParameter(ctx, putParameterInput); err != nil {
 				return err
 			}
 

@@ -86,6 +86,11 @@ func (t *tasks) UnmarshalYAML(unmarshal func(any) error) error {
 			return err
 		}
 
+		// Initialize task (e.g., create clients)
+		if err := t.Init(); err != nil {
+			return fmt.Errorf("failed to initialize task %s: %w", t.GetName(), err)
+		}
+
 		result = append(result, t)
 	}
 
