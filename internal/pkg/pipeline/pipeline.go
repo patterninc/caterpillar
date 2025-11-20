@@ -63,13 +63,8 @@ func (p *Pipeline) Run() error {
 
 	// sync
 	if p.DAG == nil {
-		p.wg.Add(tasksCount)
-
 		// data streams
 		var input, output chan *record.Record
-
-		var locker sync.Mutex
-		errors := make(map[string]error)
 
 		for i := tasksCount - 1; i >= 0; i-- {
 			if i != 0 {
@@ -78,34 +73,7 @@ func (p *Pipeline) Run() error {
 				input = nil
 			}
 
-			taskConcurrency := p.Tasks[i].GetTaskConcurrency()
-
-			var taskWg sync.WaitGroup
-			taskWg.Add(taskConcurrency)
-
-			for c := 0; c < taskConcurrency; c++ {
-				go func(taskIndex int, in <-chan *record.Record, out chan<- *record.Record) {
-					defer taskWg.Done()
-					if err := p.Tasks[taskIndex].Run(in, out); err != nil {
-						// FIXME: add better error processing
-						fmt.Printf("error in %s: %s\n", p.Tasks[taskIndex].GetName(), err)
-						if p.Tasks[taskIndex].GetFailOnError() {
-							defer locker.Unlock()
-							locker.Lock()
-							errors[p.Tasks[taskIndex].GetName()] = err
-						}
-					}
-				}(i, input, output)
-			}
-
-			// Pipeline orchestrator closes the output channel after all workers complete
-			go func(wg *sync.WaitGroup, out chan<- *record.Record) {
-				wg.Wait()
-				if out != nil {
-					close(out)
-				}
-				p.wg.Done()
-			}(&taskWg, output)
+			p.runTaskConcurrently(p.Tasks[i], input, output)
 
 			output = input
 		}
@@ -161,20 +129,8 @@ func (p *Pipeline) runTask(taskName string, input <-chan *record.Record) (<-chan
 	}
 
 	output := make(chan *record.Record, p.ChannelSize)
-	p.wg.Add(1)
 
-	go func() {
-		defer p.wg.Done()
-
-		if err := task.Run(input, output); err != nil {
-			fmt.Printf("error in %s: %s\n", task.GetName(), err)
-			if task.GetFailOnError() {
-				p.locker.Lock()
-				p.errors[task.GetName()] = err
-				p.locker.Unlock()
-			}
-		}
-	}()
+	p.runTaskConcurrently(task, input, output)
 
 	return output, nil
 }
@@ -263,3 +219,36 @@ func (p *Pipeline) mergeChannels(inputs []<-chan *record.Record) <-chan *record.
 	return output
 }
 
+func (p *Pipeline) runTaskConcurrently(t task.Task, input <-chan *record.Record, output chan<- *record.Record) {
+	// wait for all workers of this taks to finish
+	p.wg.Add(1)
+
+	concurrency := t.GetTaskConcurrency()
+
+	// wait group for task workers
+	taskWg := sync.WaitGroup{}
+	taskWg.Add(concurrency)
+
+	for i := 0; i < concurrency; i++ {
+		go func(task task.Task, in <-chan *record.Record, out chan<- *record.Record) {
+			defer taskWg.Done()
+
+			if err := task.Run(in, out); err != nil {
+				fmt.Printf("error in %s: %s\n", task.GetName(), err)
+				if task.GetFailOnError() {
+					p.locker.Lock()
+					p.errors[task.GetName()] = err
+					p.locker.Unlock()
+				}
+			}
+		}(t, input, output)
+	}
+
+	go func(wg *sync.WaitGroup, out chan<- *record.Record) {
+		wg.Wait()
+		if out != nil {
+			close(out)
+		}
+		p.wg.Done()
+	}(&taskWg, output)
+}
