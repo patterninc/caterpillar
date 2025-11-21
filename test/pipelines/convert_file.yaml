@@ -1,7 +1,7 @@
 tasks:
   - name: read_csv_file
     type: file
-    path: sample.csv
+    path: test/pipelines/sample.csv
   - name: split_to_lines
     type: split
   - name: convert_from_csv
@@ -18,3 +18,14 @@ tasks:
   - name: echo
     type: echo
     only_data: true
+  - name: echo2
+    type: echo
+    only_data: true
+  - name: echo3
+    type: echo
+    only_data: true
+  - name: echo4
+    type: echo
+    only_data: true
+
+dag: read_csv_file >> [split_to_lines,echo3]  >> [convert_from_csv,echo] >> [echo2,echo4]

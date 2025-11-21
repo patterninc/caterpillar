@@ -39,6 +39,10 @@ func main() {
 		process.Bail(`config`, err)
 	}
 
+	if err := p.Init(); err != nil {
+		process.Bail(`pipeline init`, err)
+	}
+	
 	// run pipeline
 	if err := p.Run(); err != nil {
 		process.Bail(`pipeline`, err)
