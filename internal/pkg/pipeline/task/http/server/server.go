@@ -49,16 +49,20 @@ func New() (task.Task, error) {
 	}, nil
 }
 
+// Init prints a warning if task_concurrency is set for http_server
+func (s *server) GetTaskConcurrency() int {
+	if s.Base.TaskConcurrency > 1 {
+		fmt.Printf("WARN: task_concurrency (%d) is not supported for task '%s'. Only one server instance will run.\n",
+			s.Base.TaskConcurrency, s.Base.Type)
+	}
+	return 1
+}
+
 func (s *server) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
 	// input channel must be nil
 	if input != nil {
 		return task.ErrPresentInput
-	}
-
-	// validate and set default port if not provided
-	if s.Port <= 0 {
-		s.Port = defaultPort
 	}
 
 	// Create individual handlers for each configured path
