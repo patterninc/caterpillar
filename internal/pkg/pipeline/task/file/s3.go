@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	s3client "github.com/patterninc/caterpillar/internal/pkg/pipeline/task/file/s3_client"
 )
 
@@ -69,7 +70,7 @@ func (r *s3Reader) parse(glob string) ([]string, error) {
 
 }
 
-func writeS3File(f *file, reader io.Reader) error {
+func writeS3File(f *file, rec *record.Record, reader io.Reader) error {
 
 	// create s3 client
 	client, err := s3client.New(ctx, f.Region)
@@ -77,7 +78,7 @@ func writeS3File(f *file, reader io.Reader) error {
 		return err
 	}
 
-	path, err := f.Path.Get(f.CurrentRecord)
+	path, err := f.Path.Get(rec)
 	if err != nil {
 		return err
 	}

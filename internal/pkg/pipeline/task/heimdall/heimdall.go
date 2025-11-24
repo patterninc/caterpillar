@@ -58,34 +58,53 @@ func (h *heimdall) Run(input <-chan *record.Record, output chan<- *record.Record
 	// If input is provided, override the job request context
 	if input != nil {
 		for {
-			r, ok := h.GetRecord(input)
+			rc, ok := h.GetRecord(input)
 			if !ok {
 				break
 			}
 
 			// Parse the input record to get dynamic context
 			var jobContext map[string]any
-			if err := json.Unmarshal([]byte(r.Data), &jobContext); err != nil {
+			if err := json.Unmarshal([]byte(rc.Data), &jobContext); err != nil {
 				return err
 			}
 
-			h.JobRequest.Context = jobContext
-			if err := h.submitJob(output); err != nil {
+			// Create a job request with the dynamic context
+			jobReq := h.buildJobRequest(jobContext)
+			if err := h.submitJob(jobReq, output); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 
-	return h.submitJob(output)
+	// Create a job request with the configured context
+	jobReq := h.buildJobRequest(h.JobRequest.Context)
+	return h.submitJob(jobReq, output)
 
 }
 
-func (h *heimdall) submitJob(output chan<- *record.Record) error {
+// buildJobRequest creates a complete job request with all fields including tags
+func (h *heimdall) buildJobRequest(context map[string]any) *jobRequest {
+	tags := make([]string, 0, len(h.JobRequest.Tags)+1)
+	tags = append(tags, h.JobRequest.Tags...)
+	tags = append(tags, fmt.Sprintf("caterpillar_task_name:%s", h.Base.Name))
+
+	return &jobRequest{
+		Name:            h.JobRequest.Name,
+		Version:         h.JobRequest.Version,
+		Context:         context,
+		CommandCriteria: h.JobRequest.CommandCriteria,
+		ClusterCriteria: h.JobRequest.ClusterCriteria,
+		Tags:            tags,
+	}
+}
+
+func (h *heimdall) submitJob(jobReq *jobRequest, output chan<- *record.Record) error {
 
 	response := &response{}
 
-	if err := h.api(http.MethodPost, h.Endpoint+endpointJob, response); err != nil {
+	if err := h.api(http.MethodPost, h.Endpoint+endpointJob, jobReq, response); err != nil {
 		return err
 	}
 
@@ -114,7 +133,7 @@ func (h *heimdall) processAsyncJob(jobID string, output chan<- *record.Record) e
 
 		// Poll for job status
 		response := &response{}
-		if err := h.api(http.MethodGet, fmt.Sprintf(h.Endpoint+endpointJobStatus, jobID), response); err != nil {
+		if err := h.api(http.MethodGet, fmt.Sprintf(h.Endpoint+endpointJobStatus, jobID), nil, response); err != nil {
 			return err
 		}
 
@@ -122,7 +141,7 @@ func (h *heimdall) processAsyncJob(jobID string, output chan<- *record.Record) e
 		case jobStatusSucceeded:
 			// Get the job result directly from the result endpoint
 			result := &result{}
-			if err := h.api(http.MethodGet, fmt.Sprintf(h.Endpoint+endpointJobResult, jobID), result); err != nil {
+			if err := h.api(http.MethodGet, fmt.Sprintf(h.Endpoint+endpointJobResult, jobID), nil, result); err != nil {
 				return err
 			}
 			return h.sendToOutput(result, output)

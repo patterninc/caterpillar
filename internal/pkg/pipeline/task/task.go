@@ -11,7 +11,6 @@ import (
 )
 
 const (
-	timeNowFormat            = `2006-01-02 15:04:05`
 	ErrUnsupportedFieldValue = `invalid value for field %s: %s`
 )
 
@@ -25,9 +24,9 @@ var (
 type Task interface {
 	Run(<-chan *record.Record, chan<- *record.Record) error
 	GetName() string
-	GetInputCount() int
 	GetFailOnError() bool
 	GetTaskConcurrency() int
+	Init() error // Called once after unmarshaling, before pipeline execution
 }
 
 type Base struct {
@@ -36,10 +35,8 @@ type Base struct {
 	FailOnError     bool                 `yaml:"fail_on_error,omitempty" json:"fail_on_error,omitempty"`
 	TaskConcurrency int                  `yaml:"task_concurrency,omitempty" json:"task_concurrency,omitempty"`
 	Context         map[string]*jq.Query `yaml:"context,omitempty" json:"context,omitempty"`
-	CurrentRecord   *record.Record       // make record context available to entire task
 
 	recordIndex int
-	inputCount  int
 	sync.RWMutex
 }
 
@@ -52,10 +49,16 @@ func (b *Base) GetName() string {
 }
 
 func (b *Base) GetTaskConcurrency() int {
-	if b.TaskConcurrency <= 0 {
-		return 1
+	if b.TaskConcurrency < 0 {
+		fmt.Printf(`WARN: defaulting task_concurrency to 1 for task %s`, b.Name)
 	}
-	return b.TaskConcurrency
+	return max(1, b.TaskConcurrency)
+}
+
+// Init is called once after unmarshaling, before pipeline execution
+// Default implementation does nothing. Tasks can override this for initialization.
+func (b *Base) Init() error {
+	return nil
 }
 
 func (b *Base) GetRecord(input <-chan *record.Record) (*record.Record, bool) {
@@ -65,22 +68,7 @@ func (b *Base) GetRecord(input <-chan *record.Record) (*record.Record, bool) {
 	}
 
 	record, ok := <-input
-	if ok {
-		b.Lock()
-		defer b.Unlock()
-		b.inputCount++
-		b.CurrentRecord = record
-	}
 	return record, ok
-
-}
-
-func (b *Base) GetInputCount() int {
-
-	b.RLock()
-	defer b.RUnlock()
-
-	return b.inputCount
 
 }
 

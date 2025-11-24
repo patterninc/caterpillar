@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 )
 
 const (
@@ -44,9 +45,9 @@ func (r *localReader) parse(glob string) ([]string, error) {
 
 }
 
-func writeLocalFile(f *file, reader io.Reader) error {
+func writeLocalFile(f *file, rec *record.Record, reader io.Reader) error {
 
-	path, err := f.Path.Get(f.CurrentRecord)
+	path, err := f.Path.Get(rec)
 	if err != nil {
 		return err
 	}

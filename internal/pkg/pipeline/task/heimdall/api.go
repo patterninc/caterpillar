@@ -8,21 +8,13 @@ import (
 	"net/http"
 )
 
-var (
-	headers = http.Header{
-		`Content-Type`: {`application/json`},
-	}
-)
-
-func (h *heimdall) api(method, url string, obj interface{}) (err error) {
+func (h *heimdall) api(method, url string, jobReq *jobRequest, obj interface{}) (err error) {
 
 	var payloadJson []byte
 
-	// let's set additional job tags
-	h.JobRequest.Tags = append(h.JobRequest.Tags, fmt.Sprintf("caterpillar_task_name:%s", h.Base.Name))
-
-	if method != http.MethodGet {
-		if payloadJson, err = json.Marshal(&h.JobRequest); err != nil {
+	// If we have a job request, prepare the payload
+	if jobReq != nil && method != http.MethodGet {
+		if payloadJson, err = json.Marshal(jobReq); err != nil {
 			return err
 		}
 	}
@@ -32,12 +24,11 @@ func (h *heimdall) api(method, url string, obj interface{}) (err error) {
 		return err
 	}
 
-	// Set default headers
-	req.Header = headers
+	req.Header.Set("Content-Type", "application/json")
 
 	// set user supplied headers
 	for key, value := range h.Headers {
-		req.Header.Add(key, value)
+		req.Header.Set(key, value)
 	}
 
 	// Build client
