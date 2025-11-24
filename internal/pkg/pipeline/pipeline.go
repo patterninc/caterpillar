@@ -78,7 +78,7 @@ func (p *Pipeline) Run() error {
 			output = input
 		}
 	} else {
-		_, err := p.executeDag(p.DAG, nil)
+		_, err := p.executeDag(p.DAG, nil, true)
 		if err != nil {
 			return err
 		}
@@ -106,36 +106,39 @@ func (p *Pipeline) tasksToMap() {
 	p.taskByName = taskMap
 }
 
-func (p *Pipeline) executeDag(item *DAG, input <-chan *record.Record) (<-chan *record.Record, error) {
+func (p *Pipeline) executeDag(item *DAG, input <-chan *record.Record, isLeaf bool) (<-chan *record.Record, error) {
 	// Process a single task
 	if item.Name != "" {
-		return p.runTask(item.Name, input)
+		return p.runTask(item.Name, input, isLeaf)
 	}
 
 	// Process items in parallel first
-	itemsOutput, err := p.processItems(item.Items, input)
+	itemsOutput, err := p.processItems(item.Items, input, isLeaf && len(item.Children) == 0) // is a leaf if is in the leaf path and has no children
 	if err != nil {
 		return nil, err
 	}
 
 	// Then process children with items output
-	return p.processChildren(item.Children, itemsOutput)
+	return p.processChildren(item.Children, itemsOutput, isLeaf) // is a leaf if in the leaf path
 }
 
-func (p *Pipeline) runTask(taskName string, input <-chan *record.Record) (<-chan *record.Record, error) {
+func (p *Pipeline) runTask(taskName string, input <-chan *record.Record, isLeaf bool) (<-chan *record.Record, error) {
 	task, found := p.taskByName[taskName]
 	if !found {
 		return nil, fmt.Errorf("task not found: %s", taskName)
 	}
 
-	output := make(chan *record.Record, p.ChannelSize)
+	var output chan *record.Record
+	if !isLeaf {
+		output = make(chan *record.Record, p.ChannelSize)
+	}
 
 	p.runTaskConcurrently(task, input, output)
 
 	return output, nil
 }
 
-func (p *Pipeline) processItems(items []*DAG, input <-chan *record.Record) (<-chan *record.Record, error) {
+func (p *Pipeline) processItems(items []*DAG, input <-chan *record.Record, isLeaf bool) (<-chan *record.Record, error) {
 	// Create input channels for parallel processing
 	inputChannels := make([]chan *record.Record, len(items))
 	outputChannels := make([]<-chan *record.Record, len(items))
@@ -144,11 +147,13 @@ func (p *Pipeline) processItems(items []*DAG, input <-chan *record.Record) (<-ch
 		if input != nil {
 			inputChannels[i] = make(chan *record.Record, p.ChannelSize)
 		}
-		outChan, err := p.executeDag(item, inputChannels[i])
+		outChan, err := p.executeDag(item, inputChannels[i], isLeaf)
 		if err != nil {
 			return nil, err
 		}
-		outputChannels[i] = outChan
+		if outChan != nil {
+			outputChannels[i] = outChan
+		}
 	}
 
 	// Distribute input to all parallel branches
@@ -158,14 +163,14 @@ func (p *Pipeline) processItems(items []*DAG, input <-chan *record.Record) (<-ch
 	return p.mergeChannels(outputChannels), nil
 }
 
-func (p *Pipeline) processChildren(children []*DAG, input <-chan *record.Record) (<-chan *record.Record, error) {
+func (p *Pipeline) processChildren(children []*DAG, input <-chan *record.Record, isLeaf bool) (<-chan *record.Record, error) {
 	if len(children) == 0 {
 		return input, nil
 	}
 
 	currentOutput := input
 	for _, child := range children {
-		nextOutput, err := p.executeDag(child, currentOutput)
+		nextOutput, err := p.executeDag(child, currentOutput, isLeaf)
 		if err != nil {
 			return nil, err
 		}
