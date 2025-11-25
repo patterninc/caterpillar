@@ -225,7 +225,7 @@ func (p *Pipeline) mergeChannels(inputs []<-chan *record.Record) <-chan *record.
 }
 
 func (p *Pipeline) runTaskConcurrently(t task.Task, input <-chan *record.Record, output chan<- *record.Record) {
-	// wait for all workers of this taks to finish
+	// wait for all workers of this task to finish
 	p.wg.Add(1)
 
 	concurrency := t.GetTaskConcurrency()

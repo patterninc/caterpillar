@@ -103,7 +103,7 @@ func isNameChar(c rune) bool {
 	return unicode.IsLetter(c) || unicode.IsDigit(c) || c == '_' || c == '-'
 }
 
-// Validate the input check for invalid characters and group syntax
+// Validate the input, checking for invalid characters and group syntax
 func validateInput(input string) error {
 	// check for empty input
 	if len(input) == 0 {
