@@ -19,10 +19,6 @@ type DAG struct {
 }
 
 func (t *DAG) UnmarshalYAML(value *yaml.Node) error {
-	if len(value.Value) == 0 {
-		return fmt.Errorf("zero length DAG expression")
-	}
-
 	input := value.Value
 
 	// validate input string for correct syntax
@@ -109,6 +105,11 @@ func isNameChar(c rune) bool {
 
 // Validate the input check for invalid characters and group syntax
 func validateInput(input string) error {
+	// check for empty input
+	if len(input) == 0 {
+		return fmt.Errorf("zero length DAG expression")
+	}
+
 	// check for invalid characters
 	invalidChars, err := regexp.Compile(`[^a-zA-Z0-9_\-\[\],>\s]`)
 	if err != nil {
@@ -116,6 +117,11 @@ func validateInput(input string) error {
 	}
 	if invalidChars.MatchString(input) {
 		return fmt.Errorf("invalid characters found")
+	}
+
+	// check for leading '>'
+	if input[0] == '>' {
+		return fmt.Errorf("error at index 0, leading > found")
 	}
 
 	// validate groups
@@ -138,10 +144,10 @@ func validateInput(input string) error {
 			if isNextArrow {
 				return fmt.Errorf("error at index %d, invalid group: [> pattern found", i)
 			}
-			if input[i+1] == ']' {
+			if i+1 < len(input) && input[i+1] == ']' {
 				return fmt.Errorf("error at index %d, empty group '[]' found", i)
 			}
-			if input[i+1] == ',' {
+			if i+1 < len(input) && input[i+1] == ',' {
 				return fmt.Errorf("error at index %d, invalid group: [, pattern found", i)
 			}
 		case ']':
@@ -165,16 +171,13 @@ func validateInput(input string) error {
 			if isNextArrow {
 				return fmt.Errorf("error at index %d, invalid group: ,> pattern found", i)
 			}
-			if input[i+1] == ']' {
+			if i+1 < len(input) && input[i+1] == ']' {
 				return fmt.Errorf("error at index %d, invalid group: ,] pattern found", i)
 			}
-			if input[i+1] == ',' {
+			if i+1 < len(input) && input[i+1] == ',' {
 				return fmt.Errorf("error at index %d, consecutive commas found", i)
 			}
 		case '>':
-			if isPrevArrow && i <= 1 {
-				return fmt.Errorf("error at index %d, leading >> found", i)
-			}
 			if isPrevArrow && isNextArrow {
 				return fmt.Errorf("error at index %d, more than two consecutive > found", i)
 			}

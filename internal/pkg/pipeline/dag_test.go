@@ -68,6 +68,13 @@ func TestValidateInput(t *testing.T) {
 		input    string
 		expected error
 	}{
+		// Invalid cases - zero length
+		{
+			name:     "Empty string",
+			input:    "",
+			expected: fmt.Errorf("zero length DAG expression"),
+		},
+
 		// Valid cases
 		{
 			name:     "Simple task",
@@ -224,12 +231,57 @@ func TestValidateInput(t *testing.T) {
 		{
 			name:     "Leading >>",
 			input:    ">>task1",
-			expected: fmt.Errorf("error at index 1, leading >> found"),
+			expected: fmt.Errorf("error at index 0, leading > found"),
 		},
 		{
 			name:     "Leading >",
 			input:    ">task1",
-			expected: fmt.Errorf("error at index 0, single > found"),
+			expected: fmt.Errorf("error at index 0, leading > found"),
+		},
+		{
+			name:     "Single character [",
+			input:    "[",
+			expected: fmt.Errorf("unmatched opening brace '[' found"),
+		},
+		{
+			name:     "Single character ]",
+			input:    "]",
+			expected: fmt.Errorf("error at index 0, unmatched closing brace ']' found"),
+		},
+		{
+			name:     "Single character ,",
+			input:    ",",
+			expected: fmt.Errorf("error at index 0, comma outside brackets found"),
+		},
+		{
+			name:     "Single character >",
+			input:    ">",
+			expected: fmt.Errorf("error at index 0, leading > found"),
+		},
+		{
+			name:     "End with [",
+			input:    "task1[",
+			expected: fmt.Errorf("unmatched opening brace '[' found"),
+		},
+		{
+			name:     "End with ,",
+			input:    "task1,",
+			expected: fmt.Errorf("error at index 5, comma outside brackets found"),
+		},
+		{
+			name:     "End with single >",
+			input:    "task1>",
+			expected: fmt.Errorf("error at index 5, single > found"),
+		},
+		{
+			name:     "Bracket followed by end - causes panic",
+			input:    "[task1,",
+			expected: fmt.Errorf("unmatched opening brace '[' found"),
+		},
+		{
+			name:     "Task followed by comma inside brackets - causes panic",
+			input:    "[task,",
+			expected: fmt.Errorf("unmatched opening brace '[' found"),
 		},
 	}
 
@@ -383,6 +435,16 @@ func TestIntegrationParsing(t *testing.T) {
 			name:     "Full integration: multiple chains in list",
 			input:    "dag: \"[ task1 >> task2 >> task3 , task4 >> task5 , task6 ]\"",
 			expected: `{"items":[{"items":[{"items":[{"name":"task1"}],"children":[{"items":[{"name":"task2"}],"children":[{"items":[{"name":"task3"}]}]}]},{"items":[{"name":"task4"}],"children":[{"items":[{"name":"task5"}]}]},{"items":[{"name":"task6"}]}]}]}`,
+		},
+		{
+			name:     "Diamond pattern: simple branching and merging",
+			input:    "dag: task1 >> [ task2 , task3 ] >> task4",
+			expected: `{"items":[{"items":[{"name":"task1"}],"children":[{"items":[{"items":[{"name":"task2"}]},{"items":[{"name":"task3"}]}],"children":[{"items":[{"name":"task4"}]}]}]}]}`,
+		},
+		{
+			name:     "Diamond pattern: complex branching with chains",
+			input:    "dag: task1 >> [ task2 >> task3 , task4 >> task5 ] >> task6",
+			expected: `{"items":[{"items":[{"name":"task1"}],"children":[{"items":[{"items":[{"name":"task2"}],"children":[{"items":[{"name":"task3"}]}]},{"items":[{"name":"task4"}],"children":[{"items":[{"name":"task5"}]}]}],"children":[{"items":[{"name":"task6"}]}]}]}]}`,
 		},
 	}
 
