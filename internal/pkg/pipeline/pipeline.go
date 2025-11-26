@@ -183,19 +183,16 @@ func (p *Pipeline) processChildren(children []*DAG, input <-chan *record.Record,
 func (p *Pipeline) distributeToChannels(input <-chan *record.Record, outputs []chan *record.Record) {
 	defer func() {
 		for _, ch := range outputs {
-			close(ch)
+			if ch != nil {
+				close(ch)
+			}
 		}
 	}()
 
 	for rec := range input {
 		for _, ch := range outputs {
-			select {
-			case ch <- rec:
-			default:
-				// Handle potential deadlock by using select with default
-				go func(ch chan *record.Record, rec *record.Record) {
-					ch <- rec
-				}(ch, rec)
+			if ch != nil {
+				ch <- rec
 			}
 		}
 	}
@@ -208,6 +205,11 @@ func (p *Pipeline) mergeChannels(inputs []<-chan *record.Record) <-chan *record.
 	wg.Add(len(inputs))
 
 	for _, input := range inputs {
+		if input == nil {
+			wg.Done()
+			continue
+		}
+
 		go func(in <-chan *record.Record) {
 			defer wg.Done()
 			for rec := range in {
