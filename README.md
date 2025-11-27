@@ -89,6 +89,34 @@ tasks:
 
 When `fail_on_error` is set, the pipeline will return a non-zero exit code if any configured task encounters an error.
 
+### DAG (Directed Acyclic Graph) Execution - EXPERIMENTAL
+
+Caterpillar supports complex pipeline architectures using DAG syntax, enabling parallel processing, branching, and merging of task execution flows.
+
+**For comprehensive documentation on DAG features, see [DAG_README.md](DAG_README.md)**
+
+Basic DAG syntax examples:
+- Sequential: `task1 >> task2 >> task3`
+- Parallel: `[task1, task2, task3]`
+- Fan-out: `task1 >> [task2, task3]`
+- Fan-in: `[task1, task2] >> task3`
+- Diamond: `task1 >> [task2, task3] >> task4`
+
+```yaml
+tasks:
+  - name: read_data
+    type: file
+  - name: process_a
+    type: jq
+  - name: process_b
+    type: jq
+  - name: merge_results
+    type: join
+
+# DAG definition enables parallel processing
+dag: read_data >> [process_a, process_b] >> merge_results
+```
+
 ### Context Variables
 
 Context variables allow you to store data on a record that can be accessed later in the pipeline. This is especially useful when tasks are separated by one or more intermediate tasks.
