@@ -44,7 +44,11 @@ func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) e
 		if x.Container != `` {
 			containerNodes = htmlquery.Find(document, x.Container)
 			if len(containerNodes) == 0 {
-				return fmt.Errorf("no nodes found for XPath: %s", x.Container)
+				if !x.IgnoreMissing {
+					return fmt.Errorf("no nodes found for XPath: %s", x.Container)
+				}
+				fmt.Println("container is missing - ", x.Container)
+				continue
 			}
 		}
 
