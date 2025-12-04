@@ -32,7 +32,7 @@ In both modes, the task sends HTTP response data to its output channel and suppo
 | `expected_statuses` | string | `200` | Comma-separated list of expected HTTP status codes |
 | `oauth` | object | - | OAuth configuration (see OAuth section) |
 | `proxy` | object | - | Proxy configuration |
-| `next_page` | string | - | JQ expression to extract next page URL |
+| `next_page` | string/object | - | JQ expression to extract next page URL (string) or pagination config (object with`endpoint`, `method`, `body`, `headers`) |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
 ## OAuth Configuration
