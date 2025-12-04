@@ -3,7 +3,7 @@ tasks:
   - name: get_google_drive_file
     type: http
     method: GET
-    endpoint: "https://sheets.googleapis.com/v4/spreadsheets/1GUX7kfcUwdODTSUc6QAYl6Uqti0Y0UoHTsvHxz4FI6k?ranges=Keywords!a1:az999999&fields=sheets(data(rowData(values(userEnteredFormat/numberFormat,userEnteredValue))))"
+    endpoint: "https://sheets.googleapis.com/v4/spreadsheets/1GUX7kfcUwdODTSUc6QAYl6Uqti0Y0UoHTsvHxz4FI6k?ranges=Keywords!a1:zz999999&fields=sheets(data(rowData(values(userEnteredFormat/numberFormat,userEnteredValue))))"
     headers:
       Content-Type: application/x-www-form-urlencoded
       Accept: text/csv
@@ -53,14 +53,7 @@ tasks:
             else 
               null
             end
-          ] + [
-            null,null,null,null,null,null,null,null,null,null,
-            null,null,null,null,null,null,null,null,null,null,
-            null,null,null,null,null,null,null,null,null,null,
-            null,null,null,null,null,null,null,null,null,null,
-            null,null,null,null,null,null,null,null,null,null,
-            null,null
-          ])[:$expected_count],
+          ] + ([range($expected_count - (.values | length)) | null]))[:$expected_count],
           "column_types": $types
         } |
         select(.row_data | any(. != null))
@@ -69,26 +62,22 @@ tasks:
   - name: replace_newlines_in_strings
     type: jq
     path: |
-      .row_data = (.row_data | map(if type == "string" then gsub("\n"; " ") else . end)) |
-      .
+      .row_data = (.row_data | map(if type == "string" then gsub("\n"; " ") else . end)) | .
 # Step 5: Replace tab characters with spaces in string values
   - name: replace_tabs_in_strings
     type: jq
     path: |
-      .row_data = (.row_data | map(if type == "string" then gsub("\t"; " ") else . end)) |
-      .
+      .row_data = (.row_data | map(if type == "string" then gsub("\t"; " ") else . end)) | .
 # Step 6: Replace single quotes in string values with two single quotes to prevent SQL errors
   - name: escape_single_quotes
     type: jq
     path: |
-      .row_data = (.row_data | map(if type == "string" then (. | gsub("'"; "''")) else . end)) |
-      .
+      .row_data = (.row_data | map(if type == "string" then (. | gsub("'"; "''")) else . end)) | .
 # Step 7: Replace double quotes with escaped double quote
   - name: escape_double_quotes
     type: jq
     path: |
-      .row_data = (.row_data | map(if type == "string" then (. | gsub("\""; "\\\"")) else . end)) |
-      .
+      .row_data = (.row_data | map(if type == "string" then (. | gsub("\""; "\\\"")) else . end)) | .
 # Step 8: Format complete rows as SQL VALUES tuples using column types from first row
   - name: format_sql_values
     type: jq
@@ -100,10 +89,10 @@ tasks:
         else (.[0] | tostring)
         end
       ) | join(",")) + ")"
-# Step 9: Batch VALUES into groups controlled by the {records_per_insert} parameter (default 100) and create separate INSERT statements
+# Step 9: Batch VALUES into groups controlled by the {records_per_insert} parameter and create separate INSERT statements
   - name: batch_and_create_inserts
     type: join
-    number: 100 # Batch size for records per INSERT
+    number: 1 # Batch size for records per INSERT
     size: 2097152 # 2MB max size per batch in bytes
     delimiter: ", "
 # Step 10: Clean up any newlines introduced by join operation

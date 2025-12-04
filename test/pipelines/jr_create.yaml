@@ -3,7 +3,7 @@ tasks:
   - name: get_column_datatypes
     type: http
     method: GET
-    endpoint: "https://sheets.googleapis.com/v4/spreadsheets/1GUX7kfcUwdODTSUc6QAYl6Uqti0Y0UoHTsvHxz4FI6k?ranges=Keywords!a1:az1&fields=sheets(data(rowData(values(userEnteredFormat/numberFormat,userEnteredValue))))"
+    endpoint: "https://sheets.googleapis.com/v4/spreadsheets/1GUX7kfcUwdODTSUc6QAYl6Uqti0Y0UoHTsvHxz4FI6k?ranges=Keywords!a1:zz1&fields=sheets(data(rowData(values(userEnteredFormat/numberFormat,userEnteredValue))))"
     headers:
       Content-Type: application/x-www-form-urlencoded
       Accept: application/json
@@ -35,7 +35,7 @@ tasks:
   - name: build_ddl_sql
     type: jq
     path: |
-      {"query":"CREATE OR REPLACE TABLE adhoc.global_keyword_list_jr( " + . + " )"}
+      {"query":"CREATE OR REPLACE TABLE adhoc.global_keyword_list_jr2( " + . + " )"}
 
   # Step 4: Execute the DDL using Heimdall
   - name: create_table_heimdall
