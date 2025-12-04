@@ -1,0 +1,52 @@
+tasks:
+  # Step 1: Get column names and datatypes from Google Sheet
+  - name: get_column_datatypes
+    type: http
+    method: GET
+    endpoint: "https://sheets.googleapis.com/v4/spreadsheets/1GUX7kfcUwdODTSUc6QAYl6Uqti0Y0UoHTsvHxz4FI6k?ranges=Keywords!a1:az1&fields=sheets(data(rowData(values(userEnteredFormat/numberFormat,userEnteredValue))))"
+    headers:
+      Content-Type: application/x-www-form-urlencoded
+      Accept: application/json
+    oauth:
+      version: "2.0"
+      issuer: {{ secret "/google_service/issuer" }}
+      scope: 
+        - "https://www.googleapis.com/auth/drive"
+        - "https://www.googleapis.com/auth/spreadsheets"
+      audience: "https://oauth2.googleapis.com/token"
+      token_uri: "https://oauth2.googleapis.com/token"
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer"
+      private_key: {{ secret "/google_service/private_key" }}
+
+  # Step 2: Extract column definitions and format for SQL DDL
+  - name: format_column_definitions
+    type: jq
+    path: |
+      [.sheets[].data[].rowData[].values[] | 
+       select(.userEnteredValue.stringValue != null) |
+       "  " + (.userEnteredValue.stringValue | ascii_downcase | gsub("[^a-z0-9_]"; "_") | gsub("_+"; "_") | gsub("^_+|_+$"; "")) + " " + 
+       (if .userEnteredFormat.numberFormat.type == "NUMBER" then "int"
+        elif .userEnteredFormat.numberFormat.type == "DATE" then "int"
+        elif .userEnteredFormat.numberFormat.type == "TIME" then "varchar"
+        else "varchar" end)
+      ] | join(", ")
+    
+  # Step 3: Build the complete DDL statement
+  - name: build_ddl_sql
+    type: jq
+    path: |
+      {"query":"CREATE OR REPLACE TABLE adhoc.global_keyword_list_jr( " + . + " )"}
+
+  # Step 4: Execute the DDL using Heimdall
+  - name: create_table_heimdall
+    type: heimdall
+    endpoint: http://localhost:9090 #http://heimdall.prod.pattern.aws.internal
+    headers:
+      X-Pattern-Service: __SECRET_TOKEN__
+    job:
+      command_criteria:
+        - type:trino
+      cluster_criteria:
+        - data:prod
+    fail_on_error: true
+    poll_interval: 1s
