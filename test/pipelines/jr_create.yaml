@@ -3,21 +3,20 @@ tasks:
   - name: get_column_datatypes
     type: http
     method: GET
-    endpoint: "https://sheets.googleapis.com/v4/spreadsheets/1GUX7kfcUwdODTSUc6QAYl6Uqti0Y0UoHTsvHxz4FI6k?ranges=Keywords!a1:zz1&fields=sheets(data(rowData(values(userEnteredFormat/numberFormat,userEnteredValue))))"
+    endpoint: "https://sheets.googleapis.com/v4/spreadsheets/{googlesheet_id}?ranges={googlesheet_tab_name}!a1:zz1&fields=sheets(data(rowData(values(userEnteredFormat/numberFormat,userEnteredValue))))"
     headers:
       Content-Type: application/x-www-form-urlencoded
       Accept: application/json
     oauth:
       version: "2.0"
-      issuer: {{ secret "/google_service/issuer" }}
+      issuer: {{{{ secret "/google_service/issuer" }}}}
       scope: 
         - "https://www.googleapis.com/auth/drive"
         - "https://www.googleapis.com/auth/spreadsheets"
       audience: "https://oauth2.googleapis.com/token"
       token_uri: "https://oauth2.googleapis.com/token"
       grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer"
-      private_key: {{ secret "/google_service/private_key" }}
-
+      private_key: {{{{ secret "/google_service/private_key" }}}}
   # Step 2: Extract column definitions and format for SQL DDL
   - name: format_column_definitions
     type: jq
@@ -30,17 +29,15 @@ tasks:
         elif .userEnteredFormat.numberFormat.type == "TIME" then "varchar"
         else "varchar" end)
       ] | join(", ")
-    
   # Step 3: Build the complete DDL statement
   - name: build_ddl_sql
     type: jq
     path: |
-      {"query":"CREATE OR REPLACE TABLE adhoc.global_keyword_list_jr2( " + . + " )"}
-
+      {"query":"CREATE OR REPLACE TABLE {namespace}.{table_name} ( " + . + " )"}
   # Step 4: Execute the DDL using Heimdall
   - name: create_table_heimdall
     type: heimdall
-    endpoint: http://localhost:9090 #http://heimdall.prod.pattern.aws.internal
+    endpoint: http://heimdall.prod.pattern.aws.internal
     headers:
       X-Pattern-Service: __SECRET_TOKEN__
     job:

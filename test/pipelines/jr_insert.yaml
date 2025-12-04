@@ -1,22 +1,22 @@
 tasks:
-# Step 1: Get data from Google Sheet including header row for column count
+# Step 1: Get data from Google Sheet including header row, including column count
   - name: get_google_drive_file
     type: http
     method: GET
-    endpoint: "https://sheets.googleapis.com/v4/spreadsheets/1GUX7kfcUwdODTSUc6QAYl6Uqti0Y0UoHTsvHxz4FI6k?ranges=Keywords!a1:zz999999&fields=sheets(data(rowData(values(userEnteredFormat/numberFormat,userEnteredValue))))"
+    endpoint: "https://sheets.googleapis.com/v4/spreadsheets/{googlesheet_id}?ranges={googlesheet_tab_name}!a1:zz999999&fields=sheets(data(rowData(values(userEnteredFormat/numberFormat,userEnteredValue))))"
     headers:
       Content-Type: application/x-www-form-urlencoded
       Accept: text/csv
     oauth:
       version: "2.0"
-      issuer: {{ secret "/google_service/issuer" }}
+      issuer: {{{{ secret "/google_service/issuer" }}}}
       scope: 
         - "https://www.googleapis.com/auth/drive"
         - "https://www.googleapis.com/auth/spreadsheets"
       audience: "https://oauth2.googleapis.com/token"
       token_uri: "https://oauth2.googleapis.com/token"
       grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer"
-      private_key: {{ secret "/google_service/private_key" }}
+      private_key: {{{{ secret "/google_service/private_key" }}}}
 # Step 2: Extract column data types from first row
   - name: extract_column_types
     type: jq
@@ -92,7 +92,7 @@ tasks:
 # Step 9: Batch VALUES into groups controlled by the {records_per_insert} parameter and create separate INSERT statements
   - name: batch_and_create_inserts
     type: join
-    number: 1 # Batch size for records per INSERT
+    number: {records_per_insert} # Batch size for records per INSERT
     size: 2097152 # 2MB max size per batch in bytes
     delimiter: ", "
 # Step 10: Clean up any newlines introduced by join operation
@@ -104,7 +104,7 @@ tasks:
   - name: create_json_query
     type: replace
     expression: "^"
-    replacement: "{\"query\":\"INSERT INTO adhoc.global_keyword_list_jr2 VALUES "
+    replacement: "{{\"query\":\"INSERT INTO {namespace}.{table_name} VALUES "
 # Step 12: Close JSON structure  
   - name: close_json
     type: replace
@@ -114,8 +114,8 @@ tasks:
   - name: insert_into_table_heimdall
     type: heimdall
     endpoint: http://localhost:9090 #http://heimdall.prod.pattern.aws.internal
-    # headers:
-    #   X-Pattern-Service: __SECRET_TOKEN__
+    headers:
+      X-Pattern-Service: __SECRET_TOKEN__
     job:
       command_criteria:
         - type:trino
