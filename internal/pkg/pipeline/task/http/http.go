@@ -203,6 +203,35 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 
 		if nextPageString, ok := nextPageData.(string); ok {
 			endpoint = nextPageString
+		} else if nextPageMap, ok := nextPageData.(map[string]interface{}); ok {
+			// Extract endpoint
+			if endpointVal, ok := nextPageMap["endpoint"].(string); ok {
+				endpoint = endpointVal
+			}
+
+			// Extract method
+			if methodVal, ok := nextPageMap["method"].(string); ok {
+				h.Method = methodVal
+			}
+
+			// Extract body
+			if bodyVal, ok := nextPageMap["body"].(string); ok {
+				h.Body = bodyVal
+			}
+
+			// Extract headers
+			if headersVal, ok := nextPageMap["headers"].(map[string]interface{}); ok {
+				if h.Headers == nil {
+					h.Headers = make(map[string]string)
+				}
+				for k, v := range headersVal {
+					if vStr, ok := v.(string); ok {
+						h.Headers[k] = vStr
+					}
+				}
+			}
+		} else {
+			break
 		}
 
 	}
