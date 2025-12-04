@@ -103,7 +103,7 @@ tasks:
 # Step 9: Batch VALUES into groups controlled by the {records_per_insert} parameter (default 100) and create separate INSERT statements
   - name: batch_and_create_inserts
     type: join
-    number: 1 # Batch size for records per INSERT
+    number: 100 # Batch size for records per INSERT
     size: 2097152 # 2MB max size per batch in bytes
     delimiter: ", "
 # Step 10: Clean up any newlines introduced by join operation
@@ -115,7 +115,7 @@ tasks:
   - name: create_json_query
     type: replace
     expression: "^"
-    replacement: "{\"query\":\"INSERT INTO adhoc.global_keyword_list_jr VALUES "
+    replacement: "{\"query\":\"INSERT INTO adhoc.global_keyword_list_jr2 VALUES "
 # Step 12: Close JSON structure  
   - name: close_json
     type: replace
@@ -125,8 +125,8 @@ tasks:
   - name: insert_into_table_heimdall
     type: heimdall
     endpoint: http://localhost:9090 #http://heimdall.prod.pattern.aws.internal
-    headers:
-      X-Pattern-Service: __SECRET_TOKEN__
+    # headers:
+    #   X-Pattern-Service: __SECRET_TOKEN__
     job:
       command_criteria:
         - type:trino
