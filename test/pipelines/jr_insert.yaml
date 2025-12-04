@@ -17,89 +17,111 @@ tasks:
       token_uri: "https://oauth2.googleapis.com/token"
       grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer"
       private_key: {{ secret "/google_service/private_key" }}
-# Step 2: Extract and format row data, ensuring all rows have the correct number of columns.  Nulls are added to rows with missing columns, allowing for a total of 52 (2 * 26) columns per row.
+# Step 2: Extract column data types from first row
+  - name: extract_column_types
+    type: jq
+    path: |
+      {
+        "data": .,
+        "column_types": [.sheets[].data[].rowData[0].values[] | 
+          if .userEnteredFormat.numberFormat.type == "NUMBER" then "int"
+          elif .userEnteredFormat.numberFormat.type == "DATE" then "int"
+          elif .userEnteredFormat.numberFormat.type == "TIME" then "varchar"
+          else "varchar" end]
+      }
+# Step 3: Extract and format row data, ensuring all rows have the correct number of columns.  Nulls are added to rows with missing columns, allowing for a total of 52 (2 * 26) columns per row.
   - name: extract_rows
     type: jq  
     explode: true
     path: |
-      .sheets[].data[].rowData as $all_rows |
+      .data.sheets[].data[].rowData as $all_rows |
+      .column_types as $types |
       ($all_rows[0].values | length) as $expected_count |
       $all_rows[1:] | map(
-        ([.values[] | 
-          if .userEnteredValue.stringValue then 
-            .userEnteredValue.stringValue
-          elif .userEnteredValue.boolValue != null then
-            (.userEnteredValue.boolValue | tostring)
-          elif .userEnteredValue.numberValue then
-            if .userEnteredFormat.numberFormat.type == "DATE" then
-              (.userEnteredValue.numberValue - 25569) * 86400
-            else
-              .userEnteredValue.numberValue
+        {
+          "row_data": ([.values[] | 
+            if .userEnteredValue.stringValue then 
+              .userEnteredValue.stringValue
+            elif .userEnteredValue.boolValue != null then
+              (.userEnteredValue.boolValue | tostring)
+            elif .userEnteredValue.numberValue then
+              if .userEnteredFormat.numberFormat.type == "DATE" then
+                (.userEnteredValue.numberValue - 25569) * 86400
+              else
+                .userEnteredValue.numberValue
+              end
+            else 
+              null
             end
-          else 
-            null
-          end
-        ] + [
-          null,null,null,null,null,null,null,null,null,null,
-          null,null,null,null,null,null,null,null,null,null,
-          null,null,null,null,null,null,null,null,null,null,
-          null,null,null,null,null,null,null,null,null,null,
-          null,null,null,null,null,null,null,null,null,null,
-          null,null
-        ])[:$expected_count] | 
-        select(any(. != null))
+          ] + [
+            null,null,null,null,null,null,null,null,null,null,
+            null,null,null,null,null,null,null,null,null,null,
+            null,null,null,null,null,null,null,null,null,null,
+            null,null,null,null,null,null,null,null,null,null,
+            null,null,null,null,null,null,null,null,null,null,
+            null,null
+          ])[:$expected_count],
+          "column_types": $types
+        } |
+        select(.row_data | any(. != null))
       )
-# Step 3: Replace newline characters with spaces in string values
+# Step 4: Replace newline characters with spaces in string values
   - name: replace_newlines_in_strings
     type: jq
     path: |
-      map(if type == "string" then gsub("\n"; " ") else . end)
-# Step 4: Replace tab characters with spaces in string values
+      .row_data = (.row_data | map(if type == "string" then gsub("\n"; " ") else . end)) |
+      .
+# Step 5: Replace tab characters with spaces in string values
   - name: replace_tabs_in_strings
     type: jq
     path: |
-      map(if type == "string" then gsub("\t"; " ") else . end)
-# Step 5: Replace single quotes in string values with two single quotes to prevent SQL errors
+      .row_data = (.row_data | map(if type == "string" then gsub("\t"; " ") else . end)) |
+      .
+# Step 6: Replace single quotes in string values with two single quotes to prevent SQL errors
   - name: escape_single_quotes
     type: jq
     path: |
-      map(if type == "string" then (. | gsub("'"; "''")) else . end)
-# Step 6: Replace double quotes with escaped double quote
+      .row_data = (.row_data | map(if type == "string" then (. | gsub("'"; "''")) else . end)) |
+      .
+# Step 7: Replace double quotes with escaped double quote
   - name: escape_double_quotes
     type: jq
     path: |
-      map(if type == "string" then (. | gsub("\""; "\\\"")) else . end)
-# Step 7: Format complete rows as SQL VALUES tuples 
+      .row_data = (.row_data | map(if type == "string" then (. | gsub("\""; "\\\"")) else . end)) |
+      .
+# Step 8: Format complete rows as SQL VALUES tuples using column types from first row
   - name: format_sql_values
     type: jq
     as_raw: true
     path: |
-      "(" + (. | map(if . == null then "NULL" elif type == "string" then "'" + . + "'" else tostring end) | join(",")) + ")"
-# Step 8: Batch VALUES into groups controlled by the {records_per_insert} parameter (default 100) and create separate INSERT statements
+      "(" + ([.row_data, .column_types] | transpose | map(
+        if .[0] == null then "NULL"
+        elif .[1] == "varchar" then "'" + (.[0] | tostring) + "'"
+        else (.[0] | tostring)
+        end
+      ) | join(",")) + ")"
+# Step 9: Batch VALUES into groups controlled by the {records_per_insert} parameter (default 100) and create separate INSERT statements
   - name: batch_and_create_inserts
     type: join
     number: 1 # Batch size for records per INSERT
     size: 2097152 # 2MB max size per batch in bytes
     delimiter: ", "
-# Step 9: Clean up any newlines introduced by join operation
+# Step 10: Clean up any newlines introduced by join operation
   - name: cleanup_join_newlines
     type: replace
     expression: "\n"
     replacement: " "
-# Step 10: Add SQL INSERT header and wrap in JSON for each batch
+# Step 11: Add SQL INSERT header and wrap in JSON for each batch
   - name: create_json_query
     type: replace
     expression: "^"
     replacement: "{\"query\":\"INSERT INTO adhoc.global_keyword_list_jr VALUES "
-# Step 11: Close JSON structure  
+# Step 12: Close JSON structure  
   - name: close_json
     type: replace
     expression: "$"
     replacement: "\"}"
-  # - name: echo 
-  #   type: echo 
-  #   only_data: true
-# Step 12: Execute the SQL using Heimdall
+# Step 13: Execute the SQL using Heimdall
   - name: insert_into_table_heimdall
     type: heimdall
     endpoint: http://localhost:9090 #http://heimdall.prod.pattern.aws.internal
