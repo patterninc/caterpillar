@@ -97,18 +97,18 @@ func (s *sqs) Run(input <-chan *record.Record, output chan<- *record.Record) err
 	// let's create channel to which getMessages function will communicate messages receipts
 	receipts := make(chan *string, s.Concurrency*receiptsQueueMultiplier)
 
-	// now let's start a go routine that will bring messages from the queue
-	go s.getMessages(ctx, output, receipts)
-
 	// we set a pool of workers that will delete messages from the queue
 	var wg sync.WaitGroup
 	wg.Add(s.Concurrency)
 	for i := 0; i < s.Concurrency; i++ {
 		go s.processReceipts(receipts, &wg)
 	}
+
+	err := s.getMessages(ctx, output, receipts)
+
 	wg.Wait()
 
-	return nil
+	return err
 
 }
 
