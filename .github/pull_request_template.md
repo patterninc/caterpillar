@@ -18,4 +18,3 @@
   <!--- Go Style Guide https://github.com/uber-go/guide/blob/master/style.md -->
 - [ ] My change requires a change to the documentation and I have updated the documentation accordingly.
 - [ ] I have added tests to cover my changes.
-- [ ] I have checked downstream dependencies (e.g. ExternalTaskSensors) by searching for DAG name elsewhere in the repo

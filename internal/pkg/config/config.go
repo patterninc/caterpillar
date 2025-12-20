@@ -64,6 +64,13 @@ func Load(configFile string, obj interface{}) error {
 		"macro":   setMacroPlaceholder,    // set placeholder string for macro replacement
 		"secret":  getSecret,              // we use this template function to inject secrets from parameter store
 		"context": setContextPlaceholder,  // set placeholder string for context replacement
+		// indent: add `n` spaces after every newline in the value (useful when
+		// injecting multiline values into YAML block scalars)
+		"indent": func(n int, v string) string {
+			pad := strings.Repeat(" ", n)
+			v = strings.ReplaceAll(v, "\r\n", "\n")
+			return strings.ReplaceAll(v, "\n", "\n"+pad)
+		},
 	})
 
 	parsedTemplate, err := configTemplate.Parse(string(content))

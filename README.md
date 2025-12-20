@@ -236,6 +236,7 @@ Caterpillar supports the following tasks, each of which can serve different role
 - **`http_server`** -[Start an HTTP server to receive incoming data](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/http/server/README.md)
 - **`join`** - [Combine multiple records into a single record](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/join/README.md)
 - **`jq`** - [Transform JSON data using JQ queries](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/jq/README.md)
+- **`kafka`** - [Read from or write to Kafka topics (acts as source or sink)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/kafka/README.md)
 - **`replace`** - [Perform regex-based text replacement and transformation](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/replace/README.md)
 - **`sample`** - [Sample data using various strategies (random, head, tail, nth, percent)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/sample/README.md)
 - **`split`** - [Split data by specified delimiters](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/split/README.md)

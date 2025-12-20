@@ -19,6 +19,7 @@ import (
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/http/server"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/join"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/jq"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/kafka"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/replace"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/sample"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/split"
@@ -43,6 +44,7 @@ var (
 		`http`:                http.New,
 		`join`:                join.New,
 		`jq`:                  jq.New,
+		`kafka`:               kafka.New,
 		`replace`:             replace.New,
 		`sample`:              sample.New,
 		`split`:               split.New,
