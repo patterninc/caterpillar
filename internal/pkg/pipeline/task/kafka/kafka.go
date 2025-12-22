@@ -100,12 +100,7 @@ func (k *kafka) write(input <-chan *record.Record) error {
 		return fmt.Errorf("failed to create kafka dialer: %w", err)
 	}
 
-	writer := kg.NewWriter(kg.WriterConfig{
-		Brokers:  []string{k.BootstrapServer},
-		Topic:    k.Topic,
-		Balancer: &kg.LeastBytes{}, //TODO: look into other balancers
-		Dialer:   dialer,
-	})
+	writer := k.getWriter(dialer)
 
 	defer func() {
 		if err := writer.Close(); err != nil {
@@ -142,9 +137,6 @@ func (k *kafka) write(input <-chan *record.Record) error {
 
 // read reads messages from the Kafka topic and sends them to the output channel
 func (k *kafka) read(output chan<- *record.Record) error {
-	if k.GroupID == "" {
-		fmt.Printf("No group_id specified, will consume as standalone reader.\n")
-	}
 	dialer, err := k.dial()
 	if err != nil {
 		return fmt.Errorf("failed to create kafka dialer: %w", err)
@@ -238,10 +230,21 @@ func (k *kafka) getReader(dialer *kg.Dialer) *kg.Reader {
 			StartOffset: start,
 		})
 	}
+	fmt.Printf("No group_id specified, will consume as standalone reader.\n")
 	return kg.NewReader(kg.ReaderConfig{
 		Brokers: []string{k.BootstrapServer},
 		Topic:   k.Topic,
 		Dialer:  dialer,
+	})
+}
+
+// getWriter creates a kafka writer for the specified dialer
+func (k *kafka) getWriter(dialer *kg.Dialer) *kg.Writer {
+	return kg.NewWriter(kg.WriterConfig{
+		Brokers:  []string{k.BootstrapServer},
+		Topic:    k.Topic,
+		Balancer: &kg.LeastBytes{}, //TODO: look into other balancers
+		Dialer:   dialer,
 	})
 }
 
