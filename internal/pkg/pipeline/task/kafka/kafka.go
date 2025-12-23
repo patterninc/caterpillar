@@ -15,34 +15,35 @@ import (
 	"github.com/segmentio/kafka-go/sasl/plain"
 	"github.com/segmentio/kafka-go/sasl/scram"
 
+	"github.com/patterninc/caterpillar/internal/pkg/duration"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
 
 const (
-	defaultTimeoutMinutes = 1
+	defaultTimeout = duration.Duration(25 * time.Second)
 )
 
 var (
 	ctx     = context.Background()
-	timeout = time.Duration(defaultTimeoutMinutes) * time.Minute
+	timeout time.Duration
 )
 
 type kafka struct {
 	task.Base          `yaml:",inline" json:",inline"`
-	BootstrapServer    string `yaml:"bootstrap_server" json:"bootstrap_server"`                             // "host:port"
-	Topic              string `yaml:"topic" json:"topic"`                                                   // topic to read from or write to
-	ServerAuthType     string `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"`         // "none", "tls"
-	Cert               string `yaml:"cert,omitempty" json:"cert,omitempty"`                                 // used for Server TLS authentication
-	CertPath           string `yaml:"cert_path,omitempty" json:"cert_path,omitempty"`                       // used for Server TLS authentication
-	UserAuthType       string `yaml:"user_auth_type" json:"user_auth_type"`                                 // "none", "sasl", "scram", "mtls"
-	UserCert           string `yaml:"user_cert,omitempty" json:"user_cert,omitempty"`                       // used for user mTLS authentication
-	UserCertPath       string `yaml:"user_cert_path,omitempty" json:"user_cert_path,omitempty"`             // used for user mTLS authentication
-	Username           string `yaml:"username,omitempty" json:"username,omitempty"`                         // used for user SASL/Scram authentication
-	Password           string `yaml:"password,omitempty" json:"password,omitempty"`                         // used for user SASL/Scram authentication
-	Timeout            int    `yaml:"timeout,omitempty" json:"timeout,omitempty"`                           // connection timeout in minutes
-	GroupID            string `yaml:"group_id,omitempty" json:"group_id,omitempty"`                         // consumer group ID for reading
-	StartFromBeginning bool   `yaml:"start_from_beginning,omitempty" json:"start_from_beginning,omitempty"` // set property for a new group, whether to start reading from beginning of topic
+	BootstrapServer    string            `yaml:"bootstrap_server" json:"bootstrap_server"`                             // "host:port"
+	Topic              string            `yaml:"topic" json:"topic"`                                                   // topic to read from or write to
+	ServerAuthType     string            `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"`         // "none", "tls"
+	Cert               string            `yaml:"cert,omitempty" json:"cert,omitempty"`                                 // used for Server TLS authentication
+	CertPath           string            `yaml:"cert_path,omitempty" json:"cert_path,omitempty"`                       // used for Server TLS authentication
+	UserAuthType       string            `yaml:"user_auth_type" json:"user_auth_type"`                                 // "none", "sasl", "scram", "mtls"
+	UserCert           string            `yaml:"user_cert,omitempty" json:"user_cert,omitempty"`                       // used for user mTLS authentication
+	UserCertPath       string            `yaml:"user_cert_path,omitempty" json:"user_cert_path,omitempty"`             // used for user mTLS authentication
+	Username           string            `yaml:"username,omitempty" json:"username,omitempty"`                         // used for user SASL/Scram authentication
+	Password           string            `yaml:"password,omitempty" json:"password,omitempty"`                         // used for user SASL/Scram authentication
+	Timeout            duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`                           // connection timeout
+	GroupID            string            `yaml:"group_id,omitempty" json:"group_id,omitempty"`                         // consumer group ID for reading
+	StartFromBeginning bool              `yaml:"start_from_beginning,omitempty" json:"start_from_beginning,omitempty"` // set property for a new group, whether to start reading from beginning of topic
 }
 
 func New() (task.Task, error) {
@@ -57,7 +58,7 @@ func (k *kafka) Init() error {
 		return fmt.Errorf("topic is required")
 	}
 	if k.Timeout <= 0 {
-		k.Timeout = defaultTimeoutMinutes
+		k.Timeout = defaultTimeout
 	}
 	if k.ServerAuthType == "" {
 		k.ServerAuthType = "none"
@@ -65,7 +66,7 @@ func (k *kafka) Init() error {
 	if k.UserAuthType == "" {
 		k.UserAuthType = "none"
 	}
-	timeout = time.Duration(k.Timeout) * time.Minute
+	timeout = time.Duration(k.Timeout)
 
 	// try connecting to kafka broker to validate config
 	dialer, err := k.dial()
@@ -84,6 +85,10 @@ func (k *kafka) Init() error {
 }
 
 func (k *kafka) Run(input <-chan *record.Record, output chan<- *record.Record) error {
+	if input != nil && output != nil {
+		return task.ErrPresentInputOutput
+	}
+
 	// if input is not nil, this is a sink task
 	if input != nil {
 		return k.write(input)

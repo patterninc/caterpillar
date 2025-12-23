@@ -17,7 +17,7 @@ When reading from a Kafka topic, there are two main modes of operation:
 
 - **Run a standalone reader** (no consumer group): use a `kafka` task without `group_id`; it will pull messages directly from the topic. This is useful for quick debugging but not recommended for production because offsets are not coordinated across consumers.
 
-- **Run a group consumer** (recommended for production): set `group_id` in the task. Multiple instances with the same `group_id` will split partitions between them and coordinate offsets automatically. Use `start_from_beginning: true` only when creating a new group and you want to process all historical messages.
+- **Run a group consumer** (recommended for production): set `group_id` in the task. Multiple instances with the same `group_id` will split partitions between them and coordinate offsets automatically. Use `start_from_beginning: true` only when creating a new group and you want to process all historical messages in the group at every use.
 
 ## Configuration Fields
 
@@ -27,7 +27,7 @@ When reading from a Kafka topic, there are two main modes of operation:
 | `type` | string | `kafka` | Must be "kafka" |
 | `bootstrap_server` | string | - | Kafka broker's bootstrap address (required) |
 | `topic` | string | - | Topic to read from or write to (required) |
-| `timeout` | int | `1` | Connection timeout in minutes |
+| `timeout` | duration string | `25s` | Connection timeout (Go duration format, e.g. `25s`, `1m`, `2m30s`) |
 | `group_id` | string | - | Consumer group id for group consumption (optional) |
 | `start_from_beginning` | bool | false | When using a `group_id` for a non-existent group, set the property for the group to consume from the beginning of topic |
 | `server_auth_type` | string | `none` | `none` or `tls` — server certificate verification mode |
@@ -62,7 +62,7 @@ tasks:
     password: my-pass
     server_auth_type: tls
     cert_path: /etc/ssl/certs/kafka-ca.pem
-    timeout: 5
+    timeout: 5m
 ```
 
 ### Writing with inline CA (multiline PEM)
@@ -77,7 +77,7 @@ tasks:
       -----BEGIN CERTIFICATE-----
       MIID... (your PEM here)
       -----END CERTIFICATE-----
-    timeout: 2
+    timeout: 2s
 ```
 
 ### Reading from a Kafka topic
@@ -88,7 +88,7 @@ tasks:
     bootstrap_server: kafka.local:9092
     topic: input-topic
     user_auth_type: none
-    timeout: 10
+    timeout: 10s
 ```
 
 ### Standalone reader (no consumer group)
@@ -98,7 +98,7 @@ tasks:
     type: kafka
     bootstrap_server: kafka.local:9092
     topic: input-topic
-    timeout: 1
+    timeout: 25s
 ```
 
 ### Group consumer
@@ -110,7 +110,7 @@ tasks:
     topic: input-topic
     group_id: my-consumer-group
     start_from_beginning: true
-    timeout: 1
+    timeout: 25s
 ```
 
 ### Using SCRAM (SCRAM-SHA-512)
@@ -137,12 +137,13 @@ tasks:
     user_auth_type: sasl
     username: plain-user
     password: plain-pass
-    timeout: 1
+    timeout: 25s
 ```
 
 ## Notes and Limitations
- - Standalone reader reads partitions directly and does not perform coordinated offset commits across multiple readers.
- - Group consumers enable scaling: Kafka will assign partitions across group members so each message is delivered only once to the group.
+ - Standalone reader reads partitions directly and does not perform coordinated offset commits across multiple readers. When `group_id` is empty the task will not commit offsets.
+ - Group consumers enable scaling: Kafka will assign partitions across group members so each message is delivered only once to the group. When `group_id` is set, the task will commit offsets after processing messages.
+ - `timeout` uses Go duration strings (type `duration.Duration`) and defaults to `25s` in code; use values like `25s`, `1m`, or `2m30s` in your YAML.
  - `mtls` is a placeholder in the code and currently returns an error / not implemented; client certificate authentication is not provided yet.
  - The code sets a default `timeout` of 1 minute if not provided.
 
