@@ -1,0 +1,15 @@
+tasks:
+  - name: data_to_send
+    type: file
+    path: test/pipelines/names.txt
+  
+  - name: kafka_write
+    type: kafka
+    bootstrap_server: '{{ secret "/kafka/server" }}:9094'
+    topic: test-caterpillar-topic
+    server_auth_type: tls
+    cert: |
+      {{ indent 6 (secret "/kafka/ca-cert") }}
+    user_auth_type: scram
+    username: test-caterpillar
+    password: {{ secret "/kafka/test-caterpillar/secret" }}
