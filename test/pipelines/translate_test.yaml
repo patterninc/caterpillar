@@ -1,0 +1,15 @@
+tasks:
+  - name: get_greetings
+    type: file
+    path: test/pipelines/greetings.json
+  - name: translate_greetings
+    type: jq
+    path: |
+      .[] | {
+        "source_lang": .language,
+        "source_lang_content": .greeting,
+        "target_lang_content": translate(.greeting; "auto"; "en")
+      }
+  - name: save_translated_greetings
+    type: file
+    path: test/pipelines/translated_greetings.json

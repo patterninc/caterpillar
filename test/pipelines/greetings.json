@@ -1,0 +1,42 @@
+[
+  {
+    "language": "Spanish",
+    "greeting": "¡Hola! ¿Cómo estás?"
+  },
+  {
+    "language": "French",
+    "greeting": "Bonjour! Comment allez-vous?"
+  },
+  {
+    "language": "German",
+    "greeting": "Hallo! Wie geht es Ihnen?"
+  },
+  {
+    "language": "Italian",
+    "greeting": "Ciao! Come stai?"
+  },
+  {
+    "language": "Japanese",
+    "greeting": "こんにちは！お元気ですか？"
+  },
+  {
+    "language": "Mandarin Chinese",
+    "greeting": "你好！你好吗？"
+  },
+  {
+    "language": "Hindi",
+    "greeting": "नमस्ते! आप कैसे हैं?"
+  },
+  {
+    "language": "Arabic",
+    "greeting": "مرحبا! كيف حالك؟"
+  },
+  {
+    "language": "Portuguese",
+    "greeting": "Olá! Como você está?"
+  },
+  {
+    "language": "Russian",
+    "greeting": "Привет! Как дела?"
+  }
+]
