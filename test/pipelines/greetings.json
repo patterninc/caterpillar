@@ -1,42 +1,42 @@
 [
   {
     "language": "Spanish",
-    "greeting": "¡Hola! ¿Cómo estás?"
+    "greeting": "¡Buenos días! Espero que tengas un gran día."
   },
   {
     "language": "French",
-    "greeting": "Bonjour! Comment allez-vous?"
+    "greeting": "Salut ! Ravi de te voir."
   },
   {
     "language": "German",
-    "greeting": "Hallo! Wie geht es Ihnen?"
+    "greeting": "Guten Tag! Schön, dich kennenzulernen."
   },
   {
     "language": "Italian",
-    "greeting": "Ciao! Come stai?"
+    "greeting": "Buongiorno! Piacere di conoscerti."
   },
   {
     "language": "Japanese",
-    "greeting": "こんにちは！お元気ですか？"
+    "greeting": "はじめまして！よろしくお願いします。"
   },
   {
     "language": "Mandarin Chinese",
-    "greeting": "你好！你好吗？"
+    "greeting": "很高兴见到你！"
   },
   {
     "language": "Hindi",
-    "greeting": "नमस्ते! आप कैसे हैं?"
+    "greeting": "सुप्रभात! आपसे मिलकर खुशी हुई।"
   },
   {
     "language": "Arabic",
-    "greeting": "مرحبا! كيف حالك؟"
+    "greeting": "أهلاً وسهلاً! تشرفت بلقائك."
   },
   {
     "language": "Portuguese",
-    "greeting": "Olá! Como você está?"
+    "greeting": "Bom dia! É um prazer falar com você."
   },
   {
     "language": "Russian",
-    "greeting": "Привет! Как дела?"
+    "greeting": "Здравствуйте! Рад вас видеть."
   }
 ]

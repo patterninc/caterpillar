@@ -2,6 +2,7 @@ package jq
 
 import (
 	"context"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/translate"
@@ -12,18 +13,30 @@ type awsTranslateClient struct {
 	*translate.Client
 }
 
+var (
+	client *awsTranslateClient
+	once   sync.Once
+)
+
 func new(ctx context.Context) (*awsTranslateClient, error) {
-	awsConfig, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
 
-	return &awsTranslateClient{
-		Client: translate.NewFromConfig(awsConfig),
-	}, nil
+	var err error
+	once.Do(func() {
+		awsConfig, loadErr := config.LoadDefaultConfig(ctx)
+		if loadErr != nil {
+			err = loadErr
+			return
+		}
 
+		client = &awsTranslateClient{
+			Client: translate.NewFromConfig(awsConfig),
+		}
+	})
+
+	return client, err
 }
 
+// TranslateText translates the given text from sourceLang to targetLang.
 func (c *awsTranslateClient) TranslateText(ctx context.Context, text, sourceLang, targetLang string) (string, error) {
 
 	output, err := c.Client.TranslateText(ctx, &translate.TranslateTextInput{
