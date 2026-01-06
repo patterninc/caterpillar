@@ -101,11 +101,44 @@ tasks:
       }
 ```
 
+## Custom JQ Functions
+
+In addition to standard JQ functions, Caterpillar provides custom functions to extend JQ capabilities:
+
+### translate
+
+Translates text using AWS Translate service.
+
+**Signature:** `translate(text; source_lang; target_lang)`
+
+**Parameters:**
+- `text` (string): The text to translate
+- `source_lang` (string): Source language code (e.g., "en", "es", "fr")
+- `target_lang` (string): Target language code (e.g., "en", "es", "fr")
+
+**Returns:** Translated text as a string
+
+**Example:**
+```yaml
+tasks:
+  - name: translate_greeting
+    type: jq
+    path: |
+      {
+        "original": .message,
+        "spanish": translate(.message; "en"; "es"),
+        "french": translate(.message; "en"; "fr")
+      }
+```
+
+**Note:** Requires AWS credentials configured in your environment.
+
 ## Sample Pipelines
 
 - `test/pipelines/context_test.yaml` - JQ with context variables
 - `test/pipelines/convert_industries.yaml` - Data transformation with JQ
 - `test/pipelines/html2json.yaml` - HTML to JSON conversion
+- `test/pipelines/translate_test.yaml` - Text translation with JQ
 
 ## Use Cases
 

@@ -1,0 +1,42 @@
+[
+  {
+    "language": "Spanish",
+    "greeting": "¡Buenos días! Espero que tengas un gran día."
+  },
+  {
+    "language": "French",
+    "greeting": "Salut ! Ravi de te voir."
+  },
+  {
+    "language": "German",
+    "greeting": "Guten Tag! Schön, dich kennenzulernen."
+  },
+  {
+    "language": "Italian",
+    "greeting": "Buongiorno! Piacere di conoscerti."
+  },
+  {
+    "language": "Japanese",
+    "greeting": "はじめまして！よろしくお願いします。"
+  },
+  {
+    "language": "Mandarin Chinese",
+    "greeting": "很高兴见到你！"
+  },
+  {
+    "language": "Hindi",
+    "greeting": "सुप्रभात! आपसे मिलकर खुशी हुई।"
+  },
+  {
+    "language": "Arabic",
+    "greeting": "أهلاً وسهلاً! تشرفت بلقائك."
+  },
+  {
+    "language": "Portuguese",
+    "greeting": "Bom dia! É um prazer falar com você."
+  },
+  {
+    "language": "Russian",
+    "greeting": "Здравствуйте! Рад вас видеть."
+  }
+]

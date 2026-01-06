@@ -109,5 +109,6 @@ func customFunctionsOptions() []gojq.CompilerOption {
 	options = append(options, messageAuthOptions()...)
 	options = append(options, shuffleOptions()...)
 	options = append(options, sleepOptions()...)
+	options = append(options, translateOption()...)
 	return options
 }
