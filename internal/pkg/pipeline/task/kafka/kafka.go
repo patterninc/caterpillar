@@ -26,11 +26,6 @@ const (
 	defaultRetryLimit = 5
 )
 
-var (
-	ctx     = context.Background()
-	timeout time.Duration
-)
-
 type kafka struct {
 	task.Base       `yaml:",inline" json:",inline"`
 	BootstrapServer string            `yaml:"bootstrap_server" json:"bootstrap_server"`                     // "host:port"
@@ -46,6 +41,8 @@ type kafka struct {
 	Timeout         duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`                   // connection, read, write, commit timeout
 	GroupID         string            `yaml:"group_id,omitempty" json:"group_id,omitempty"`                 // the consumer group id (optional)
 	BatchSize       int               `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`             // number of messages to read/write in a batch
+	ctx             context.Context   // parent context
+	timeout         time.Duration     // timeout duration calculated from Timeout
 }
 
 func New() (task.Task, error) {
@@ -53,6 +50,7 @@ func New() (task.Task, error) {
 }
 
 func (k *kafka) Init() error {
+	k.ctx = context.Background()
 	if k.BootstrapServer == "" {
 		return fmt.Errorf("bootstrap_server is required")
 	}
@@ -71,14 +69,14 @@ func (k *kafka) Init() error {
 	if k.BatchSize <= 0 {
 		k.BatchSize = defaultBatchSize
 	}
-	timeout = time.Duration(k.Timeout)
+	k.timeout = time.Duration(k.Timeout)
 
 	// try connecting to kafka broker to validate config
 	dialer, err := k.dial()
 	if err != nil {
 		return fmt.Errorf("failed to create kafka dialer: %w", err)
 	}
-	dialCtx, cancel := context.WithTimeout(ctx, timeout)
+	dialCtx, cancel := context.WithTimeout(k.ctx, k.timeout)
 	defer cancel()
 	conn, err := dialer.DialContext(dialCtx, "tcp", k.BootstrapServer)
 	if err != nil {
@@ -119,7 +117,7 @@ func (k *kafka) write(input <-chan *record.Record) error {
 	}()
 
 	writeBuf := make([]kg.Message, 0, k.BatchSize)
-	timeEmptyWriteBuf := time.Now()
+	timeWriteBufLastEmpty := time.Now()
 	for {
 		r, ok := k.GetRecord(input)
 		if !ok {
@@ -129,25 +127,24 @@ func (k *kafka) write(input <-chan *record.Record) error {
 		writeBuf = append(writeBuf, kg.Message{Value: r.Data})
 
 		// write in batches of BatchSize messages with flush timeout as well
-		if len(writeBuf) < k.BatchSize && time.Since(timeEmptyWriteBuf) < timeout {
+		if len(writeBuf) < k.BatchSize && time.Since(timeWriteBufLastEmpty) < k.timeout {
 			continue
 		}
 
-		// create a write context with timeout per message batch
-		wctx, cancel := context.WithTimeout(ctx, timeout)
-		err := writer.WriteMessages(wctx, writeBuf...)
-		cancel()
-
+		// write the batch
+		err := k.performWrite(writer, writeBuf)
 		if err != nil {
-			var we kg.WriteErrors
-			// TODO: handle individual message errors in case of batch writes
-			if errors.As(err, &we) {
-				return fmt.Errorf("failed to write message to kafka: %v with error count = %d", err, we.Count())
-			}
-			return fmt.Errorf("failed to write message to kafka: %w", err)
+			return err
 		}
-		timeEmptyWriteBuf = time.Now()
+		timeWriteBufLastEmpty = time.Now()
 		writeBuf = writeBuf[:0]
+	}
+	if len(writeBuf) > 0 {
+		// write any remaining messages
+		err := k.performWrite(writer, writeBuf)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -168,11 +165,11 @@ func (k *kafka) read(output chan<- *record.Record) error {
 	deadlineExceededRetries := defaultRetryLimit
 	for {
 		select {
-		case <-ctx.Done():
+		case <-k.ctx.Done():
 			return nil
 		default:
 			// read with a timeout so we can check for cancellation periodically
-			fetchCtx, cancel := context.WithTimeout(ctx, timeout)
+			fetchCtx, cancel := context.WithTimeout(k.ctx, k.timeout)
 			m, err := reader.FetchMessage(fetchCtx)
 			cancel()
 
@@ -199,7 +196,7 @@ func (k *kafka) read(output chan<- *record.Record) error {
 				continue
 			}
 
-			k.SendData(ctx, m.Value, output)
+			k.SendData(k.ctx, m.Value, output)
 
 			if k.GroupID == "" {
 				// if not using consumer group, no need to commit messages
@@ -207,7 +204,7 @@ func (k *kafka) read(output chan<- *record.Record) error {
 			}
 
 			// commit the message after successful processing
-			cctx, cancel := context.WithTimeout(ctx, timeout)
+			cctx, cancel := context.WithTimeout(k.ctx, k.timeout)
 			if err = reader.CommitMessages(cctx, m); err != nil {
 				// log the commit error but continue processing
 				// any new message will ensure that all previous
@@ -239,6 +236,27 @@ func (k *kafka) dial() (*kg.Dialer, error) {
 	}
 
 	return k.createDialer(mechanism)
+}
+
+// performWrite writes a batch of messages to the kafka topic
+func (k *kafka) performWrite(writer *kg.Writer, messages []kg.Message) error {
+	// create a write context with timeout per message batch
+	wctx, cancel := context.WithTimeout(k.ctx, k.timeout)
+	err := writer.WriteMessages(wctx, messages...)
+	cancel()
+	errString := ""
+	if err != nil {
+		var we kg.WriteErrors
+		if errors.As(err, &we) {
+			errString = fmt.Sprintf("failed to write message to kafka: %v with error count = %d\nThe errors are:\n", err, we.Count())
+			for i, individualErr := range we {
+				errString += fmt.Sprintf("%d   : %v\n", i, individualErr)
+			}
+			return fmt.Errorf("%s", errString)
+		}
+		return fmt.Errorf("failed to write message to kafka: %w", err)
+	}
+	return nil
 }
 
 // getReader creates a kafka reader based on whether GroupID is specified
@@ -274,7 +292,7 @@ func (k *kafka) getWriter(dialer *kg.Dialer) *kg.Writer {
 // createDialer creates a kafka dialer with optional SASL mechanism and TLS configuration
 func (k *kafka) createDialer(mechanism sasl.Mechanism) (*kg.Dialer, error) {
 	dialer := &kg.Dialer{
-		Timeout:   timeout,
+		Timeout:   k.timeout,
 		DualStack: true, // use both IPv4 and IPv6 incase either is available
 	}
 	if mechanism != nil {
