@@ -195,7 +195,7 @@ func (k *kafka) read(output chan<- *record.Record) error {
 				fmt.Printf("kafka error reading message: %v\n", err)
 				continue
 			}
-
+			deadlineExceededRetries = defaultRetryLimit
 			k.SendData(k.ctx, m.Value, output)
 
 			if k.GroupID == "" {
@@ -244,11 +244,10 @@ func (k *kafka) performWrite(writer *kg.Writer, messages []kg.Message) error {
 	wctx, cancel := context.WithTimeout(k.ctx, k.timeout)
 	err := writer.WriteMessages(wctx, messages...)
 	cancel()
-	errString := ""
 	if err != nil {
 		var we kg.WriteErrors
 		if errors.As(err, &we) {
-			errString = fmt.Sprintf("failed to write message to kafka: %v with error count = %d\nThe errors are:\n", err, we.Count())
+			errString := fmt.Sprintf("failed to write message to kafka: %v with error count = %d\nThe errors are:\n", err, we.Count())
 			for i, individualErr := range we {
 				errString += fmt.Sprintf("%d   : %v\n", i, individualErr)
 			}
