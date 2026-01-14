@@ -247,7 +247,7 @@ func (k *kafka) performWrite(writer *kg.Writer, messages []kg.Message) error {
 	if err != nil {
 		var we kg.WriteErrors
 		if errors.As(err, &we) {
-			errString := fmt.Sprintf("failed to write message to kafka: %v with error count = %d\nThe errors are:\n", err, we.Count())
+			errString := fmt.Sprintf("failed to write message to kafka with error count = %d.\nThe errors are:\n", we.Count())
 			for i, individualErr := range we {
 				errString += fmt.Sprintf("%d   : %v\n", i, individualErr)
 			}
