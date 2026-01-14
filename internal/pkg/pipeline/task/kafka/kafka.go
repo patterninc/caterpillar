@@ -21,7 +21,9 @@ import (
 )
 
 const (
-	defaultTimeout = duration.Duration(25 * time.Second)
+	defaultTimeout    = duration.Duration(15 * time.Second)
+	defaultBatchSize  = 100
+	defaultRetryLimit = 5
 )
 
 var (
@@ -30,20 +32,20 @@ var (
 )
 
 type kafka struct {
-	task.Base          `yaml:",inline" json:",inline"`
-	BootstrapServer    string            `yaml:"bootstrap_server" json:"bootstrap_server"`                             // "host:port"
-	Topic              string            `yaml:"topic" json:"topic"`                                                   // topic to read from or write to
-	ServerAuthType     string            `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"`         // "none", "tls"
-	Cert               string            `yaml:"cert,omitempty" json:"cert,omitempty"`                                 // used for Server TLS authentication
-	CertPath           string            `yaml:"cert_path,omitempty" json:"cert_path,omitempty"`                       // used for Server TLS authentication
-	UserAuthType       string            `yaml:"user_auth_type" json:"user_auth_type"`                                 // "none", "sasl", "scram", "mtls"
-	UserCert           string            `yaml:"user_cert,omitempty" json:"user_cert,omitempty"`                       // used for user mTLS authentication
-	UserCertPath       string            `yaml:"user_cert_path,omitempty" json:"user_cert_path,omitempty"`             // used for user mTLS authentication
-	Username           string            `yaml:"username,omitempty" json:"username,omitempty"`                         // used for user SASL/Scram authentication
-	Password           string            `yaml:"password,omitempty" json:"password,omitempty"`                         // used for user SASL/Scram authentication
-	Timeout            duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`                           // connection timeout
-	GroupID            string            `yaml:"group_id,omitempty" json:"group_id,omitempty"`                         // consumer group ID for reading
-	StartFromBeginning bool              `yaml:"start_from_beginning,omitempty" json:"start_from_beginning,omitempty"` // set property for a new group, whether to start reading from beginning of topic
+	task.Base       `yaml:",inline" json:",inline"`
+	BootstrapServer string            `yaml:"bootstrap_server" json:"bootstrap_server"`                     // "host:port"
+	Topic           string            `yaml:"topic" json:"topic"`                                           // topic to read from or write to
+	ServerAuthType  string            `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"` // "none", "tls"
+	Cert            string            `yaml:"cert,omitempty" json:"cert,omitempty"`                         // used for Server TLS authentication
+	CertPath        string            `yaml:"cert_path,omitempty" json:"cert_path,omitempty"`               // used for Server TLS authentication
+	UserAuthType    string            `yaml:"user_auth_type" json:"user_auth_type"`                         // "none", "sasl", "scram", "mtls"
+	UserCert        string            `yaml:"user_cert,omitempty" json:"user_cert,omitempty"`               // used for user mTLS authentication
+	UserCertPath    string            `yaml:"user_cert_path,omitempty" json:"user_cert_path,omitempty"`     // used for user mTLS authentication
+	Username        string            `yaml:"username,omitempty" json:"username,omitempty"`                 // used for user SASL/Scram authentication
+	Password        string            `yaml:"password,omitempty" json:"password,omitempty"`                 // used for user SASL/Scram authentication
+	Timeout         duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`                   // connection, read, write, commit timeout
+	GroupID         string            `yaml:"group_id,omitempty" json:"group_id,omitempty"`                 // the consumer group id (optional)
+	BatchSize       int               `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`             // number of messages to read/write in a batch
 }
 
 func New() (task.Task, error) {
@@ -65,6 +67,9 @@ func (k *kafka) Init() error {
 	}
 	if k.UserAuthType == "" {
 		k.UserAuthType = "none"
+	}
+	if k.BatchSize <= 0 {
+		k.BatchSize = defaultBatchSize
 	}
 	timeout = time.Duration(k.Timeout)
 
@@ -113,19 +118,24 @@ func (k *kafka) write(input <-chan *record.Record) error {
 		}
 	}()
 
+	writeBuf := make([]kg.Message, 0, k.BatchSize)
+	timeEmptyWriteBuf := time.Now()
 	for {
 		r, ok := k.GetRecord(input)
 		if !ok {
 			break
 		}
 
+		writeBuf = append(writeBuf, kg.Message{Value: r.Data})
+
+		// write in batches of BatchSize messages with flush timeout as well
+		if len(writeBuf) < k.BatchSize && time.Since(timeEmptyWriteBuf) < timeout {
+			continue
+		}
+
 		// create a write context with timeout per message batch
 		wctx, cancel := context.WithTimeout(ctx, timeout)
-		// TODO: add batch writing support and add Key, Headers, etc for messages
-		// for now, write one message wih only value at a time
-		err := writer.WriteMessages(wctx, kg.Message{
-			Value: r.Data,
-		})
+		err := writer.WriteMessages(wctx, writeBuf...)
 		cancel()
 
 		if err != nil {
@@ -136,6 +146,8 @@ func (k *kafka) write(input <-chan *record.Record) error {
 			}
 			return fmt.Errorf("failed to write message to kafka: %w", err)
 		}
+		timeEmptyWriteBuf = time.Now()
+		writeBuf = writeBuf[:0]
 	}
 	return nil
 }
@@ -153,26 +165,35 @@ func (k *kafka) read(output chan<- *record.Record) error {
 		}
 	}()
 
+	deadlineExceededRetries := defaultRetryLimit
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
-			// TODO: add batch reading support
-
 			// read with a timeout so we can check for cancellation periodically
 			fetchCtx, cancel := context.WithTimeout(ctx, timeout)
 			m, err := reader.FetchMessage(fetchCtx)
 			cancel()
 
 			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					fmt.Printf("kafka message retrieval cancelled or timed out: %v\n", err)
-					return nil
-				}
 				if errors.Is(err, io.EOF) {
+					// this is not reliable for kafka end of topic detection
 					fmt.Printf("kafka reached end of topic: %v\n", k.Topic)
 					return nil
+				}
+				if errors.Is(err, context.Canceled) {
+					fmt.Printf("kafka reader context canceled: %v\n", err)
+					return nil
+				}
+				if errors.Is(err, context.DeadlineExceeded) {
+					fmt.Printf("kafka deadline exceeded while reading message: %v\n", err)
+					deadlineExceededRetries--
+					if deadlineExceededRetries <= 0 {
+						fmt.Printf("kafka exceeded maximum deadline exceeded retries (%d), stopping reader\n", defaultRetryLimit)
+						return nil
+					}
+					continue
 				}
 				fmt.Printf("kafka error reading message: %v\n", err)
 				continue
@@ -223,23 +244,20 @@ func (k *kafka) dial() (*kg.Dialer, error) {
 // getReader creates a kafka reader based on whether GroupID is specified
 func (k *kafka) getReader(dialer *kg.Dialer) *kg.Reader {
 	if k.GroupID != "" {
-		start := kg.LastOffset
-		if k.StartFromBeginning {
-			start = kg.FirstOffset
-		}
 		return kg.NewReader(kg.ReaderConfig{
-			Brokers:     []string{k.BootstrapServer},
-			Topic:       k.Topic,
-			Dialer:      dialer,
-			GroupID:     k.GroupID,
-			StartOffset: start,
+			Brokers:       []string{k.BootstrapServer},
+			Topic:         k.Topic,
+			Dialer:        dialer,
+			GroupID:       k.GroupID,
+			QueueCapacity: k.BatchSize,
 		})
 	}
 	fmt.Printf("No group_id specified, will consume as standalone reader.\n")
 	return kg.NewReader(kg.ReaderConfig{
-		Brokers: []string{k.BootstrapServer},
-		Topic:   k.Topic,
-		Dialer:  dialer,
+		Brokers:       []string{k.BootstrapServer},
+		Topic:         k.Topic,
+		Dialer:        dialer,
+		QueueCapacity: k.BatchSize,
 	})
 }
 

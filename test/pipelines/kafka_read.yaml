@@ -10,6 +10,6 @@ tasks:
     cert: |
       {{ indent 6 (secret "/kafka/ca-cert") }}
 
-  - name: save_results
-    type: file
-    path: test/pipelines/results/{{macro "uuid"}}.json
+  - name: echo_results
+    type: echo
+    only_data: true

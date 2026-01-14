@@ -3,8 +3,7 @@ tasks:
     type: kafka
     bootstrap_server: '{{ secret "/kafka/server" }}:9094'
     topic: test-caterpillar-topic
-    group_id: test-caterpillar-group
-    start_from_beginning: false # can be omitted, defaults to false
+    group_id: test-caterpillar-group-test
     user_auth_type: scram
     username: test-caterpillar
     password: {{ secret "/kafka/test-caterpillar/secret" }}
@@ -12,6 +11,6 @@ tasks:
     cert: |
       {{ indent 6 (secret "/kafka/ca-cert") }}
 
-  - name: save_results
-    type: file
-    path: test/pipelines/results/{{macro "uuid"}}.json
+  - name: echo_results
+    type: echo
+    only_data: true
