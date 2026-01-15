@@ -6,8 +6,8 @@ The `kafka` task reads from or writes to Apache Kafka topics.
 
 The Kafka task operates in two modes depending on whether an input channel is provided:
 
-- **Write mode** (with input channel): Receives records from the input channel and sends them as messages to the Kafka topic.
-- **Read mode** (no input channel): Polls messages from the Kafka topic and sends them to the output channel.
+- **Write mode** (with input channel): receives records from the input channel and sends them as messages to the Kafka topic. Writes are buffered and flushed in batches (see `batch_size` and `timeout`).
+- **Read mode** (no input channel): polls messages from the Kafka topic and sends them to the output channel.
 
 The task automatically determines its mode based on the presence of input/output channels.
 
@@ -15,9 +15,8 @@ The task automatically determines its mode based on the presence of input/output
 
 When reading from a Kafka topic, there are two main modes of operation:
 
-- **Run a standalone reader** (no consumer group): use a `kafka` task without `group_id`; it will pull messages directly from the topic. This is useful for quick debugging but not recommended for production because offsets are not coordinated across consumers.
-
-- **Run a group consumer** (recommended for production): set `group_id` in the task. Multiple instances with the same `group_id` will split partitions between them and coordinate offsets automatically. Use `start_from_beginning: true` only when creating a new group and you want to process all historical messages in the group at every use.
+- **Standalone reader** (no consumer group): omit `group_id`; the reader pulls messages directly from partitions. Offsets are not coordinated across instances and are not committed.
+- **Group consumer** (recommended for production): set `group_id`. Multiple instances with the same `group_id` split partitions between them and coordinate offsets. When `group_id` is set the task will commit offsets after processing messages.
 
 ## Configuration Fields
 
@@ -27,9 +26,9 @@ When reading from a Kafka topic, there are two main modes of operation:
 | `type` | string | `kafka` | Must be "kafka" |
 | `bootstrap_server` | string | - | Kafka broker's bootstrap address (required) |
 | `topic` | string | - | Topic to read from or write to (required) |
-| `timeout` | duration string | `25s` | Connection timeout (Go duration format, e.g. `25s`, `1m`, `2m30s`) |
+| `timeout` | duration string | `15s` | Per-operation timeout (used for dial, read, write, commit by default). Uses Go duration format (e.g. `25s`, `1m`). |
+| `batch_size` | int | `100` | Number of messages to buffer/flush for write and reader |
 | `group_id` | string | - | Consumer group id for group consumption (optional) |
-| `start_from_beginning` | bool | false | When using a `group_id` for a non-existent group, set the property for the group to consume from the beginning of topic |
 | `server_auth_type` | string | `none` | `none` or `tls` — server certificate verification mode |
 | `cert` | string | - | CA certificate PEM/CRT content used when `server_auth_type: tls` (alternatively use `cert_path`) |
 | `cert_path` | string | - | Path to CA certificate (PEM/CRT) |
@@ -41,7 +40,7 @@ When reading from a Kafka topic, there are two main modes of operation:
 
 ## Authentication
 
-- `server_auth_type: tls` enables server certificate verification using the CA at `cert` or if absent, then using CA file at `cert_path`. 
+- `server_auth_type: tls` enables server certificate verification using the CA at `cert` or, if absent, the CA file at `cert_path`.
 - `user_auth_type: sasl` uses SASL Plain authentication (requires `username` and `password`).
 - `user_auth_type: scram` uses SCRAM-SHA-512 authentication (requires `username` and `password`).
 - `user_auth_type: mtls` is reserved for mTLS (client cert) but is not implemented in this task yet.
@@ -109,7 +108,6 @@ tasks:
     bootstrap_server: kafka.local:9092
     topic: input-topic
     group_id: my-consumer-group
-    start_from_beginning: true
     timeout: 25s
 ```
 
@@ -143,13 +141,14 @@ tasks:
 ## Notes and Limitations
  - Standalone reader reads partitions directly and does not perform coordinated offset commits across multiple readers. When `group_id` is empty the task will not commit offsets.
  - Group consumers enable scaling: Kafka will assign partitions across group members so each message is delivered only once to the group. When `group_id` is set, the task will commit offsets after processing messages.
- - `timeout` uses Go duration strings (type `duration.Duration`) and defaults to `25s` in code; use values like `25s`, `1m`, or `2m30s` in your YAML.
+ - The task uses a single configured `timeout` (default 15s) for dial, read, write and commit operations. Dial attempts use the same `timeout` value for each connection attempt.
+ - When reading, the code treats `context.DeadlineExceeded` as transient and retries; the implementation will stop the reader after a limited number of consecutive deadline-exceeded occurrences (default retry limit = 5). Increase `timeout` or decrease message polling intervals to avoid hitting this limit in normal operation.
+ - Writes are buffered up to `batch_size` and flushed either when the buffer reaches `batch_size` or when the configured `timeout` elapses since the last flush attempt.
  - `mtls` is a placeholder in the code and currently returns an error / not implemented; client certificate authentication is not provided yet.
- - The code sets a default `timeout` of 1 minute if not provided.
 
 ## Troubleshooting
 
-- If TLS connections fail, verify the CA at `cert_path` or `cert` matches the broker's certificate chain. Also check whether the certificate at `cert` is correctly formatted (PEM) in multiline, use `|` and indentation in YAML.
+- If TLS connections fail, verify the CA at `cert_path` or `cert` matches the broker's certificate chain. Also check whether the certificate at `cert` is correctly formatted (PEM) in multiline YAML (use `|` and indentation).
 - If SASL/SCRAM authentication fails, double-check `username`/`password` and the broker's configured mechanism.
 
 **Thanks to the _[kafka-go](https://github.com/segmentio/kafka-go)_ library for Kafka client functionality.**

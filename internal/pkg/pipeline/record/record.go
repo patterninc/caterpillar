@@ -13,14 +13,14 @@ type Record struct {
 }
 
 func (m Record) MarshalJSON() ([]byte, error) {
-    type Alias Record // Prevent recursion
-    return json.Marshal(&struct {
-        Data string `json:"data"`
-        *Alias
-    }{
-        Data:  string(m.Data),
-        Alias: (*Alias)(&m),
-    })
+	type Alias Record // Prevent recursion
+	return json.Marshal(&struct {
+		Data string `json:"data"`
+		*Alias
+	}{
+		Data:  string(m.Data),
+		Alias: (*Alias)(&m),
+	})
 }
 
 func (r *Record) Bytes() []byte {
