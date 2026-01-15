@@ -116,34 +116,26 @@ func (k *kafka) write(input <-chan *record.Record) error {
 		}
 	}()
 
-	writeBuf := make([]kg.Message, 0, k.BatchSize)
-	timeWriteBufLastEmpty := time.Now()
 	for {
 		r, ok := k.GetRecord(input)
 		if !ok {
 			break
 		}
 
-		writeBuf = append(writeBuf, kg.Message{Value: r.Data})
-
-		// write in batches of BatchSize messages with flush timeout as well
-		if len(writeBuf) < k.BatchSize && time.Since(timeWriteBufLastEmpty) < k.timeout {
-			continue
-		}
-
-		// write the batch
-		err := k.performWrite(writer, writeBuf)
+		// create a write context with timeout per message batch
+		wctx, cancel := context.WithTimeout(k.ctx, k.timeout)
+		err := writer.WriteMessages(wctx, kg.Message{Value: r.Data})
+		cancel()
 		if err != nil {
-			return err
-		}
-		timeWriteBufLastEmpty = time.Now()
-		writeBuf = writeBuf[:0]
-	}
-	if len(writeBuf) > 0 {
-		// write any remaining messages
-		err := k.performWrite(writer, writeBuf)
-		if err != nil {
-			return err
+			var we kg.WriteErrors
+			if errors.As(err, &we) {
+				errString := fmt.Sprintf("failed to write message to kafka with error count = %d.\nThe errors are:\n", we.Count())
+				for i, individualErr := range we {
+					errString += fmt.Sprintf("%d   : %v\n", i, individualErr)
+				}
+				return fmt.Errorf("%s", errString)
+			}
+			return fmt.Errorf("failed to write message to kafka: %w", err)
 		}
 	}
 	return nil
@@ -238,26 +230,6 @@ func (k *kafka) dial() (*kg.Dialer, error) {
 	return k.createDialer(mechanism)
 }
 
-// performWrite writes a batch of messages to the kafka topic
-func (k *kafka) performWrite(writer *kg.Writer, messages []kg.Message) error {
-	// create a write context with timeout per message batch
-	wctx, cancel := context.WithTimeout(k.ctx, k.timeout)
-	err := writer.WriteMessages(wctx, messages...)
-	cancel()
-	if err != nil {
-		var we kg.WriteErrors
-		if errors.As(err, &we) {
-			errString := fmt.Sprintf("failed to write message to kafka with error count = %d.\nThe errors are:\n", we.Count())
-			for i, individualErr := range we {
-				errString += fmt.Sprintf("%d   : %v\n", i, individualErr)
-			}
-			return fmt.Errorf("%s", errString)
-		}
-		return fmt.Errorf("failed to write message to kafka: %w", err)
-	}
-	return nil
-}
-
 // getReader creates a kafka reader based on whether GroupID is specified
 func (k *kafka) getReader(dialer *kg.Dialer) *kg.Reader {
 	if k.GroupID != "" {
@@ -281,10 +253,12 @@ func (k *kafka) getReader(dialer *kg.Dialer) *kg.Reader {
 // getWriter creates a kafka writer for the specified dialer
 func (k *kafka) getWriter(dialer *kg.Dialer) *kg.Writer {
 	return kg.NewWriter(kg.WriterConfig{
-		Brokers:  []string{k.BootstrapServer},
-		Topic:    k.Topic,
-		Balancer: &kg.LeastBytes{}, //TODO: look into other balancers
-		Dialer:   dialer,
+		Brokers:      []string{k.BootstrapServer},
+		Topic:        k.Topic,
+		Balancer:     &kg.LeastBytes{}, //TODO: look into other balancers
+		Dialer:       dialer,
+		BatchSize:    k.BatchSize, // number of messages to batch before sending
+		BatchTimeout: k.timeout,   // wait up to timeout before sending incomplete batch
 	})
 }
 
