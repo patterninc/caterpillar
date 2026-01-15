@@ -155,6 +155,7 @@ func (k *kafka) read(output chan<- *record.Record) error {
 	}()
 
 	deadlineExceededRetries := defaultRetryLimit
+	otherErrorRetries := defaultRetryLimit
 	for {
 		select {
 		case <-k.ctx.Done():
@@ -176,7 +177,7 @@ func (k *kafka) read(output chan<- *record.Record) error {
 					return nil
 				}
 				if errors.Is(err, context.DeadlineExceeded) {
-					fmt.Printf("kafka deadline exceeded while reading message: %v\n", err)
+					fmt.Printf("kafka deadline exceeded while reading message for attempt #%d with error: %v\n", defaultRetryLimit-deadlineExceededRetries+1, err)
 					deadlineExceededRetries--
 					if deadlineExceededRetries <= 0 {
 						fmt.Printf("kafka exceeded maximum deadline exceeded retries (%d), stopping reader\n", defaultRetryLimit)
@@ -184,7 +185,11 @@ func (k *kafka) read(output chan<- *record.Record) error {
 					}
 					continue
 				}
-				fmt.Printf("kafka error reading message: %v\n", err)
+				fmt.Printf("kafka error while reading message for attempt #%d with error: %v\n", defaultRetryLimit-otherErrorRetries+1, err)
+				otherErrorRetries--
+				if otherErrorRetries <= 0 {
+					return fmt.Errorf("kafka exceeded maximum other error retries (%d), last error: %w", defaultRetryLimit, err)
+				}
 				continue
 			}
 			deadlineExceededRetries = defaultRetryLimit
@@ -232,22 +237,18 @@ func (k *kafka) dial() (*kg.Dialer, error) {
 
 // getReader creates a kafka reader based on whether GroupID is specified
 func (k *kafka) getReader(dialer *kg.Dialer) *kg.Reader {
-	if k.GroupID != "" {
-		return kg.NewReader(kg.ReaderConfig{
-			Brokers:       []string{k.BootstrapServer},
-			Topic:         k.Topic,
-			Dialer:        dialer,
-			GroupID:       k.GroupID,
-			QueueCapacity: k.BatchSize,
-		})
-	}
-	fmt.Printf("No group_id specified, will consume as standalone reader.\n")
-	return kg.NewReader(kg.ReaderConfig{
+	readerConfig := kg.ReaderConfig{
 		Brokers:       []string{k.BootstrapServer},
 		Topic:         k.Topic,
 		Dialer:        dialer,
 		QueueCapacity: k.BatchSize,
-	})
+	}
+	if k.GroupID != "" {
+		readerConfig.GroupID = k.GroupID
+	} else {
+		fmt.Printf("No group_id specified, will consume as standalone reader.\n")
+	}
+	return kg.NewReader(readerConfig)
 }
 
 // getWriter creates a kafka writer for the specified dialer
