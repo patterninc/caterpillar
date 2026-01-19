@@ -268,7 +268,7 @@ func (k *kafka) handleWriteError(err error) error {
 		for i, individualErr := range we {
 			errStringBuilder.WriteString(fmt.Sprintf("%d   : %v\n", i, individualErr))
 		}
-		return fmt.Errorf("%s", errStringBuilder.String())
+		return errors.New(errStringBuilder.String())
 	}
 	return fmt.Errorf("failed to write message to kafka: %w", err)
 }
