@@ -28,6 +28,7 @@ When reading from a Kafka topic, there are two main modes of operation:
 | `topic` | string | - | Topic to read from or write to (required) |
 | `timeout` | duration string | `15s` | Per-operation timeout (used for dial, read, write, commit by default). Uses Go duration format (e.g. `25s`, `1m`). |
 | `batch_size` | int | `100` | Number of messages to buffer/flush for write and reader |
+| `batch_flush_interval` | duration string | `2s` | Interval to flush write batches; must be less than `timeout` |
 | `group_id` | string | - | Consumer group id for group consumption (optional) |
 | `server_auth_type` | string | `none` | `none` or `tls` — server certificate verification mode |
 | `cert` | string | - | CA certificate PEM/CRT content used when `server_auth_type: tls` (alternatively use `cert_path`) |
@@ -43,7 +44,7 @@ When reading from a Kafka topic, there are two main modes of operation:
 - `server_auth_type: tls` enables server certificate verification using the CA at `cert` or, if absent, the CA file at `cert_path`.
 - `user_auth_type: sasl` uses SASL Plain authentication (requires `username` and `password`).
 - `user_auth_type: scram` uses SCRAM-SHA-512 authentication (requires `username` and `password`).
-- `user_auth_type: mtls` is reserved for mTLS (client cert) but is not implemented in this task yet.
+- `user_auth_type: mtls` is reserved for mTLS (client cert) but is not implemented in this task yet and will return an error if configured.
 
 If you choose SASL/SCRAM and `server_auth_type: tls`, both TLS and the SASL mechanism will be configured on the dialer.
 
@@ -142,9 +143,9 @@ tasks:
  - Standalone reader reads partitions directly and does not perform coordinated offset commits across multiple readers. When `group_id` is empty the task will not commit offsets.
  - Group consumers enable scaling: Kafka will assign partitions across group members so each message is delivered only once to the group. When `group_id` is set, the task will commit offsets after processing messages.
  - The task uses a single configured `timeout` (default 15s) for dial, read, write and commit operations. Dial attempts use the same `timeout` value for each connection attempt.
- - When reading, the code treats `context.DeadlineExceeded` as transient and retries; the implementation will stop the reader after a limited number of consecutive deadline-exceeded occurrences (default retry limit = 5). Increase `timeout` or decrease message polling intervals to avoid hitting this limit in normal operation.
- - Writes are buffered up to `batch_size` and flushed either when the buffer reaches `batch_size` or when the configured `timeout` elapses since the last flush attempt.
- - `mtls` is a placeholder in the code and currently returns an error / not implemented; client certificate authentication is not provided yet.
+- When reading, the code treats `context.DeadlineExceeded` as transient and retries a limited number of times (`retry_limit`, default 5). There are separate retry counters for deadline-exceeded errors and for other errors; both are reset to `retry_limit` on a successful read. If either counter is exhausted the reader will stop.
+- Writes are buffered up to `batch_size` and flushed either when the buffer reaches `batch_size` or when the configured `batch_flush_interval` elapses for incomplete batches.
+- `mtls` is a placeholder in the code and currently returns an error / not implemented; client certificate authentication is not provided yet.
 
 ## Troubleshooting
 
