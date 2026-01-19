@@ -29,7 +29,8 @@ When reading from a Kafka topic, there are two main modes of operation:
 | `timeout` | duration string | `15s` | Per-operation timeout (used for dial, read, write, commit by default). Uses Go duration format (e.g. `25s`, `1m`). |
 | `batch_size` | int | `100` | Number of messages to buffer/flush for write and reader |
 | `batch_flush_interval` | duration string | `2s` | Interval to flush write batches; must be less than `timeout` |
-| `retry_limit` | int | `5` | Number of retries for read operations on transient errors (e.g. deadline exceeded) |
+| `retry_limit` | int | `5` | Number used to initialize retry counters for read behavior (see blocking vs non-blocking below) |
+| `exit_on_empty` | bool | `false` | When true the reader will stop after `retry_limit` consecutive empty polls (`context.DeadlineExceeded`). When false the reader continues polling indefinitely. |
 | `group_id` | string | - | Consumer group id for group consumption (optional) |
 | `server_auth_type` | string | `none` | `none` or `tls` — server certificate verification mode |
 | `cert` | string | - | CA certificate PEM/CRT content used when `server_auth_type: tls` (alternatively use `cert_path`) |
@@ -48,6 +49,24 @@ When reading from a Kafka topic, there are two main modes of operation:
 - `user_auth_type: mtls` is reserved for mTLS (client cert) but is not implemented in this task yet and will return an error if configured.
 
 If you choose SASL/SCRAM and `server_auth_type: tls`, both TLS and the SASL mechanism will be configured on the dialer.
+
+## Blocking vs Non-blocking read modes
+
+The Kafka task exposes `exit_on_empty` to control how the reader responds to polling timeouts (`context.DeadlineExceeded`):
+
+- **Non-blocking (default)**: `exit_on_empty: false` (or omitted). The reader treats `context.DeadlineExceeded` as a normal "no message available" event and continues polling indefinitely. Empty polls do not stop the reader in this mode.
+
+- **Exit-on-empty**: `exit_on_empty: true`. The reader counts consecutive `context.DeadlineExceeded` events in an `empty read` counter (starts at 0). When this counter becomes greater than `retry_limit` the reader stops gracefully. The counter is reset to 0 on any successful read.
+
+### Separate retry counter for other errors
+
+There is a second retry counter for non-deadline errors (network, auth, broker errors). This `other error` counter is initialized to `retry_limit` in `Init()` and is decremented each time such an error occurs. When it reaches zero the reader stops with an error. The `other error` counter is reset to `retry_limit` on successful reads.
+
+Why two counters?
+
+- Keeps normal polling timeouts (no messages available) from exhausting retries intended for real errors.
+- Allows an explicit "exit on quiet" behavior when `exit_on_empty: true` without reducing tolerance for transient broker errors.
+
 
 ## Example Configurations
 
@@ -138,6 +157,18 @@ tasks:
     username: plain-user
     password: plain-pass
     timeout: 25s
+```
+
+### Stop after 10 consecutive empty polls
+```yaml
+tasks:
+  - name: read_until_empty
+    type: kafka
+    bootstrap_server: kafka.local:9092
+    topic: input-topic
+    exit_on_empty: true
+    retry_limit: 10
+    timeout: 5s
 ```
 
 ## Notes and Limitations

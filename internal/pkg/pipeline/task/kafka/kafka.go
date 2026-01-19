@@ -29,27 +29,28 @@ const (
 )
 
 type kafka struct {
-	task.Base                   `yaml:",inline" json:",inline"`
-	BootstrapServer             string            `yaml:"bootstrap_server" json:"bootstrap_server"`                             // "host:port"
-	Topic                       string            `yaml:"topic" json:"topic"`                                                   // topic to read from or write to
-	ServerAuthType              string            `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"`         // "none", "tls"
-	Cert                        string            `yaml:"cert,omitempty" json:"cert,omitempty"`                                 // used for Server TLS authentication
-	CertPath                    string            `yaml:"cert_path,omitempty" json:"cert_path,omitempty"`                       // used for Server TLS authentication
-	UserAuthType                string            `yaml:"user_auth_type" json:"user_auth_type"`                                 // "none", "sasl", "scram", "mtls"
-	UserCert                    string            `yaml:"user_cert,omitempty" json:"user_cert,omitempty"`                       // used for user mTLS authentication
-	UserCertPath                string            `yaml:"user_cert_path,omitempty" json:"user_cert_path,omitempty"`             // used for user mTLS authentication
-	Username                    string            `yaml:"username,omitempty" json:"username,omitempty"`                         // used for user SASL/Scram authentication
-	Password                    string            `yaml:"password,omitempty" json:"password,omitempty"`                         // used for user SASL/Scram authentication
-	Timeout                     duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`                           // connection, read, write, commit timeout
-	BatchFlushInterval          duration.Duration `yaml:"batch_flush_interval,omitempty" json:"batch_flush_interval,omitempty"` // interval to flush incomplete batches
-	GroupID                     string            `yaml:"group_id,omitempty" json:"group_id,omitempty"`                         // the consumer group id (optional)
-	BatchSize                   int               `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`                     // number of messages to read/write in a batch
-	RetryLimit                  *int              `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`                   // number of retries for read errors
-	ctx                         context.Context   // parent context
-	timeout                     time.Duration     // timeout duration calculated from Timeout
-	batchFlushInterval          time.Duration     // batch flush interval calculated from BatchFlushInterval
-	deadlineExceededReadRetries int               // number of retries left for deadline exceeded errors
-	otherErrorReadRetries       int               // number of retries left for other errors
+	task.Base          `yaml:",inline" json:",inline"`
+	BootstrapServer    string            `yaml:"bootstrap_server" json:"bootstrap_server"`                             // "host:port"
+	Topic              string            `yaml:"topic" json:"topic"`                                                   // topic to read from or write to
+	ServerAuthType     string            `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"`         // "none", "tls"
+	Cert               string            `yaml:"cert,omitempty" json:"cert,omitempty"`                                 // used for Server TLS authentication
+	CertPath           string            `yaml:"cert_path,omitempty" json:"cert_path,omitempty"`                       // used for Server TLS authentication
+	UserAuthType       string            `yaml:"user_auth_type" json:"user_auth_type"`                                 // "none", "sasl", "scram", "mtls"
+	UserCert           string            `yaml:"user_cert,omitempty" json:"user_cert,omitempty"`                       // used for user mTLS authentication
+	UserCertPath       string            `yaml:"user_cert_path,omitempty" json:"user_cert_path,omitempty"`             // used for user mTLS authentication
+	Username           string            `yaml:"username,omitempty" json:"username,omitempty"`                         // used for user SASL/Scram authentication
+	Password           string            `yaml:"password,omitempty" json:"password,omitempty"`                         // used for user SASL/Scram authentication
+	Timeout            duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`                           // connection, read, write, commit timeout
+	BatchFlushInterval duration.Duration `yaml:"batch_flush_interval,omitempty" json:"batch_flush_interval,omitempty"` // interval to flush incomplete batches
+	GroupID            string            `yaml:"group_id,omitempty" json:"group_id,omitempty"`                         // the consumer group id (optional)
+	BatchSize          int               `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`                     // number of messages to read/write in a batch
+	RetryLimit         *int              `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`                   // number of retries for read errors
+	ExitOnEmpty        bool              `yaml:"exit_on_empty,omitempty" json:"exit_on_empty,omitempty"`               // exit when no more messages are available
+	ctx                context.Context   // parent context
+	timeout            time.Duration     // timeout duration calculated from Timeout
+	batchFlushInterval time.Duration     // batch flush interval calculated from BatchFlushInterval
+	readErrorRetries   int               // number of retries left for read errors
+	emptyReadRetries   int               // a counter to track empty reads retries
 }
 
 func New() (task.Task, error) {
@@ -85,11 +86,8 @@ func (k *kafka) Init() error {
 	}
 	k.timeout = time.Duration(k.Timeout)
 	k.batchFlushInterval = time.Duration(k.BatchFlushInterval)
-	k.deadlineExceededReadRetries = *k.RetryLimit
-	k.otherErrorReadRetries = *k.RetryLimit
-	if k.batchFlushInterval >= k.timeout {
-		return fmt.Errorf("batch_flush_interval (%s) must be less than timeout (%s)", k.batchFlushInterval, k.timeout)
-	}
+	k.readErrorRetries = *k.RetryLimit
+	k.emptyReadRetries = 0
 
 	// try connecting to kafka broker to validate config
 	dialer, err := k.dial()
@@ -123,6 +121,10 @@ func (k *kafka) Run(input <-chan *record.Record, output chan<- *record.Record) e
 
 // write writes records from the input channel to the Kafka topic
 func (k *kafka) write(input <-chan *record.Record) error {
+	if k.batchFlushInterval >= k.timeout {
+		return fmt.Errorf("batch_flush_interval (%s) must be less than timeout (%s)", k.batchFlushInterval, k.timeout)
+	}
+
 	dialer, err := k.dial()
 	if err != nil {
 		return fmt.Errorf("failed to create kafka dialer: %w", err)
@@ -183,8 +185,8 @@ func (k *kafka) read(output chan<- *record.Record) error {
 				}
 				continue
 			}
-			k.deadlineExceededReadRetries = *k.RetryLimit
-			k.otherErrorReadRetries = *k.RetryLimit
+			k.readErrorRetries = *k.RetryLimit
+			k.emptyReadRetries = 0
 
 			// process the message
 			k.SendData(k.ctx, m.Value, output)
@@ -284,20 +286,20 @@ func (k *kafka) handleReadError(err error) (returnErr error, shouldRetry bool) {
 		return nil, false
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		// not an error, just context deadline exceeded, but need to limit retries
-		fmt.Printf("kafka deadline exceeded while reading message for attempt #%d with error: %v\n", *k.RetryLimit-k.deadlineExceededReadRetries+1, err)
-		k.deadlineExceededReadRetries--
-		if k.deadlineExceededReadRetries <= 0 {
-			fmt.Printf("kafka exceeded maximum deadline exceeded retries (%d), stopping reader\n", *k.RetryLimit)
+		// not an error, just context deadline exceeded
+		k.emptyReadRetries++
+		fmt.Printf("kafka no message returned while reading message for attempt #%d with error: %v\n", k.emptyReadRetries, err)
+		if k.ExitOnEmpty && k.emptyReadRetries > *k.RetryLimit {
+			fmt.Printf("kafka no message returned, reached retry limit (%d), stopping reader\n", *k.RetryLimit)
 			return nil, false
 		}
 		return nil, true
 	}
 	// other errors - log and retry up to retry limit
-	fmt.Printf("kafka error while reading message for attempt #%d with error: %v\n", *k.RetryLimit-k.otherErrorReadRetries+1, err)
-	k.otherErrorReadRetries--
-	if k.otherErrorReadRetries <= 0 {
-		return fmt.Errorf("kafka exceeded maximum other error retries (%d), last error: %w", *k.RetryLimit, err), false
+	fmt.Printf("kafka error while reading message for attempt #%d with error: %v\n", *k.RetryLimit-k.readErrorRetries+1, err)
+	k.readErrorRetries--
+	if k.readErrorRetries <= 0 {
+		return fmt.Errorf("kafka reached read error retry limit (%d), stopping reader\n", *k.RetryLimit), false
 	}
 	return nil, true
 }
