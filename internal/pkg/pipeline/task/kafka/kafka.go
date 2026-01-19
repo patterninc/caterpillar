@@ -272,7 +272,7 @@ func (k *kafka) handleWriteError(err error) error {
 }
 
 // handleReadError processes errors returned from reader.FetchMessage
-func (k *kafka) handleReadError(err error) (error, bool) {
+func (k *kafka) handleReadError(err error) (returnErr error, shouldRetry bool) {
 	if errors.Is(err, io.EOF) {
 		// this is not reliable for kafka end of topic detection
 		fmt.Printf("kafka reached end of topic: %v\n", k.Topic)

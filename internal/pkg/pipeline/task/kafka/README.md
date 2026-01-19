@@ -29,6 +29,7 @@ When reading from a Kafka topic, there are two main modes of operation:
 | `timeout` | duration string | `15s` | Per-operation timeout (used for dial, read, write, commit by default). Uses Go duration format (e.g. `25s`, `1m`). |
 | `batch_size` | int | `100` | Number of messages to buffer/flush for write and reader |
 | `batch_flush_interval` | duration string | `2s` | Interval to flush write batches; must be less than `timeout` |
+| `retry_limit` | int | `5` | Number of retries for read operations on transient errors (e.g. deadline exceeded) |
 | `group_id` | string | - | Consumer group id for group consumption (optional) |
 | `server_auth_type` | string | `none` | `none` or `tls` — server certificate verification mode |
 | `cert` | string | - | CA certificate PEM/CRT content used when `server_auth_type: tls` (alternatively use `cert_path`) |
