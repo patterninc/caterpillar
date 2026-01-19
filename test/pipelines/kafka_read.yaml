@@ -9,7 +9,6 @@ tasks:
     server_auth_type: tls
     exit_on_empty: false # this is the default value
     timeout: 2s
-    batch_flush_interval: 500ms
     cert: |
       {{ indent 6 (secret "/kafka/ca-cert") }}
 
