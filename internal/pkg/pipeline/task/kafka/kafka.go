@@ -290,7 +290,7 @@ func (k *kafka) handleReadError(err error) (returnErr error, shouldRetry bool) {
 		k.emptyReadRetries++
 		fmt.Printf("kafka no message returned while reading message for attempt #%d with error: %v\n", k.emptyReadRetries, err)
 		if k.ExitOnEmpty && k.emptyReadRetries > *k.RetryLimit {
-			fmt.Printf("kafka no message returned, reached retry limit (%d), stopping reader\n", *k.RetryLimit)
+			fmt.Printf("kafka no message returned, reached retry limit (%d), stopping reader", *k.RetryLimit)
 			return nil, false
 		}
 		return nil, true
@@ -299,7 +299,7 @@ func (k *kafka) handleReadError(err error) (returnErr error, shouldRetry bool) {
 	fmt.Printf("kafka error while reading message for attempt #%d with error: %v\n", *k.RetryLimit-k.readErrorRetries+1, err)
 	k.readErrorRetries--
 	if k.readErrorRetries <= 0 {
-		return fmt.Errorf("kafka reached read error retry limit (%d), stopping reader\n", *k.RetryLimit), false
+		return fmt.Errorf("kafka reached read error retry limit (%d), stopping reader", *k.RetryLimit), false
 	}
 	return nil, true
 }

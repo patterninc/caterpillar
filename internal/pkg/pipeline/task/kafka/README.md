@@ -5,8 +5,8 @@ The `kafka` task reads from or writes to Apache Kafka topics.
 ## Behavior
 
 The Kafka task operates in two modes depending on whether an input channel is provided:
- - **Write mode** (with input channel): receives records from the input channel and sends them as messages to the Kafka topic. Writes are buffered and flushed in batches (see `batch_size` and `batch_flush_interval`). The task validates `batch_flush_interval < timeout` at runtime and will return an error in write mode if it's violated.
- - **Read mode** (no input channel): polls messages from the Kafka topic and sends them to the output channel. The reader's polling is controlled by the configured `timeout` and `exit_on_empty` behavior (see below).
+- **Write mode** (with input channel): receives records from the input channel and sends them as messages to the Kafka topic. Writes are buffered and flushed in batches (see `batch_size` and `batch_flush_interval`). The task validates `batch_flush_interval < timeout` at runtime and will return an error in write mode if it's violated.
+- **Read mode** (no input channel): polls messages from the Kafka topic and sends them to the output channel. The reader's polling is controlled by the configured `timeout` and `exit_on_empty` behavior (see below).
 
 The task automatically determines its mode based on the presence of input/output channels.
 
@@ -17,11 +17,11 @@ When reading from a Kafka topic, there are two main modes of operation:
 - **Standalone reader** (no consumer group): omit `group_id`; the reader pulls messages directly from partitions. Offsets are not coordinated across instances and are not committed.
 - **Group consumer** (recommended for production): set `group_id`. Multiple instances with the same `group_id` split partitions between them and coordinate offsets. When `group_id` is set the task will commit offsets after processing messages.
 
-#### ***Blocking vs Non-blocking read modes***
+#### ***Read termination***
 
 The Kafka task exposes `exit_on_empty` to control how the reader responds to polling timeouts (`context.DeadlineExceeded`):
 
-- **Non-blocking (default)**: `exit_on_empty: false` (or omitted). The reader treats `context.DeadlineExceeded` as a normal "no message available" event and continues polling indefinitely. Empty polls do not stop the reader in this mode.
+- **Indefinite mode (default)**: `exit_on_empty: false` (or omitted). The reader treats `context.DeadlineExceeded` as a normal "no message available" event and continues polling indefinitely. Empty polls do not stop the reader in this mode.
 
 - **Exit-on-empty**: `exit_on_empty: true`. The reader counts consecutive `context.DeadlineExceeded` events in an `empty read` counter (starts at 0). When this counter becomes greater than `retry_limit` the reader stops gracefully. The counter is reset to 0 on any successful read.
 
@@ -43,7 +43,7 @@ Why two counters?
 | `timeout` | duration string | `15s` | Per-operation timeout (used for dial, read, write, commit by default). Uses Go duration format (e.g. `25s`, `1m`). |
 | `batch_size` | int | `100` | Number of messages to buffer/flush for write and reader |
 | `batch_flush_interval` | duration string | `2s` | Interval to flush incomplete write batches; must be less than `timeout` |
-| `retry_limit` | int | `5` | Number used to initialize retry counters for read behavior (see blocking vs non-blocking below) |
+| `retry_limit` | int | `5` | Number used to initialize retry counters for read behavior |
 | `exit_on_empty` | bool | `false` | When true the reader will stop after `retry_limit` consecutive empty polls (`context.DeadlineExceeded`). When false the reader continues polling indefinitely. |
 | `group_id` | string | - | Consumer group id for group consumption (optional) |
 | `server_auth_type` | string | `none` | `none` or `tls` — server certificate verification mode |
@@ -155,7 +155,7 @@ tasks:
     timeout: 25s
 ```
 
-### Stop after 10 consecutive empty polls
+### Stop after 10 consecutive empty retry polls
 ```yaml
 tasks:
   - name: read_until_empty
