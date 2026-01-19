@@ -8,6 +8,8 @@ tasks:
     username: test-caterpillar
     password: {{ secret "/kafka/test-caterpillar/secret" }}
     server_auth_type: tls
+    exit_on_empty: true
+    retry_limit: 1
     cert: |
       {{ indent 6 (secret "/kafka/ca-cert") }}
 
