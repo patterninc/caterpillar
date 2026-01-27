@@ -22,6 +22,7 @@ import (
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/kafka"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/replace"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/sample"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/sns"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/split"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/sqs"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/xpath"
@@ -47,6 +48,7 @@ var (
 		`kafka`:               kafka.New,
 		`replace`:             replace.New,
 		`sample`:              sample.New,
+		`sns`:                 sns.New,
 		`split`:               split.New,
 		`sqs`:                 sqs.New,
 		`xpath`:               xpath.New,
