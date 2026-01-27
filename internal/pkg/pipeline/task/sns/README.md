@@ -6,6 +6,9 @@ The `sns` task publishes messages to an AWS SNS topic.
 
 The SNS task acts as a sink, receiving records from the input channel and publishing them to the configured SNS topic. It does not output any records downstream.
 
+> **Note**: If you need to trigger subsequent tasks after SNS publication, use the DAG functionality to manage dependencies.
+
+
 -   **Message Content**: The `Data` field of the input record is sent as the `Message` body.
 
 
