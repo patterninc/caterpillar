@@ -21,7 +21,7 @@ The SNS task acts as a sink, receiving records from the input channel and publis
 | `attributes` | list | - | Optional list of message attributes (name, type, value) |
 | `message_group_id` | string | - | Required for FIFO topics. If not provided for a FIFO topic, a UUID is generated. |
 | `message_deduplication_id` | string | - | Optional for FIFO topics. |
-| `fail_on_error` | bool | `false` | If true, the task will stop and return an error if publishing fails |
+
 
 ## Example Configurations
 

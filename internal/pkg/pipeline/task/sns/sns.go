@@ -63,7 +63,7 @@ func (s *snsTask) Init() error {
 
 func (s *snsTask) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 	if input == nil {
-		return nil
+		return task.ErrNilInput
 	}
 
 	isFifo := strings.HasSuffix(s.TopicArn, ".fifo")
@@ -82,18 +82,7 @@ func (s *snsTask) Run(input <-chan *record.Record, output chan<- *record.Record)
 		}
 
 		if isFifo {
-			groupID := s.MessageGroupId
-			if groupID == "" {
-				// Generate a random UUID if no group ID is provided for FIFO
-				groupID = uuid.New().String()
-			}
-			publishInput.MessageGroupId = aws.String(groupID)
-
-			if s.MessageDeduplicationId != "" {
-				publishInput.MessageDeduplicationId = aws.String(s.MessageDeduplicationId)
-			} else {
-				publishInput.MessageDeduplicationId = aws.String(uuid.New().String())
-			}
+			s.setFifoParams(publishInput)
 		}
 
 		if len(s.Attributes) > 0 {
@@ -108,12 +97,24 @@ func (s *snsTask) Run(input <-chan *record.Record, output chan<- *record.Record)
 
 		_, err := s.client.Publish(r.Context, publishInput)
 		if err != nil {
-			fmt.Printf("failed to publish to SNS topic %s: %v\n", s.TopicArn, err)
-			if s.FailOnError {
-				return err
-			}
+			return fmt.Errorf("failed to publish to SNS topic %s: %w", s.TopicArn, err)
 		}
 	}
 
 	return nil
+}
+
+func (s *snsTask) setFifoParams(publishInput *sns.PublishInput) {
+	groupID := s.MessageGroupId
+	if groupID == "" {
+		// Generate a random UUID if no group ID is provided for FIFO
+		groupID = uuid.New().String()
+	}
+	publishInput.MessageGroupId = aws.String(groupID)
+
+	if s.MessageDeduplicationId != "" {
+		publishInput.MessageDeduplicationId = aws.String(s.MessageDeduplicationId)
+	} else {
+		publishInput.MessageDeduplicationId = aws.String(uuid.New().String())
+	}
 }
