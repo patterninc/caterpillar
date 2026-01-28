@@ -242,6 +242,7 @@ Caterpillar supports the following tasks, each of which can serve different role
 - **`split`** - [Split data by specified delimiters](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/split/README.md)
 - **`sqs`** - [Read from or write to AWS SQS queues (acts as source or sink)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/sqs/README.md)
 - **`xpath`** - [Extract data from XML/HTML using XPath expressions](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/xpath/README.md)
+- **`sns`** - [Send data to AWS SNS](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/sns/README.md)
 
 
 
