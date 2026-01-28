@@ -1,0 +1,11 @@
+tasks:
+  - name: pull_names_from_s3
+    type: file
+    path: test/pipelines/compressed_birds.zip
+  - name: compress_file
+    type: compress
+    format: zip
+    action: decompress
+  - name: store_compressed_file
+    type: file  
+    path: uncompressed_birds.txt
