@@ -1,0 +1,17 @@
+
+tasks:
+  - name: read_names
+    type: file
+    path: test/pipelines/names.txt
+
+  - name: split_names
+    type: split
+
+  - name: send_to_sns
+    type: sns
+    topic_arn: "arn:aws:sns:us-west-2:1234567890:test_caterpillar"
+    subject: "Test JSON Message"
+    attributes:
+      - name: "Environment"
+        type: "String"
+        value: "Sandbox"
