@@ -35,6 +35,7 @@ type snsTask struct {
 	MessageDeduplicationId string `yaml:"message_deduplication_id,omitempty" json:"message_deduplication_id,omitempty"`
 
 	client *sns.Client
+	isFifo bool
 }
 
 func New() (task.Task, error) {
@@ -50,6 +51,8 @@ func (s *snsTask) Init() error {
 	if region == "" {
 		region = defaultRegion
 	}
+
+	s.isFifo = strings.HasSuffix(s.TopicArn, ".fifo")
 
 	// Load default config
 	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region))
@@ -70,7 +73,6 @@ func (s *snsTask) Run(input <-chan *record.Record, output chan<- *record.Record)
 		return task.ErrPresentInputOutput
 	}
 
-	isFifo := strings.HasSuffix(s.TopicArn, ".fifo")
 	for {
 		r, ok := s.GetRecord(input)
 		if !ok {
@@ -85,7 +87,7 @@ func (s *snsTask) Run(input <-chan *record.Record, output chan<- *record.Record)
 			publishInput.Subject = aws.String(s.Subject)
 		}
 
-		if isFifo {
+		if s.isFifo {
 			s.setFifoParams(publishInput)
 		}
 
