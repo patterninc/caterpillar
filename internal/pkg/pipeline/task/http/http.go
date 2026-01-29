@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/patterninc/caterpillar/internal/pkg/config"
@@ -174,10 +175,8 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 			// Store headers in the context for downstream tasks to access
 			// Replace hyphens with underscores in header names to match placeholder regex
 			for headerName, headerValues := range result.Headers {
-				if len(headerValues) > 0 {
-					contextKey := fmt.Sprintf(headerContextPrefix, headerName)
-					rc.SetContextValue(contextKey, headerValues[0])
-				}
+				contextKey := fmt.Sprintf(headerContextPrefix, headerName)
+				rc.SetContextValue(contextKey, strings.Join(headerValues, "; "))
 			}
 
 			h.SendData(rc.Context, []byte(result.Data), output)
