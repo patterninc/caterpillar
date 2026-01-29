@@ -20,7 +20,7 @@ In both modes, the task sends HTTP response data to its output channel and suppo
 
 The HTTP task outputs the response body as-is (maintains backward compatibility). Response headers are automatically stored in the record's context with the prefix `http-header-`, making them accessible to downstream tasks via context variables.
 
-For example, if the HTTP response includes a `Content-Type` header, it will be available as `{{ context "http-header-Content-Type" }}` in subsequent tasks.
+For example, if the HTTP response includes a `Content-Type` header, it will be available as `{{ context "http-header-Content-Type" }}` in subsequent tasks. Note that HTTP header names are case-sensitive when used as context keys. Go's HTTP library canonicalizes header names (for example, `content-type` becomes `Content-Type`), so you must use the canonical form when accessing headers via context (for example, `http-header-Content-Type`, not `http-header-content-type`).
 
 ## Configuration Fields
 
