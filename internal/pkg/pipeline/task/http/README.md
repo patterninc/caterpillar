@@ -16,6 +16,12 @@ The HTTP task operates in two modes depending on whether an input channel is pro
 
 In both modes, the task sends HTTP response data to its output channel and supports automatic retries, OAuth authentication, and proxy configuration.
 
+### Response Format and Headers
+
+The HTTP task outputs the response body as-is (maintains backward compatibility). Response headers are automatically stored in the record's context with the prefix `http-header-`, making them accessible to downstream tasks via context variables.
+
+For example, if the HTTP response includes a `Content-Type` header, it will be available as `{{ context "http-header-Content-Type" }}` in subsequent tasks.
+
 ## Configuration Fields
 
 | Field | Type | Default | Description |
@@ -33,6 +39,7 @@ In both modes, the task sends HTTP response data to its output channel and suppo
 | `oauth` | object | - | OAuth configuration (see OAuth section) |
 | `proxy` | object | - | Proxy configuration |
 | `next_page` | string/object | - | JQ expression to extract next page URL (string) or pagination config (object with`endpoint`, `method`, `body`, `headers`) |
+| `context` | map[string]string | - | JQ expressions to extract values from the response and store in record context |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
 ## OAuth Configuration
@@ -94,6 +101,27 @@ tasks:
     endpoint: https://api.example.com/users/{{ context "user_id" }}
     headers:
       Authorization: Bearer {{ context "auth_token" }}
+```
+
+### Setting context values from response and accessing headers:
+```yaml
+tasks:
+  - name: fetch_user
+    type: http
+    method: GET
+    endpoint: https://api.example.com/user/123
+    context:
+      user_name: ".data | fromjson | .name"
+      user_email: ".data | fromjson | .email"
+  
+  - name: use_context
+    type: jq
+    path: |
+      {
+        "greeting": "Hello {{ context "user_name" }}",
+        "email": "{{ context "user_email" }}",
+        "content_type": "{{ context "http-header-Content-Type" }}"
+      }
 ```
 
 ## Sample Pipelines

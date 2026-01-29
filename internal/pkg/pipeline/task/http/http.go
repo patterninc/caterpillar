@@ -22,6 +22,7 @@ const (
 	defaultExpectedStatuses = `200`
 	defaultMethod           = http.MethodGet
 	defaultTimeout          = duration.Duration(90 * time.Second)
+	headerContextPrefix     = "http-header-%s"
 )
 
 var (
@@ -170,6 +171,15 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 		}
 
 		if output != nil {
+			// Store headers in the context for downstream tasks to access
+			// Replace hyphens with underscores in header names to match placeholder regex
+			for headerName, headerValues := range result.Headers {
+				if len(headerValues) > 0 {
+					contextKey := fmt.Sprintf(headerContextPrefix, headerName)
+					rc.SetContextValue(contextKey, headerValues[0])
+				}
+			}
+
 			h.SendData(rc.Context, []byte(result.Data), output)
 		}
 
@@ -319,7 +329,8 @@ func (h *httpCore) call(endpoint string) (*result, error) {
 
 		if h.ExpectedStatuses != nil {
 			if code := response.StatusCode; !h.ExpectedStatuses.Has(code) {
-				lastErr = fmt.Errorf("unexpected http response code [%v %s]: %s", code, http.StatusText(code), string(body))
+				lastErr = fmt.Errorf("unexpected http response code [%v %s] for url %s", code, http.StatusText(code), endpoint)
+				fmt.Println(lastErr)
 				if attempt < h.MaxRetries {
 					h.handleBackoff(attempt, response)
 					continue
