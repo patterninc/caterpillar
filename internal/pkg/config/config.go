@@ -14,7 +14,7 @@ import (
 
 const (
 	templateName     = `render`
-	placeholderRegex = "([a-zA-Z0-9_]+?)"
+	placeholderRegex = "([a-zA-Z0-9_-]+?)"
 )
 
 // Generic String type that can evaluate both macro and context templates

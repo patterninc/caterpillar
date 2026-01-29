@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/patterninc/caterpillar/internal/pkg/config"
@@ -22,6 +23,7 @@ const (
 	defaultExpectedStatuses = `200`
 	defaultMethod           = http.MethodGet
 	defaultTimeout          = duration.Duration(90 * time.Second)
+	headerContextPrefix     = "http-header-%s"
 )
 
 var (
@@ -170,6 +172,13 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 		}
 
 		if output != nil {
+			// Store headers in the context for downstream tasks to access
+			// Header names are preserved as-is and stored with the http-header- prefix
+			for headerName, headerValues := range result.Headers {
+				contextKey := fmt.Sprintf(headerContextPrefix, headerName)
+				rc.SetContextValue(contextKey, strings.Join(headerValues, "; "))
+			}
+
 			h.SendData(rc.Context, []byte(result.Data), output)
 		}
 

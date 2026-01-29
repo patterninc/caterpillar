@@ -50,7 +50,8 @@ func (q *Query) Execute(document []byte, inputs ...any) (any, error) {
 	var data any
 
 	if err := json.Unmarshal(document, &data); err != nil {
-		return nil, err
+		// If the document is not valid JSON, treat it as a raw string
+		data = string(document)
 	}
 
 	values := make([]any, 0, len(inputs)+1)
