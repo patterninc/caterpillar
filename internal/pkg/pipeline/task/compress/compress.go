@@ -2,7 +2,6 @@ package compress
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 
@@ -54,7 +53,6 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 		return task.ErrNilInput
 	}
 
-	ctx := context.Background()
 
 	for {
 		r, ok := c.GetRecord(input)
@@ -85,7 +83,7 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 		}
 
 		if output != nil {
-			c.SendData(ctx, transformedData, output)
+			c.SendData(r.Context, transformedData, output)
 		}
 	}
 
