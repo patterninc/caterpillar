@@ -1,7 +1,6 @@
 package compress
 
 import (
-	"compress/flate"
 	"compress/gzip"
 	"io"
 
@@ -28,14 +27,6 @@ var (
 			},
 			NewWriter: func(w io.Writer) io.WriteCloser {
 				return snappy.NewBufferedWriter(w)
-			}},
-		`zip`: {
-			NewReader: func(r io.Reader) (io.ReadCloser, error) {
-				return flate.NewReader(r), nil
-			},
-			NewWriter: func(w io.Writer) io.WriteCloser {
-				writer, _ := flate.NewWriter(w, flate.DefaultCompression)
-				return writer
 			}},
 	}
 )
