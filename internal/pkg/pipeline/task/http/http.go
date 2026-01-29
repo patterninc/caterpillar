@@ -329,8 +329,7 @@ func (h *httpCore) call(endpoint string) (*result, error) {
 
 		if h.ExpectedStatuses != nil {
 			if code := response.StatusCode; !h.ExpectedStatuses.Has(code) {
-				lastErr = fmt.Errorf("unexpected http response code [%v %s] for url %s", code, http.StatusText(code), endpoint)
-				fmt.Println(lastErr)
+				lastErr = fmt.Errorf("unexpected http response code [%v %s]: %s", code, http.StatusText(code), string(body))
 				if attempt < h.MaxRetries {
 					h.handleBackoff(attempt, response)
 					continue
