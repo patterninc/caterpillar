@@ -173,7 +173,7 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 
 		if output != nil {
 			// Store headers in the context for downstream tasks to access
-			// Replace hyphens with underscores in header names to match placeholder regex
+			// Header names are preserved as-is and stored with the http-header- prefix
 			for headerName, headerValues := range result.Headers {
 				contextKey := fmt.Sprintf(headerContextPrefix, headerName)
 				rc.SetContextValue(contextKey, strings.Join(headerValues, "; "))
