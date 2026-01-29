@@ -1,10 +1,10 @@
 tasks:
-  - name: pull_names_from_s3
+  - name: birds_file
     type: file
     path: test/pipelines/birds.txt
-  - name: compress_file
-    type: compress
-    format: zip
-  - name: store_compressed_file
+  - name: pack_file
+    type: archive
+    file_name: birds.txt
+  - name: store_packed_file
     type: file  
-    path: compressed_birds.zip
+    path: packed_birds.zip
