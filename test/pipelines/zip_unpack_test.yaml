@@ -6,5 +6,5 @@ tasks:
     type: archive
     action: unpack
   - name: store_unpacked_file
-    type: file  
+    type: file
     path: unpacked_birds.txt
