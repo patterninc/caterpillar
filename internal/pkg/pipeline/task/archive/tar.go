@@ -44,22 +44,25 @@ func (t *tarArchive) Write(b []byte) {
 		log.Fatal("file name is required to create tar archive")
 	}
 
-	tw := tar.NewWriter(bytes.NewBuffer(b))
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
 
-	tw.WriteHeader(
-		&tar.Header{Name: t.FileName,
-			Mode: 0777,
-			Size: int64(len(b))})
-
-	_, err := tw.Write(b)
-	if err != nil {
+	header := &tar.Header{
+		Name: t.FileName,
+		Mode: 0600,
+		Size: int64(len(b)),
+	}
+	if err := tw.WriteHeader(header); err != nil {
 		log.Fatal(err)
 	}
 
-	err = tw.Close()
-	if err != nil {
+	if _, err := tw.Write(b); err != nil {
 		log.Fatal(err)
 	}
 
-	t.SendData(t.Record.Context, b, t.OutputChan)
+	if err := tw.Close(); err != nil {
+		log.Fatal(err)
+	}
+
+	t.SendData(t.Record.Context, buf.Bytes(), t.OutputChan)
 }
