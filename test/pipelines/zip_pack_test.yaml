@@ -4,7 +4,6 @@ tasks:
     path: test/pipelines/birds.txt
   - name: pack_file
     type: archive
-    file_name: birds.txt
   - name: store_packed_file
     type: file
     path: packed_birds.zip

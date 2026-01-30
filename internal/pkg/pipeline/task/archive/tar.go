@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"io"
 	"log"
+	"strings"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
@@ -12,60 +13,96 @@ import (
 
 type tarArchive struct {
 	*task.Base
-	FileName   string
-	Record     *record.Record
 	OutputChan chan<- *record.Record
+	InputChan  <-chan *record.Record
 }
 
-func (t *tarArchive) Read(b []byte) {
-	r := tar.NewReader(bytes.NewReader(b))
+func (t *tarArchive) Read() {
 
 	for {
-		header, err := r.Next()
-		if err == io.EOF {
+		rc, ok := t.GetRecord(t.InputChan)
+		if !ok {
 			break
 		}
-		if err != nil {
-			log.Fatal(err)
+
+		if len(rc.Data) == 0 {
+			continue
 		}
 
-		// check the file type is regular file
-		if header.Typeflag == tar.TypeReg {
-			buf := make([]byte, header.Size)
-			if _, err := io.ReadFull(r, buf); err != nil && err != io.EOF {
+		b := rc.Data
+
+		r := tar.NewReader(bytes.NewReader(b))
+
+		for {
+			header, err := r.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
 				log.Fatal(err)
 			}
-			t.SendData(t.Record.Context, buf, t.OutputChan)
-		}
 
+			// check the file type is regular file
+			if header.Typeflag == tar.TypeReg {
+				buf := make([]byte, header.Size)
+				if _, err := io.ReadFull(r, buf); err != nil && err != io.EOF {
+					log.Fatal(err)
+				}
+				rc.SetContextValue("CATERPILLER_FILE_PATH_READ", header.Name)
+				t.SendData(rc.Context, buf, t.OutputChan)
+			}
+
+		}
 	}
 }
 
-func (t *tarArchive) Write(b []byte) {
-
-	if t.FileName == "" {
-		log.Fatal("file name is required to create tar archive")
-	}
+func (t *tarArchive) Write() {
 
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
+	var rc record.Record
 
-	header := &tar.Header{
-		Name: t.FileName,
-		Mode: 0600,
-		Size: int64(len(b)),
-	}
-	if err := tw.WriteHeader(header); err != nil {
-		log.Fatal(err)
-	}
+	for {
+		rec, ok := t.GetRecord(t.InputChan)
+		if !ok {
+			break
+		}
+		b := rec.Data
 
-	if _, err := tw.Write(b); err != nil {
-		log.Fatal(err)
+		if len(b) == 0 {
+			continue
+		}
+
+		filePath, found := rec.GetContextValue("CATERPILLER_FILE_PATH")
+		if !found {
+			log.Fatal("filepath not set in context")
+		}
+
+		if filePath == "" {
+			log.Fatal("file_name is required when filepath is not in context")
+		}
+
+		filePath = strings.ReplaceAll(filePath, "\\", "/")
+
+		header := &tar.Header{
+			Name: filePath,
+			Mode: 0600,
+			Size: int64(len(b)),
+		}
+		if err := tw.WriteHeader(header); err != nil {
+			log.Fatal(err)
+		}
+
+		if _, err := tw.Write(b); err != nil {
+			log.Fatal(err)
+		}
+
+		rc.Context = rec.Context
 	}
 
 	if err := tw.Close(); err != nil {
 		log.Fatal(err)
 	}
 
-	t.SendData(t.Record.Context, buf.Bytes(), t.OutputChan)
+	t.SendData(rc.Context, buf.Bytes(), t.OutputChan)
 }

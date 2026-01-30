@@ -20,15 +20,14 @@ const (
 )
 
 type archiver interface {
-	Read(b []byte)
-	Write(b []byte)
+	Read()
+	Write()
 }
 
 type core struct {
 	task.Base `yaml:",inline" json:",inline"`
 	Format    string     `yaml:"format,omitempty" json:"format,omitempty"`
 	Action    actionType `yaml:"action,omitempty" json:"action,omitempty"`
-	FileName  string     `yaml:"file_name,omitempty" json:"file_name,omitempty"`
 }
 
 func New() (task.Task, error) {
@@ -52,12 +51,6 @@ func (c *core) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return fmt.Errorf("invalid action: %s (must be 'pack' or 'unpack')", obj.Action)
 	}
 
-	if obj.Action == actionPack {
-		if obj.FileName == "" {
-			return fmt.Errorf("file_name must be specified when action is 'pack'")
-		}
-	}
-
 	*c = core(obj)
 
 	return nil
@@ -69,43 +62,31 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 		return task.ErrNilInput
 	}
 
-	for {
-		r, ok := c.GetRecord(input)
-		if !ok {
-			break
-		}
+	var archiv archiver
 
-		if len(r.Data) == 0 {
-			continue
+	switch c.Format {
+	case "tar":
+		archiv = &tarArchive{
+			Base:       &c.Base,
+			OutputChan: output,
+			InputChan:  input,
 		}
-
-		var archiv archiver
-
-		switch c.Format {
-		case "tar":
-			archiv = &tarArchive{
-				Base:       &c.Base,
-				FileName:   c.FileName,
-				Record:     r,
-				OutputChan: output,
-			}
-		case "zip":
-			archiv = &zipArchive{
-				Base:       &c.Base,
-				FileName:   c.FileName,
-				Record:     r,
-				OutputChan: output,
-			}
-		default:
-			return fmt.Errorf("unsupported format: %s", c.Format)
+	case "zip":
+		archiv = &zipArchive{
+			Base:       &c.Base,
+			OutputChan: output,
+			InputChan:  input,
 		}
-
-		switch c.Action {
-		case actionPack:
-			archiv.Write(r.Data)
-		case actionUnpack:
-			archiv.Read(r.Data)
-		}
+	default:
+		return fmt.Errorf("unsupported format: %s", c.Format)
 	}
+
+	switch c.Action {
+	case actionPack:
+		archiv.Write()
+	case actionUnpack:
+		archiv.Read()
+	}
+
 	return nil
 }

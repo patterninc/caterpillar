@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/url"
 	"strings"
 
@@ -134,6 +135,7 @@ func (f *file) readFile(output chan<- *record.Record) error {
 
 		// Create a default record with context
 		rc := &record.Record{Context: ctx}
+		rc.SetContextValue("CATERPILLER_FILE_PATH", path)
 
 		// let's write content to output channel
 		f.SendData(rc.Context, content, output)
@@ -168,11 +170,25 @@ func (f *file) writeFile(input <-chan *record.Record) error {
 			pathScheme = fileScheme
 		}
 
+		var fs file
+
+		fs = *f
+		filePath, found := rc.GetContextValue("CATERPILLER_FILE_PATH_READ")
+		if found {
+			if filePath == "" {
+				log.Fatal("file_name is required when filepath is not in context")
+			}
+
+			filePath = strings.ReplaceAll(filePath, "\\", "/")
+
+			fs.Path = f.Path + config.String(filePath)
+		}
+
 		writerFunction, found := writers[pathScheme]
 		if !found {
 			return unknownSchemeError(pathScheme)
 		}
-		if err := writerFunction(f, rc, bytes.NewReader(rc.Data)); err != nil {
+		if err := writerFunction(&fs, rc, bytes.NewReader(rc.Data)); err != nil {
 			return err
 		}
 	}
