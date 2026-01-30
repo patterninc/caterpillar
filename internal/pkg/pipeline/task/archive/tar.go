@@ -22,7 +22,7 @@ func (t *tarArchive) Read(b []byte) {
 
 	for {
 		header, err := r.Next()
-		if err != nil {
+		if err != nil || err != io.EOF {
 			break
 		}
 

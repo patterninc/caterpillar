@@ -1,0 +1,17 @@
+tasks:
+  - name: planet_tar_file
+    type: file
+    path: test/pipelines/planets.tar.gz
+  - type: decompress
+    format: gzip
+    action: decompress
+  - name: unpack_planets_file
+    type: archive
+    format: tar
+    action: unpack
+  - name: combine
+    type: join
+    size: 20
+  - name: store_unpacked_file
+    type: file  
+    path: unpacked_planets/{{ macro "uuid" }}.txt
