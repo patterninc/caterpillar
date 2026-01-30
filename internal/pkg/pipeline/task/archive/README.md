@@ -1,12 +1,12 @@
 # Archive Task
 
-The `archive` task pack and unpack file data in various archive formats (TAR, ZIP), enabling efficient data packaging and extraction within pipelines.
+The `archive` task packs and unpacks file data in various archive formats (TAR, ZIP), enabling efficient data packaging and extraction within pipelines.
 
 ## Function
 
 The archive task handles two primary operations:
 - **Pack**: Creates archives from input data (e.g., create a ZIP or TAR file)
-- **Unpack**: Extract archives to retrieve individual files
+- **Unpack**: Extracts archives to retrieve individual files
 
 ## Behavior
 

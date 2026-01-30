@@ -22,8 +22,11 @@ func (t *tarArchive) Read(b []byte) {
 
 	for {
 		header, err := r.Next()
-		if err != nil || err != io.EOF {
+		if err == io.EOF {
 			break
+		}
+		if err != nil {
+			log.Fatal(err)
 		}
 
 		// check the file type is regular file
