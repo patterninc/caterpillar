@@ -81,7 +81,7 @@ tasks:
 ### Unpack ZIP archive
 ```yaml
 tasks:
-  - name: extract_zip
+  - name: unpack_zip
     type: archive
     format: zip
     action: unpack
@@ -100,7 +100,7 @@ tasks:
 ### Unpack TAR.GZ archive
 ```yaml
 tasks:
-  - name: extract_tar_gz
+  - name: unpack_tar_gz
     type: archive
     format: tar
     action: unpack
@@ -108,14 +108,14 @@ tasks:
 
 ## Complete Pipeline Examples
 
-### Read files, compress to ZIP, write to file
+### Read files, pack to ZIP, write to file
 ```yaml
 tasks:
   - name: read_source
     type: file
     path: source/*.txt
   
-  - name: compress_to_zip
+  - name: pack_to_zip
     type: archive
     format: zip
     action: pack
@@ -132,31 +132,36 @@ tasks:
   - name: read_archive
     type: file
     path: data.tar.gz
+
+  - name: decompress_file
+    type: compress
+    format: gzip
+    action: decompress 
   
-  - name: extract_files
+  - name: unpack_files
     type: archive
     format: tar
     action: unpack
   
-  - name: write_extracted
+  - name: write_unpacked
     type: file
-    path: /output/{{ context "filename" }}
+    path: /output/data.txt
 ```
 
-### Multi-step compression pipeline
+### Multi-step packing pipeline
 ```yaml
 tasks:
   - name: read_data
     type: file
     path: test/pipelines/birds.txt
   
-  - name: compress_zip
+  - name: pack_zip
     type: archive
     format: zip
     action: pack
     file_name: birds.zip
   
-  - name: decompress_zip
+  - name: unpack_zip
     type: archive
     format: zip
     action: unpack
@@ -184,7 +189,6 @@ Input Records
 
 ## Use Cases
 
-- **Data compression**: Reduce data size for transmission or storage
 - **Data packaging**: Bundle multiple files into a single archive
 - **Data extraction**: Process archived data within pipelines
 - **Archive conversion**: Convert between ZIP and TAR formats
