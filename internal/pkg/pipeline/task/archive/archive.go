@@ -10,8 +10,8 @@ import (
 type actionType string
 
 const (
-	actionCompress   actionType = `pack`
-	actionDecompress actionType = `unpack`
+	actionPack   actionType = `pack`
+	actionUnpack actionType = `unpack`
 )
 
 const (
@@ -48,11 +48,11 @@ func (c *core) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return err
 	}
 
-	if obj.Action != actionCompress && obj.Action != actionDecompress {
-		return fmt.Errorf("invalid action: %s (must be 'compress' or 'decompress')", obj.Action)
+	if obj.Action != actionPack && obj.Action != actionUnpack {
+		return fmt.Errorf("invalid action: %s (must be 'pack' or 'unpack')", obj.Action)
 	}
 
-	if obj.Action == actionCompress {
+	if obj.Action == actionPack {
 		if obj.FileName == "" {
 			return fmt.Errorf("file_name must be specified when action is 'pack'")
 		}
@@ -101,9 +101,9 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 		}
 
 		switch c.Action {
-		case actionCompress:
+		case actionPack:
 			archiv.Write(r.Data)
-		case actionDecompress:
+		case actionUnpack:
 			archiv.Read(r.Data)
 		}
 	}
