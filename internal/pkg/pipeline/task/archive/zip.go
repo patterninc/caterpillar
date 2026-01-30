@@ -3,7 +3,6 @@ package archive
 import (
 	"archive/zip"
 	"bytes"
-	"errors"
 	"io"
 	"log"
 
@@ -36,7 +35,10 @@ func (z *zipArchive) Read(b []byte) {
 			buf := make([]byte, f.FileInfo().Size())
 
 			_, err = rc.Read(buf)
-			if err != nil && !errors.Is(err, io.EOF) {
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
 				log.Fatal(err)
 			}
 
