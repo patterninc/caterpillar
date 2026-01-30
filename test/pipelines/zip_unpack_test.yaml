@@ -1,0 +1,10 @@
+tasks:
+  - name: birds_zip_file
+    type: file
+    path: test/pipelines/packed_birds.zip
+  - name: unpack_birds_file
+    type: archive
+    action: unpack
+  - name: store_unpacked_file
+    type: file
+    path: unpacked_birds.txt
