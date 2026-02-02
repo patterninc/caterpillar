@@ -1,0 +1,11 @@
+tasks:
+  - name: read
+    type: file
+    path: ./test/pipelines/random_data.xlsx
+  - name: convert_from_xls
+    type: converter
+    format: xlsx
+    sheets: ["Sheet1"]
+  - name: write_json
+    type: file
+    path: test-result.csv

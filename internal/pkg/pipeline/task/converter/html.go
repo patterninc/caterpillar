@@ -21,7 +21,7 @@ type htmlElement struct {
 	Children   []*htmlElement    `json:"children,omitempty"`
 }
 
-func (c *html) convert(data []byte, _ string) ([]byte, error) {
+func (c *html) convert(data []byte, _ string) ([]converterOutput, error) {
 
 	// Parse the HTML content using htmlquery
 	document, err := htmlquery.Parse(bytes.NewReader(data))
@@ -50,7 +50,7 @@ func (c *html) convert(data []byte, _ string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to marshal JSON: %v", err)
 	}
 
-	return jsonData, nil
+	return []converterOutput{{Data: jsonData}}, nil
 
 }
 

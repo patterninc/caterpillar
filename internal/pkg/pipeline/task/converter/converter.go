@@ -7,14 +7,19 @@ import (
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
 
+type converterOutput struct {
+	Data     []byte
+	Metadata map[string]string
+}
+
 type converter interface {
-	convert(data []byte, delimiter string) ([]byte, error)
+	convert(data []byte, delimiter string) ([]converterOutput, error)
 }
 
 type core struct {
 	task.Base `yaml:",inline" json:",inline"`
-	convert   func([]byte, string) ([]byte, error) `yaml:"-" json:"-"`
-	Delimiter string                               `yaml:"delimiter,omitempty" json:"delimiter,omitempty" default:"\t"`
+	convert   func([]byte, string) ([]converterOutput, error) `yaml:"-" json:"-"`
+	Delimiter string                                          `yaml:"delimiter,omitempty" json:"delimiter,omitempty" default:"\t"`
 }
 
 type mapper struct {
@@ -34,6 +39,7 @@ func (c *core) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		`csv`:  new(csv),
 		`html`: new(html),
 		`sst`:  new(sst),
+		`xlsx`: new(xlsx),
 	}
 
 	// let's figure out what converter we'll use
@@ -68,12 +74,20 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) er
 			break
 		}
 
-		convertedData, err := c.convert(r.Data, c.Delimiter)
+		outputs, err := c.convert(r.Data, c.Delimiter)
 		if err != nil {
 			return err
 		}
-		if convertedData != nil {
-			c.SendData(r.Context, convertedData, output)
+
+		for _, out := range outputs {
+			if out.Data != nil {
+				// Add metadata to context
+				for k, v := range out.Metadata {
+					r.SetContextValue(k, v)
+				}
+
+				c.SendData(r.Context, out.Data, output)
+			}
 		}
 	}
 
