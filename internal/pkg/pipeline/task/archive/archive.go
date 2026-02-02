@@ -24,6 +24,33 @@ type archiver interface {
 	Write()
 }
 
+type channelStruct struct {
+	InputChan  <-chan *record.Record
+	OutputChan chan<- *record.Record
+}
+
+var (
+	supportedFormats = map[string]func(bs *task.Base, chStruct *channelStruct) archiver{
+		"zip": func(bs *task.Base, ch *channelStruct) archiver {
+			return &zipArchive{
+				Base:          bs,
+				channelStruct: ch,
+			}
+		},
+		"tar": func(bs *task.Base, ch *channelStruct) archiver {
+			return &tarArchive{
+				Base:          bs,
+				channelStruct: ch,
+			}
+		},
+	}
+
+	supportedActions = map[string]func(archiver) func(){
+		`pack`:   func(a archiver) func() { return a.Write },
+		`unpack`: func(a archiver) func() { return a.Read },
+	}
+)
+
 type core struct {
 	task.Base `yaml:",inline" json:",inline"`
 	Format    string     `yaml:"format,omitempty" json:"format,omitempty"`
@@ -64,29 +91,13 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 
 	var archiv archiver
 
-	switch c.Format {
-	case "tar":
-		archiv = &tarArchive{
-			Base:       &c.Base,
-			OutputChan: output,
-			InputChan:  input,
-		}
-	case "zip":
-		archiv = &zipArchive{
-			Base:       &c.Base,
-			OutputChan: output,
-			InputChan:  input,
-		}
-	default:
-		return fmt.Errorf("unsupported format: %s", c.Format)
-	}
+	archiv = supportedFormats[c.Format](&c.Base, &channelStruct{
+		InputChan:  input,
+		OutputChan: output,
+	})
 
-	switch c.Action {
-	case actionPack:
-		archiv.Write()
-	case actionUnpack:
-		archiv.Read()
-	}
+	actionFunc := supportedActions[string(c.Action)](archiv)
+	actionFunc()
 
 	return nil
 }

@@ -13,8 +13,7 @@ import (
 
 type zipArchive struct {
 	*task.Base
-	OutputChan chan<- *record.Record
-	InputChan  <-chan *record.Record
+	*channelStruct
 }
 
 func (z *zipArchive) Read() {

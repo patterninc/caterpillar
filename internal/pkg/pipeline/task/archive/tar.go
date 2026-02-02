@@ -13,8 +13,7 @@ import (
 
 type tarArchive struct {
 	*task.Base
-	OutputChan chan<- *record.Record
-	InputChan  <-chan *record.Record
+	*channelStruct
 }
 
 func (t *tarArchive) Read() {
