@@ -40,7 +40,7 @@ func (x *xlsx) convert(data []byte, _ string) ([]converterOutput, error) {
 		// Get all rows from the sheet
 		rows, err := reader.GetRows(sheet)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error reading rows from sheet (%s), %s", sheet, err.Error())
 		}
 
 		// Create CSV for this sheet

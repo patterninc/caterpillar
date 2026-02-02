@@ -6,6 +6,6 @@ tasks:
     type: converter
     format: xlsx
     sheets: ["Sheet1"]
-  - name: write_json
+  - name: write_csv
     type: file
     path: test-result.csv
