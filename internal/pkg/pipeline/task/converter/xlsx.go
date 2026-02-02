@@ -26,7 +26,7 @@ func (x *xlsx) convert(data []byte, _ string) ([]converterOutput, error) {
 	// Get sheets
 	sheets := reader.GetSheetList()
 	if len(sheets) == 0 {
-		return nil, fmt.Errorf("No sheet found in the excel file")
+		return nil, fmt.Errorf("no sheet found in the excel file")
 	}
 
 	if len(x.Sheets) > 0 {
@@ -51,7 +51,7 @@ func (x *xlsx) convert(data []byte, _ string) ([]converterOutput, error) {
 		if err := writer.WriteAll(rows); err != nil {
 			return nil, err
 		}
-		writer.Flush()
+
 
 		// Add output with sheet name in metadata
 		outputs = append(outputs, converterOutput{
