@@ -30,6 +30,8 @@ tasks:
         "user_name": "{{ context "user_name" }}",
         "user_email": "{{ context "user_email" }}",
         "user_company": "{{ context "user_company" }}",
+        "headers_content_type": "{{ context "http-header-Content-Type" }}",
+        "headers_age": "{{ context "http-header-Age" }}",
         "original_data": .
       }
 
