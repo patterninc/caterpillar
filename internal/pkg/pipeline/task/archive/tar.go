@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"io"
 	"log"
+	"path/filepath"
 	"strings"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
@@ -47,7 +48,7 @@ func (t *tarArchive) Read() {
 				if _, err := io.ReadFull(r, buf); err != nil && err != io.EOF {
 					log.Fatal(err)
 				}
-				rc.SetContextValue("CATERPILLER_FILE_PATH_READ", header.Name)
+				rc.SetContextValue(string(task.CtxKeyFilePathRead), filepath.Base(header.Name))
 				t.SendData(rc.Context, buf, t.OutputChan)
 			}
 
@@ -72,7 +73,7 @@ func (t *tarArchive) Write() {
 			continue
 		}
 
-		filePath, found := rec.GetContextValue("CATERPILLER_FILE_PATH")
+		filePath, found := rec.GetContextValue(string(task.CtxKeyFilePath))
 		if !found {
 			log.Fatal("filepath not set in context")
 		}

@@ -21,6 +21,13 @@ var (
 	ErrPresentInputOutput = fmt.Errorf(`either input or output must be set, not both`)
 )
 
+type contextKeyFile string
+
+const (
+	CtxKeyFilePath     contextKeyFile = "CATERPILLAR_FILE_PATH"
+	CtxKeyFilePathRead contextKeyFile = "CATERPILLAR_FILE_PATH_READ"
+)
+
 type Task interface {
 	Run(<-chan *record.Record, chan<- *record.Record) error
 	GetName() string

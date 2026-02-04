@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"io"
 	"log"
+	"path/filepath"
 	"strings"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
@@ -38,7 +39,7 @@ func (z *zipArchive) Read() {
 			// check the file type is regular file
 			if f.FileInfo().Mode().IsRegular() {
 
-				rc.SetContextValue("CATERPILLER_FILE_PATH_READ", f.Name)
+				rc.SetContextValue(string(task.CtxKeyFilePathRead), filepath.Base(f.Name))
 
 				fs, err := f.Open()
 				if err != nil {
@@ -72,7 +73,7 @@ func (z *zipArchive) Write() {
 			break
 		}
 
-		filePath, found := rec.GetContextValue("CATERPILLER_FILE_PATH")
+		filePath, found := rec.GetContextValue(string(task.CtxKeyFilePath))
 		if !found {
 			log.Fatal("filepath not set in context")
 		}

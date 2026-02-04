@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/url"
+	"path/filepath"
 	"strings"
 
 	"github.com/patterninc/caterpillar/internal/pkg/config"
@@ -135,7 +136,7 @@ func (f *file) readFile(output chan<- *record.Record) error {
 
 		// Create a default record with context
 		rc := &record.Record{Context: ctx}
-		rc.SetContextValue("CATERPILLER_FILE_PATH", path)
+		rc.SetContextValue(string(task.CtxKeyFilePath), filepath.Base(path))
 
 		// let's write content to output channel
 		f.SendData(rc.Context, content, output)
@@ -173,10 +174,10 @@ func (f *file) writeFile(input <-chan *record.Record) error {
 		var fs file
 
 		fs = *f
-		filePath, found := rc.GetContextValue("CATERPILLER_FILE_PATH_READ")
+		filePath, found := rc.GetContextValue(string(task.CtxKeyFilePathRead))
 		if found {
 			if filePath == "" {
-				log.Fatal("file_name is required when filepath is not in context")
+				log.Fatal("required file path")
 			}
 
 			filePath = strings.ReplaceAll(filePath, "\\", "/")
