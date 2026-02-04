@@ -13,7 +13,7 @@ const (
 )
 
 type xlsx struct {
-	Sheets    []string `yaml:"sheets,omitempty" json:"sheets,omitempty"`
+	Sheets []string `yaml:"sheets,omitempty" json:"sheets,omitempty"`
 }
 
 func (x *xlsx) convert(data []byte, _ string) ([]converterOutput, error) {
@@ -37,30 +37,48 @@ func (x *xlsx) convert(data []byte, _ string) ([]converterOutput, error) {
 	outputs := make([]converterOutput, 0, len(sheets))
 
 	for _, sheet := range sheets {
-		// Get all rows from the sheet
-		rows, err := reader.GetRows(sheet)
+		output, err := readSheet(reader, sheet)
 		if err != nil {
-			return nil, fmt.Errorf("error reading rows from sheet (%s), %s", sheet, err.Error())
-		}
-
-		// Create CSV for this sheet
-		var buff bytes.Buffer
-		writer := csvEncoder.NewWriter(&buff)
-
-		// Write all rows to CSV
-		if err := writer.WriteAll(rows); err != nil {
 			return nil, err
 		}
 
-
-		// Add output with sheet name in metadata
-		outputs = append(outputs, converterOutput{
-			Data: buff.Bytes(),
-			Metadata: map[string]string{
-				sheetName: sheet,
-			},
-		})
+		outputs = append(outputs, output)
 	}
 
 	return outputs, nil
+}
+
+func readSheet(reader *excelize.File, sheet string) (converterOutput, error) {
+	// Create buffer for this sheet
+	var buff bytes.Buffer
+	writer := csvEncoder.NewWriter(&buff)
+
+	// Get all rows from the sheet
+	rows, err := reader.Rows(sheet)
+	if err != nil {
+		return converterOutput{}, fmt.Errorf("error reading rows from sheet %s: %w", sheet, err)
+	}
+	defer rows.Close()
+
+	// Write rows to buffer
+	for rows.Next() {
+		cols, err := rows.Columns()
+		if err != nil {
+			return converterOutput{}, err
+		}
+
+		if err := writer.Write(cols); err != nil {
+			return converterOutput{}, err
+		}
+	}
+
+	// Flush the writer
+	writer.Flush()
+
+	return converterOutput{
+		Data: buff.Bytes(),
+		Metadata: map[string]string{
+			sheetName: sheet,
+		},
+	}, nil
 }
