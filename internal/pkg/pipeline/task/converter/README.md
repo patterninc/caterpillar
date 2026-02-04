@@ -129,4 +129,3 @@ tasks:
 - **Report generation**: Convert data to report-friendly formats
 - **Data exchange**: Enable data sharing between different systems
 - **ETL workflows**: Transform data as part of extract, transform, load processes
-- **Multi-sheet Excel analysis**: Process each sheet of an Excel workbook independently
