@@ -39,7 +39,7 @@ func (z *zipArchive) Read() {
 			// check the file type is regular file
 			if f.FileInfo().Mode().IsRegular() {
 
-				rc.SetContextValue(string(task.CtxKeyFilePathRead), filepath.Base(f.Name))
+				rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), filepath.Base(f.Name))
 
 				fs, err := f.Open()
 				if err != nil {
@@ -73,7 +73,7 @@ func (z *zipArchive) Write() {
 			break
 		}
 
-		filePath, found := rec.GetContextValue(string(task.CtxKeyFilePath))
+		filePath, found := rec.GetContextValue(string(task.CtxKeyFileNameWrite))
 		if !found {
 			log.Fatal("filepath not set in context")
 		}

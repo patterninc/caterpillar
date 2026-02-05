@@ -24,8 +24,8 @@ var (
 type contextKeyFile string
 
 const (
-	CtxKeyFilePath     contextKeyFile = "CATERPILLAR_FILE_PATH"
-	CtxKeyFilePathRead contextKeyFile = "CATERPILLAR_FILE_PATH_READ"
+	CtxKeyFileNameWrite        contextKeyFile = "CATERPILLAR_FILE_NAME_WRITE"
+	CtxKeyArchiveFileNameWrite contextKeyFile = "CATERPILLAR_ARCHIVE_FILE_NAME_WRITE"
 )
 
 type Task interface {

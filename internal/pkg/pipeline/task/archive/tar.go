@@ -48,7 +48,7 @@ func (t *tarArchive) Read() {
 				if _, err := io.ReadFull(r, buf); err != nil && err != io.EOF {
 					log.Fatal(err)
 				}
-				rc.SetContextValue(string(task.CtxKeyFilePathRead), filepath.Base(header.Name))
+				rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), filepath.Base(header.Name))
 				t.SendData(rc.Context, buf, t.OutputChan)
 			}
 
@@ -73,7 +73,7 @@ func (t *tarArchive) Write() {
 			continue
 		}
 
-		filePath, found := rec.GetContextValue(string(task.CtxKeyFilePath))
+		filePath, found := rec.GetContextValue(string(task.CtxKeyFileNameWrite))
 		if !found {
 			log.Fatal("filepath not set in context")
 		}
