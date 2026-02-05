@@ -21,6 +21,13 @@ var (
 	ErrPresentInputOutput = fmt.Errorf(`either input or output must be set, not both`)
 )
 
+type contextKeyFile string
+
+const (
+	CtxKeyFileNameWrite        contextKeyFile = "CATERPILLAR_FILE_NAME_WRITE"
+	CtxKeyArchiveFileNameWrite contextKeyFile = "CATERPILLAR_ARCHIVE_FILE_NAME_WRITE"
+)
+
 type Task interface {
 	Run(<-chan *record.Record, chan<- *record.Record) error
 	GetName() string

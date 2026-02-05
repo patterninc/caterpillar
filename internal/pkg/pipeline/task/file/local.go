@@ -3,6 +3,7 @@ package file
 import (
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/bmatcuk/doublestar"
@@ -48,6 +49,12 @@ func (r *localReader) parse(glob string) ([]string, error) {
 func writeLocalFile(f *file, rec *record.Record, reader io.Reader) error {
 
 	path, err := f.Path.Get(rec)
+	if err != nil {
+		return err
+	}
+
+	dir := filepath.Dir(path)
+	err = os.MkdirAll(dir, os.ModePerm)
 	if err != nil {
 		return err
 	}

@@ -1,0 +1,15 @@
+tasks:
+  - name: planet_tar_file
+    type: file
+    path: test/pipelines/planets.tar.gz
+  - name: decompress_gzip
+    type: compress
+    format: gzip
+    action: decompress
+  - name: unpack_planets_file
+    type: archive
+    format: tar
+    action: unpack
+  - name: store_unpacked_file
+    type: file  
+    path: unpacked_planets/

@@ -26,7 +26,7 @@ var (
 				return io.NopCloser(snappy.NewReader(r)), nil
 			},
 			NewWriter: func(w io.Writer) io.WriteCloser {
-				return snappy.NewWriter(w)
+				return snappy.NewBufferedWriter(w)
 			}},
 	}
 )

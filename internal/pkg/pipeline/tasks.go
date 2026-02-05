@@ -7,6 +7,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/archive"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/aws/parameter_store"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/compress"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/converter"
@@ -33,6 +34,7 @@ type tasks []task.Task
 var (
 	validate       = validator.New()
 	supportedTasks = map[string]func() (task.Task, error){
+		`archive`:             archive.New,
 		`aws_parameter_store`: parameter_store.New,
 		`compress`:            compress.New,
 		`converter`:           converter.New,
