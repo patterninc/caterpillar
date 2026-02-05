@@ -18,7 +18,7 @@ const (
 	sstTablePrefix = "caterpillar-*.sst"
 )
 
-func (c *sst) convert(data []byte, d string) ([]byte, error) {
+func (c *sst) convert(data []byte, d string) ([]converterOutput, error) {
 	lines := strings.Split(string(data), "\n")
 	values := map[string]string{}
 	for _, line := range lines {
@@ -37,7 +37,13 @@ func (c *sst) convert(data []byte, d string) ([]byte, error) {
 		return nil, err
 	}
 	defer os.Remove(fileName)
-	return os.ReadFile(fileName)
+	
+	sstData, err := os.ReadFile(fileName)
+	if err != nil {
+		return nil, err
+	}
+
+	return []converterOutput{{Data: sstData}}, nil
 }
 
 func (c *sst) createSST(kvs map[string]string) (string, error) {
