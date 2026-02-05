@@ -79,7 +79,7 @@ func (t *tarArchive) Write() {
 		}
 
 		if filePath == "" {
-			log.Fatal("file_name is required when filepath is not in context")
+			log.Fatal("empty filepath in context")
 		}
 
 		filePath = strings.ReplaceAll(filePath, "\\", "/")
