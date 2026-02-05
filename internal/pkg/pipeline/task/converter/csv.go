@@ -24,7 +24,7 @@ type csv struct {
 // Pre-compile regex for column name sanitization
 var columnNameRegex = regexp.MustCompile(`[^a-zA-Z0-9]+`)
 
-func (c *csv) convert(data []byte, _ string) ([]byte, error) {
+func (c *csv) convert(data []byte, _ string) ([]converterOutput, error) {
 	// Initialize columns if not provided
 	if len(c.Columns) == 0 {
 		if err := c.initializeColumns(data); err != nil {
@@ -71,7 +71,12 @@ func (c *csv) convert(data []byte, _ string) ([]byte, error) {
 		record[column.Name] = buffer[i]
 	}
 
-	return json.Marshal(record)
+	jsonData, err := json.Marshal(record)
+	if err != nil {
+		return nil, err
+	}
+
+	return []converterOutput{{Data: jsonData}}, nil
 
 }
 
