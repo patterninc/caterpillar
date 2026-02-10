@@ -87,6 +87,11 @@ func New() (task.Task, error) {
 func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 
 	newHttp := &httpCore{
+		Base: task.Base{
+			Name:    h.Name,
+			Type:    h.Type,
+			Context: h.Context,
+		},
 		Method:           h.Method,
 		Endpoint:         h.Endpoint,
 		ExpectedStatuses: h.ExpectedStatuses,
