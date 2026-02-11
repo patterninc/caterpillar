@@ -8,7 +8,7 @@ type Record struct {
 	ID     int               `yaml:"id,omitempty" json:"id,omitempty"`
 	Origin string            `yaml:"origin,omitempty" json:"origin,omitempty"`
 	Data   []byte            `yaml:"data,omitempty" json:"data,omitempty"`
-	Meta   map[string]string `yaml:"context,omitempty" json:"context,omitempty"` // keeping json key as context for backward compatibility
+	Meta   map[string]string `yaml:"meta,omitempty" json:"meta,omitempty"`
 }
 
 func (m Record) MarshalJSON() ([]byte, error) {
