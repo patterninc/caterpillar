@@ -48,8 +48,8 @@ func (t *tarArchive) Read() {
 				if _, err := io.ReadFull(r, buf); err != nil && err != io.EOF {
 					log.Fatal(err)
 				}
-				rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), filepath.Base(header.Name))
-				t.SendData(rc.Context, buf, t.OutputChan)
+				rc.SetMetaValue(task.MetaKeyArchiveFileNameWrite, filepath.Base(header.Name))
+				t.SendData(rc.Meta, buf, t.OutputChan)
 			}
 
 		}
@@ -73,7 +73,7 @@ func (t *tarArchive) Write() {
 			continue
 		}
 
-		filePath, found := rec.GetContextValue(string(task.CtxKeyFileNameWrite))
+		filePath, found := rec.GetMetaValue(task.MetaKeyFileNameWrite)
 		if !found {
 			log.Fatal("filepath not set in context")
 		}
@@ -97,12 +97,12 @@ func (t *tarArchive) Write() {
 			log.Fatal(err)
 		}
 
-		rc.Context = rec.Context
+		rc.Meta = rec.Meta
 	}
 
 	if err := tw.Close(); err != nil {
 		log.Fatal(err)
 	}
 
-	t.SendData(rc.Context, buf.Bytes(), t.OutputChan)
+	t.SendData(rc.Meta, buf.Bytes(), t.OutputChan)
 }

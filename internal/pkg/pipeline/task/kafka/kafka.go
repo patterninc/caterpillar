@@ -105,7 +105,7 @@ func (k *kafka) Init() error {
 	return nil
 }
 
-func (k *kafka) Run(input <-chan *record.Record, output chan<- *record.Record) error {
+func (k *kafka) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) error {
 	if input != nil && output != nil {
 		return task.ErrPresentInputOutput
 	}
@@ -189,7 +189,7 @@ func (k *kafka) read(output chan<- *record.Record) error {
 			k.emptyReadRetries = 0
 
 			// process the message
-			k.SendData(k.ctx, m.Value, output)
+			k.SendData(nil, m.Value, output)
 
 			if k.GroupID == "" {
 				// if not using consumer group, no need to commit messages

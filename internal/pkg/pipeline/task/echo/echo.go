@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -21,7 +22,7 @@ func New() (task.Task, error) {
 	return &echo{}, nil
 }
 
-func (e *echo) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
+func (e *echo) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
 	for {
 		r, ok := e.GetRecord(input)

@@ -58,7 +58,7 @@ func (s *server) GetTaskConcurrency() int {
 	return 1
 }
 
-func (s *server) Run(input <-chan *record.Record, output chan<- *record.Record) error {
+func (s *server) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) error {
 
 	// input channel must be nil
 	if input != nil {

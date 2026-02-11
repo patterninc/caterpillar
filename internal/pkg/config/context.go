@@ -19,11 +19,11 @@ var (
 )
 
 // return placeholder string for context key
-func setContextPlaceholder(key string) (string, error) {
+func SetMetaPlaceholder(key string) (string, error) {
 	return fmt.Sprintf(contextPlaceholderString, key), nil
 }
 
-func evaluateContext(data string, record *record.Record) (string, error) {
+func evaluateMeta(data string, record *record.Record) (string, error) {
 
 	// Find all context template patterns
 	matches := contextTemplateRegex.FindAllStringSubmatch(data, -1)
@@ -45,7 +45,7 @@ func evaluateContext(data string, record *record.Record) (string, error) {
 		key := match[1]
 
 		// Get the context value
-		value, ok := record.GetContextValue(key)
+		value, ok := record.GetMetaValue(key)
 		if !ok {
 			missingKeys = append(missingKeys, key)
 			continue

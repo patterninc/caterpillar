@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sync"
 
 	"github.com/patterninc/caterpillar/internal/pkg/jq"
@@ -12,6 +13,9 @@ import (
 
 const (
 	ErrUnsupportedFieldValue = `invalid value for field %s: %s`
+
+	MetaKeyFileNameWrite        = "CATERPILLAR_FILE_NAME_WRITE"
+	MetaKeyArchiveFileNameWrite = "CATERPILLAR_ARCHIVE_FILE_NAME_WRITE"
 )
 
 var (
@@ -21,15 +25,8 @@ var (
 	ErrPresentInputOutput = fmt.Errorf(`either input or output must be set, not both`)
 )
 
-type contextKeyFile string
-
-const (
-	CtxKeyFileNameWrite        contextKeyFile = "CATERPILLAR_FILE_NAME_WRITE"
-	CtxKeyArchiveFileNameWrite contextKeyFile = "CATERPILLAR_ARCHIVE_FILE_NAME_WRITE"
-)
-
 type Task interface {
-	Run(<-chan *record.Record, chan<- *record.Record) error
+	Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) error
 	GetName() string
 	GetFailOnError() bool
 	GetTaskConcurrency() int
@@ -79,7 +76,7 @@ func (b *Base) GetRecord(input <-chan *record.Record) (*record.Record, bool) {
 
 }
 
-func (b *Base) Run(input <-chan *record.Record, output chan<- *record.Record) error {
+func (b *Base) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) error {
 
 	for r := range input {
 		b.SendRecord(r, output)
@@ -89,7 +86,7 @@ func (b *Base) Run(input <-chan *record.Record, output chan<- *record.Record) er
 
 }
 
-func (b *Base) SendData(ctx context.Context, data []byte, output chan<- *record.Record) /* we should return error here */ {
+func (b *Base) SendData(meta map[string]string, data []byte, output chan<- *record.Record) /* we should return error here */ {
 
 	b.Lock()
 	defer b.Unlock()
@@ -97,10 +94,15 @@ func (b *Base) SendData(ctx context.Context, data []byte, output chan<- *record.
 	b.recordIndex++
 
 	record := &record.Record{
-		ID:      b.recordIndex,
-		Origin:  b.Name,
-		Data:    data,
-		Context: ctx,
+		ID:     b.recordIndex,
+		Origin: b.Name,
+		Data:   data,
+	}
+
+	// Copy meta map if provided
+	if meta != nil {
+		record.Meta = make(map[string]string, len(meta))
+		maps.Copy(record.Meta, meta)
 	}
 
 	b.SendRecord(record, output)
@@ -139,7 +141,7 @@ func (b *Base) SendRecord(r *record.Record, output chan<- *record.Record) /* we 
 			fmt.Println(`ERROR (result):`, err)
 			return
 		}
-		r.SetContextValue(name, string(contextValueJson))
+		r.SetMetaValue(name, string(contextValueJson))
 	}
 
 }

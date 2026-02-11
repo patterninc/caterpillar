@@ -1,6 +1,7 @@
 package converter
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
@@ -66,7 +67,7 @@ func (c *core) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 }
 
-func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) error {
+func (c *core) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) error {
 
 	for {
 		r, ok := c.GetRecord(input)
@@ -83,10 +84,10 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) er
 			if out.Data != nil {
 				// Add metadata to context
 				for k, v := range out.Metadata {
-					r.SetContextValue(k, v)
+					r.SetMetaValue(k, v)
 				}
 
-				c.SendData(r.Context, out.Data, output)
+				c.SendData(r.Meta, out.Data, output)
 			}
 		}
 	}

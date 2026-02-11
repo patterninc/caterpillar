@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -22,6 +23,8 @@ type Pipeline struct {
 	wg          *sync.WaitGroup
 	locker      *sync.Mutex
 	errors      map[string]error
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
 func (p *Pipeline) Init() error {
@@ -60,6 +63,9 @@ func (p *Pipeline) Run() error {
 	if p.ChannelSize <= 0 {
 		p.ChannelSize = defaultChannelSize
 	}
+
+	// Create pipeline-level context for cancellation
+	p.ctx, p.cancel = context.WithCancel(context.Background())
 
 	// sync
 	if p.DAG == nil {
@@ -237,10 +243,10 @@ func (p *Pipeline) runTaskConcurrently(t task.Task, input <-chan *record.Record,
 	taskWg.Add(concurrency)
 
 	for i := 0; i < concurrency; i++ {
-		go func(task task.Task, in <-chan *record.Record, out chan<- *record.Record) {
+		go func(ctx context.Context, task task.Task, in <-chan *record.Record, out chan<- *record.Record) {
 			defer taskWg.Done()
 
-			if err := task.Run(in, out); err != nil {
+			if err := task.Run(ctx, in, out); err != nil {
 				fmt.Printf("error in %s: %s\n", task.GetName(), err)
 				if task.GetFailOnError() {
 					p.locker.Lock()
@@ -248,7 +254,7 @@ func (p *Pipeline) runTaskConcurrently(t task.Task, input <-chan *record.Record,
 					p.locker.Unlock()
 				}
 			}
-		}(t, input, output)
+		}(p.ctx, t, input, output)
 	}
 
 	go func(wg *sync.WaitGroup, out chan<- *record.Record) {
