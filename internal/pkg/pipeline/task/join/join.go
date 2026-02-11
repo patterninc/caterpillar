@@ -1,9 +1,9 @@
 package join
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
@@ -88,21 +88,25 @@ func (j *join) Run(ctx context.Context, input <-chan *record.Record, output chan
 func (j *join) flushBuffer(output chan<- *record.Record) {
 	if len(j.buffer) > 0 {
 		j.sendJoinedRecords(output)
+		// clear the buffer, explicitly nil out the elements to help GC
+		for i := range j.buffer {
+			j.buffer[i] = nil
+		}
 		j.buffer = j.buffer[:0]
 	}
 }
 
 func (j *join) sendJoinedRecords(output chan<- *record.Record) {
 
-	// Join all data with the specified delimiter
-	var joinedData strings.Builder
+	var joinedData bytes.Buffer
+	delimBytes := []byte(j.Delimiter)
 	for i, r := range j.buffer {
 		if i > 0 {
-			joinedData.WriteString(j.Delimiter)
+			joinedData.Write(delimBytes)
 		}
 		joinedData.Write(r.Data)
 	}
 
-	j.SendData(nil, []byte(joinedData.String()), output)
+	j.SendData(nil, joinedData.Bytes(), output)
 
 }

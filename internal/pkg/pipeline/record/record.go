@@ -2,6 +2,7 @@ package record
 
 import (
 	"encoding/json"
+	"maps"
 )
 
 type Record struct {
@@ -27,4 +28,31 @@ func (r *Record) Bytes() []byte {
 	data, _ := json.Marshal(r)
 	return data
 
+}
+
+// Clone creates a deep copy of the record to prevent shared references
+// across parallel pipeline branches. Data is copied, Meta is cloned.
+func (r *Record) Clone() *Record {
+	if r == nil {
+		return nil
+	}
+
+	newRec := &Record{
+		ID:     r.ID,
+		Origin: r.Origin,
+	}
+
+	// Deep copy Data
+	if r.Data != nil {
+		newRec.Data = make([]byte, len(r.Data))
+		copy(newRec.Data, r.Data)
+	}
+
+	// Deep copy Meta
+	if r.Meta != nil {
+		newRec.Meta = make(map[string]string, len(r.Meta))
+		maps.Copy(newRec.Meta, r.Meta)
+	}
+
+	return newRec
 }

@@ -196,9 +196,16 @@ func (p *Pipeline) distributeToChannels(input <-chan *record.Record, outputs []c
 	}()
 
 	for rec := range input {
-		for _, ch := range outputs {
+		for i, ch := range outputs {
 			if ch != nil {
-				ch <- rec
+				if i == 0 {
+					// First branch gets the original record
+					ch <- rec
+				} else {
+					// Other branches get cloned records to prevent shared references
+					// and allow independent GC of records in each branch
+					ch <- rec.Clone()
+				}
 			}
 		}
 	}

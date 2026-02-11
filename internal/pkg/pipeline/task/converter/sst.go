@@ -1,10 +1,10 @@
 package converter
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"sort"
-	"strings"
 
 	"github.com/cockroachdb/pebble"
 	"github.com/cockroachdb/pebble/objstorage/objstorageprovider"
@@ -19,17 +19,20 @@ const (
 )
 
 func (c *sst) convert(data []byte, d string) ([]converterOutput, error) {
-	lines := strings.Split(string(data), "\n")
+	delimBytes := []byte(d)
+	newline := []byte("\n")
+	lines := bytes.Split(data, newline)
 	values := map[string]string{}
 	for _, line := range lines {
-		if line == "" {
+		if len(line) == 0 {
 			continue
 		}
-		kv := strings.SplitN(line, d, 2)
+		kv := bytes.SplitN(line, delimBytes, 2)
 		if len(kv) != 2 {
-			return nil, errors.New("invalid input for sst converter: expected 'key" + d + "value' format (got: " + line + ")")
+			return nil, errors.New("invalid input for sst converter: expected 'key" + d + "value' format (got: " + string(line) + ")")
 		}
-		values[kv[0]] = kv[1]
+
+		values[string(kv[0])] = string(kv[1])
 	}
 
 	fileName, err := c.createSST(values)
@@ -37,7 +40,7 @@ func (c *sst) convert(data []byte, d string) ([]converterOutput, error) {
 		return nil, err
 	}
 	defer os.Remove(fileName)
-	
+
 	sstData, err := os.ReadFile(fileName)
 	if err != nil {
 		return nil, err
