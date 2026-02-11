@@ -65,6 +65,11 @@ func (x *xpath) Run(ctx context.Context, input <-chan *record.Record, output cha
 				x.SendData(r.Meta, data, output)
 			}
 		}
+
+		// Release HTML data reference to allow GC of the large response body.
+		// The parsed html.Node tree holds pointers into r.Data, but after extraction
+		// we no longer need the original bytes.
+		r.Data = nil
 	}
 
 	return nil
