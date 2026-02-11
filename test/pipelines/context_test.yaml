@@ -7,7 +7,7 @@ tasks:
       user_name: ".data | fromjson | .name"
       user_email: ".data | fromjson | .email"
       user_company: ".data | fromjson | .company.name"
-  
+
   - name: form_posts_endpoint_with_context
     type: jq
     path: |
@@ -21,6 +21,8 @@ tasks:
 
   - name: hit_endpoint_with_context
     type: http
+    context:
+      "number_of_posts": ".data | fromjson | length"
 
   - name: transform_with_context_jq
     type: jq
@@ -32,6 +34,7 @@ tasks:
         "user_company": "{{ context "user_company" }}",
         "headers_content_type": "{{ context "http-header-Content-Type" }}",
         "headers_age": "{{ context "http-header-Age" }}",
+        "number_of_posts": {{ context "number_of_posts" }},
         "original_data": .
       }
 
