@@ -160,6 +160,11 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 		return nil
 	}
 
+	// create a default record if none provided
+	if rc == nil {
+		rc = &record.Record{}
+	}
+
 	// TODO: perhaps expose the starting page number as a parameter for the task
 	pageID := 1
 
