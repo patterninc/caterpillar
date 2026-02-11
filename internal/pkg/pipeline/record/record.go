@@ -30,8 +30,7 @@ func (r *Record) Bytes() []byte {
 
 }
 
-// Clone creates a deep copy of the record to prevent shared references
-// across parallel pipeline branches. Data is copied, Meta is cloned.
+// Clone creates a deep copy of the record to prevent shared references across parallel pipeline branches.
 func (r *Record) Clone() *Record {
 	if r == nil {
 		return nil
@@ -42,13 +41,11 @@ func (r *Record) Clone() *Record {
 		Origin: r.Origin,
 	}
 
-	// Deep copy Data
 	if r.Data != nil {
 		newRec.Data = make([]byte, len(r.Data))
 		copy(newRec.Data, r.Data)
 	}
 
-	// Deep copy Meta
 	if r.Meta != nil {
 		newRec.Meta = make(map[string]string, len(r.Meta))
 		maps.Copy(newRec.Meta, r.Meta)
