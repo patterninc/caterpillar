@@ -143,8 +143,8 @@ func (f *file) readFile(output chan<- *record.Record) error {
 
 // helper function to read file and close reader after reading
 // we need this to close reader in a loop without delay
-func readFileContent(reader reader, path string) ([]byte, error) {
-	readerCloser, err := reader.read(path)
+func readFileContent(r reader, path string) ([]byte, error) {
+	readerCloser, err := r.read(path)
 	if err != nil {
 		return nil, err
 	}

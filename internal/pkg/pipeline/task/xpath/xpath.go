@@ -66,9 +66,8 @@ func (x *xpath) Run(ctx context.Context, input <-chan *record.Record, output cha
 			}
 		}
 
-		// Release HTML data reference to allow GC of the large response body.
-		// The parsed html.Node tree holds pointers into r.Data, but after extraction
-		// we no longer need the original bytes.
+		// Release the original HTML payload so its buffer can be garbage collected
+		// once parsing and field extraction are complete.
 		r.Data = nil
 	}
 
