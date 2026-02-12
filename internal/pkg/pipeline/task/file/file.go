@@ -123,13 +123,7 @@ func (f *file) readFile(output chan<- *record.Record) error {
 
 	for _, path := range paths {
 
-		readerCloser, err := reader.read(path)
-		if err != nil {
-			return err
-		}
-		defer readerCloser.Close()
-
-		content, err := io.ReadAll(readerCloser)
+		content, err := readFileContent(reader, path)
 		if err != nil {
 			return err
 		}
@@ -145,6 +139,23 @@ func (f *file) readFile(output chan<- *record.Record) error {
 
 	return nil
 
+}
+
+// helper function to read file and close reader after reading
+// we need this to close reader in a loop without delay
+func readFileContent(r reader, path string) ([]byte, error) {
+	readerCloser, err := r.read(path)
+	if err != nil {
+		return nil, err
+	}
+	defer readerCloser.Close()
+
+	content, err := io.ReadAll(readerCloser)
+	if err != nil {
+		return nil, err
+	}
+
+	return content, nil
 }
 
 func (f *file) writeFile(input <-chan *record.Record) error {

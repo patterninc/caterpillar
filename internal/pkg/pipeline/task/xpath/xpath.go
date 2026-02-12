@@ -65,6 +65,10 @@ func (x *xpath) Run(ctx context.Context, input <-chan *record.Record, output cha
 				x.SendData(r.Meta, data, output)
 			}
 		}
+
+		// Release the original HTML payload so its buffer can be garbage collected
+		// once parsing and field extraction are complete.
+		r.Data = nil
 	}
 
 	return nil

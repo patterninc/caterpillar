@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/patterninc/caterpillar/internal/pkg/config"
@@ -27,7 +28,11 @@ const (
 )
 
 var (
-	ctx = context.Background()
+	byteBufferPool = sync.Pool{
+		New: func() any {
+			return new(bytes.Buffer)
+		},
+	}
 )
 
 type oauth struct {
@@ -199,13 +204,24 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 		if err != nil {
 			return err
 		}
-		nextPageInput, err := json.Marshal(result)
-		if err != nil {
+
+		// Use pooled buffer for temporary JSON encoding
+		buf := byteBufferPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		if err := json.NewEncoder(buf).Encode(result); err != nil {
+			byteBufferPool.Put(buf)
 			return err
 		}
+		nextPageInput := buf.Bytes()
+		// trim trailing newline added by encoder
+		if len(nextPageInput) > 0 && nextPageInput[len(nextPageInput)-1] == '\n' {
+			nextPageInput = nextPageInput[:len(nextPageInput)-1]
+		}
+
 		nextPageData, err := nextPage.Execute(nextPageInput, map[string]any{
 			`page_id`: pageID,
 		})
+		byteBufferPool.Put(buf) // Return buffer after use
 
 		if err != nil {
 			return err
@@ -256,6 +272,20 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 
 func (h *httpCore) call(endpoint string) (*result, error) {
 
+	// Create HTTP client once, reuse for all retries to enable connection pooling
+	client := &http.Client{
+		Timeout: time.Duration(h.Timeout),
+	}
+
+	// Do we use proxy for this one?
+	if h.Proxy != nil {
+		transport, err := h.Proxy.getTransport()
+		if err != nil {
+			return nil, fmt.Errorf("error configuring proxy: %w", err)
+		}
+		client.Transport = transport
+	}
+
 	var lastErr error
 	for attempt := 1; attempt <= h.MaxRetries; attempt++ {
 
@@ -292,24 +322,6 @@ func (h *httpCore) call(endpoint string) (*result, error) {
 			}
 		}
 
-		// Create HTTP client with proxy configuration if specified
-		client := &http.Client{
-			Timeout: time.Duration(h.Timeout),
-		}
-
-		// Do we use proxy for this one?
-		if h.Proxy != nil {
-			transport, err := h.Proxy.getTransport()
-			if err != nil {
-				lastErr = err
-				if attempt < h.MaxRetries {
-					continue
-				}
-				break
-			}
-			client.Transport = transport
-		}
-
 		response, err := client.Do(request)
 		if err != nil {
 			lastErr = err
@@ -320,9 +332,9 @@ func (h *httpCore) call(endpoint string) (*result, error) {
 			break
 		}
 
-		defer response.Body.Close()
-
+		// Read body and close immediately
 		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
 		if err != nil {
 			lastErr = err
 			if attempt < h.MaxRetries {
