@@ -25,13 +25,15 @@ func (r *replace) Run(ctx context.Context, input <-chan *record.Record, output c
 		return err
 	}
 
+	replacementBytes := []byte(r.Replacement)
+
 	if output != nil {
 		for {
 			record, ok := r.GetRecord(input)
 			if !ok {
 				break
 			}
-			r.SendData(record.Meta, []byte(rx.ReplaceAllString(string(record.Data), r.Replacement)), output)
+			r.SendData(record.Meta, rx.ReplaceAll(record.Data, replacementBytes), output)
 		}
 	}
 

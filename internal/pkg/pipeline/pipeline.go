@@ -196,9 +196,11 @@ func (p *Pipeline) distributeToChannels(input <-chan *record.Record, outputs []c
 	}()
 
 	for rec := range input {
+		// Send clones to all channels to avoid data races
+		// and ensure GC can clean up records after processing
 		for _, ch := range outputs {
 			if ch != nil {
-				ch <- rec
+				ch <- rec.Clone()
 			}
 		}
 	}

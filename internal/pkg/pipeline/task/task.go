@@ -1,6 +1,7 @@
 package task
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -24,6 +25,12 @@ var (
 	ErrNilOutput          = fmt.Errorf(`output channel must not be nil`)
 	ErrPresentInputOutput = fmt.Errorf(`either input or output must be set, not both`)
 )
+
+var byteBufferPool = sync.Pool{
+	New: func() any {
+		return new(bytes.Buffer)
+	},
+}
 
 type Task interface {
 	Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) error
@@ -119,13 +126,26 @@ func (b *Base) SendRecord(r *record.Record, output chan<- *record.Record) /* we 
 		output <- r
 	}()
 
+	// get a buffer from the pool
+	buf := byteBufferPool.Get().(*bytes.Buffer)
+	defer byteBufferPool.Put(buf)
+	buf.Reset()
+
 	// before we set context, let's serialize the whole record
-	data, err := json.Marshal(r)
-	if err != nil {
-		// TODO: do prom metrics / log event to syslog
+	if err := json.NewEncoder(buf).Encode(r); err != nil {
 		fmt.Println(`ERROR (marshal):`, err)
 		return
 	}
+
+	data := buf.Bytes()
+
+	// get another buffer for the query results
+	ctxBuf := byteBufferPool.Get().(*bytes.Buffer)
+	defer byteBufferPool.Put(ctxBuf)
+	ctxBuf.Reset()
+
+	ctxEncoder := json.NewEncoder(ctxBuf)
+
 	// Set the context values for the record
 	for name, query := range b.Context {
 		queryResult, err := query.Execute(data)
@@ -135,13 +155,18 @@ func (b *Base) SendRecord(r *record.Record, output chan<- *record.Record) /* we 
 			return
 		}
 		// now, let's marshal it to json and set in the context...
-		contextValueJson, err := json.Marshal(queryResult)
-		if err != nil {
+		if err := ctxEncoder.Encode(queryResult); err != nil {
 			// TODO: do prom metrics / log event to syslog
 			fmt.Println(`ERROR (result):`, err)
 			return
 		}
-		r.SetMetaValue(name, string(contextValueJson))
+		// Remove trailing newline added by json.Encoder.Encode()
+		value := ctxBuf.String()
+		if len(value) > 0 && value[len(value)-1] == '\n' {
+			value = value[:len(value)-1]
+		}
+		r.SetMetaValue(name, value)
+		ctxBuf.Reset()
 	}
 
 }
