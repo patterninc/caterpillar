@@ -34,8 +34,8 @@ func (s *split) Run(ctx context.Context, input <-chan *record.Record, output cha
 		}
 
 		data := bytes.TrimSuffix(r.Data, delimBytes)
-		lines := bytes.SplitSeq(data, delimBytes)
-		for line := range lines {
+		lines := bytes.Split(data, delimBytes)
+		for _, line := range lines {
 			s.SendData(r.Meta, line, output)
 		}
 	}
