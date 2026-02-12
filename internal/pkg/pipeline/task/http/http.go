@@ -68,7 +68,7 @@ type httpCore struct {
 }
 
 type result struct {
-	Data    []byte              `json:"data"`
+	Data    string              `json:"data"`
 	Headers map[string][]string `json:"headers"`
 }
 
@@ -189,7 +189,7 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 				rc.SetMetaValue(contextKey, strings.Join(headerValues, "; "))
 			}
 
-			h.SendData(rc.Meta, result.Data, output)
+			h.SendData(rc.Meta, []byte(result.Data), output)
 		}
 
 		// if we do not have a way to define the next page, we bail...
@@ -356,7 +356,7 @@ func (h *httpCore) call(endpoint string) (*result, error) {
 		}
 
 		return &result{
-			Data:    body,
+			Data:    string(body),
 			Headers: response.Header,
 		}, nil
 	}
