@@ -281,8 +281,7 @@ func (h *httpCore) call(endpoint string) (*result, error) {
 	if h.Proxy != nil {
 		transport, err := h.Proxy.getTransport()
 		if err != nil {
-			fmt.Printf("error configuring proxy: %s\n", err)
-			return nil, err
+			return nil, fmt.Errorf("error configuring proxy: %w", err)
 		}
 		client.Transport = transport
 	}
