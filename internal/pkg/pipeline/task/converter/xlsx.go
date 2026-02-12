@@ -13,11 +13,13 @@ const (
 )
 
 type xlsx struct {
-	Sheets []string `yaml:"sheets,omitempty" json:"sheets,omitempty"`
+	Sheets          []string       `yaml:"sheets,omitempty" json:"sheets,omitempty"`
+	SkipRows        int            `yaml:"skip_rows,omitempty" json:"skip_rows,omitempty"`
+	SkipRowsBySheet map[string]int `yaml:"skip_rows_by_sheet,omitempty" json:"skip_rows_by_sheet,omitempty"`
 }
 
 func (x *xlsx) convert(data []byte, _ string) ([]converterOutput, error) {
-	reader, err := excelize.OpenReader(bytes.NewReader(data))
+	reader, err := excelize.OpenReader(bytes.NewReader(data), excelize.Options{Password: ""})
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +39,7 @@ func (x *xlsx) convert(data []byte, _ string) ([]converterOutput, error) {
 	outputs := make([]converterOutput, 0, len(sheets))
 
 	for _, sheet := range sheets {
-		output, err := readSheet(reader, sheet)
+		output, err := readSheet(reader, sheet, x.getRowsToSkip(sheet))
 		if err != nil {
 			return nil, err
 		}
@@ -48,7 +50,7 @@ func (x *xlsx) convert(data []byte, _ string) ([]converterOutput, error) {
 	return outputs, nil
 }
 
-func readSheet(reader *excelize.File, sheet string) (converterOutput, error) {
+func readSheet(reader *excelize.File, sheet string, rowsToSkip int) (converterOutput, error) {
 	// Create buffer for this sheet
 	var buff bytes.Buffer
 	writer := csvEncoder.NewWriter(&buff)
@@ -61,7 +63,13 @@ func readSheet(reader *excelize.File, sheet string) (converterOutput, error) {
 	defer rows.Close()
 
 	// Write rows to buffer
+	i := 0
 	for rows.Next() {
+		if i < rowsToSkip {
+			i++
+			continue
+		}
+
 		cols, err := rows.Columns()
 		if err != nil {
 			return converterOutput{}, err
@@ -81,4 +89,14 @@ func readSheet(reader *excelize.File, sheet string) (converterOutput, error) {
 			sheetName: sheet,
 		},
 	}, nil
+}
+
+func (x *xlsx) getRowsToSkip(sheet string) int {
+	if x.SkipRowsBySheet != nil {
+		if val, found := x.SkipRowsBySheet[sheet]; found {
+			return val
+		}
+	}
+
+	return x.SkipRows
 }

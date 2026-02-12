@@ -47,6 +47,8 @@ Convert a single line to the SSTable which could be stored on s3 or via file. It
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `sheets` | array | all sheets | Optional array of sheet names to process. If not specified, all sheets are processed |
+| `skip_rows` | int | `0` | Number of rows to skip from the beginning of each sheet (e.g., for header rows) |
+| `skip_rows_by_sheet` | map[string]int | - | Per-sheet row skip overrides. Keys are sheet names, values are rows to skip. Takes precedence over `skip_rows` |
 
 **Important:** The XLSX converter emits **one record per sheet**. Each record contains the sheet's data in CSV format, with the sheet name available in the record context under the key `xlsx_sheet_name`.
 
@@ -111,6 +113,21 @@ tasks:
   - name: echo_sheet_name
     type: echo
     # Each record will have xlsx_sheet_name in context
+```
+
+### Excel to CSV with row skipping:
+```yaml
+tasks:
+  - name: read_excel
+    type: file
+    path: report.xlsx
+  - name: convert_excel
+    type: converter
+    format: xlsx
+    skip_rows: 1  # Skip header row on all sheets
+    skip_rows_by_sheet:
+      Summary: 3  # Skip 3 rows on Summary sheet (overrides skip_rows)
+      RawData: 0  # Don't skip any rows on RawData sheet
 ```
 
 ## Sample Pipelines
