@@ -92,11 +92,16 @@ func readSheet(reader *excelize.File, sheet string, rowsToSkip int) (converterOu
 }
 
 func (x *xlsx) getRowsToSkip(sheet string) int {
+	rowsToSkip := x.SkipRows
 	if x.SkipRowsBySheet != nil {
 		if val, found := x.SkipRowsBySheet[sheet]; found {
-			return val
+			rowsToSkip = val
 		}
 	}
 
-	return x.SkipRows
+	if rowsToSkip < 0 {
+		rowsToSkip = 0
+	}
+
+	return rowsToSkip
 }
