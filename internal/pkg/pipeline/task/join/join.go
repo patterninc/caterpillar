@@ -107,6 +107,6 @@ func (j *join) sendJoinedRecords(output chan<- *record.Record) {
 		joinedData.Write(r.Data)
 	}
 
-	j.SendData(nil, joinedData.Bytes(), output)
-
+	data := bytes.Clone(joinedData.Bytes())
+	j.SendData(nil, data, output)
 }
