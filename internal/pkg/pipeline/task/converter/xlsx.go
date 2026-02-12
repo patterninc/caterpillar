@@ -19,7 +19,7 @@ type xlsx struct {
 }
 
 func (x *xlsx) convert(data []byte, _ string) ([]converterOutput, error) {
-	reader, err := excelize.OpenReader(bytes.NewReader(data), excelize.Options{Password: ""})
+	reader, err := excelize.OpenReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
