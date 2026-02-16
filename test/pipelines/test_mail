@@ -1,0 +1,49 @@
+From: sender@example.com
+To: receiver@example.com
+Subject: Test Email with PDF, CSV, and HTML Attachments
+Date: Mon, 16 Feb 2026 10:00:00 +0000
+Message-ID: <test123@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUNDARY123"
+
+--BOUNDARY123
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: 7bit
+
+Hello,
+
+Please find attached the PDF, CSV, and HTML files for testing.
+
+Regards,
+Test Sender
+
+--BOUNDARY123
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="test.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5k
+b2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPj4K
+ZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovTWVkaWFCb3gg
+WzAgMCAzMDAgMTQ0XQovQ29udGVudHMgNCAwIFIKPj4KZW5kb2JqCjQgMCBvYmoKPDwKL0xl
+bmd0aCA0NAo+PgpzdHJlYW0KQlQKL0YxIDEyIFRmCjEwMCAxMDAgVGQKKFRlc3QgUERGIEZp
+bGUpIFRqCkVUCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDUKMDAwMDAwMDAwMCA2NTUzNSBm
+IAowMDAwMDAwMDEwIDAwMDAwIG4gCjAwMDAwMDAwNTMgMDAwMDAgbiAKMDAwMDAwMDEwMCAw
+MDAwMCBuIAowMDAwMDAwMTc1IDAwMDAwIG4gCnRyYWlsZXIKPDwKL1NpemUgNQovUm9vdCAx
+IDAgUgo+PgpzdGFydHhyZWYKMjUwCiUlRU9G
+
+--BOUNDARY123
+Content-Type: text/csv
+Content-Disposition: attachment; filename="test.csv"
+Content-Transfer-Encoding: base64
+
+bmFtZSxhZ2UKSm9obiwzMApBbGljZSwyNQ==
+
+--BOUNDARY123
+Content-Type: text/html
+Content-Disposition: attachment; filename="test.html"
+Content-Transfer-Encoding: base64
+
+PGh0bWw+Cjxib2R5PkhlbGxvIFdvcmxkPC9ib2R5Pgo8L2h0bWw+
+
+--BOUNDARY123--
