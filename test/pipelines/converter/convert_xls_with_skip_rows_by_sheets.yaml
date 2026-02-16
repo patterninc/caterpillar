@@ -5,8 +5,10 @@ tasks:
   - name: convert_from_xls
     type: converter
     format: xlsx
-    sheets: ["Sheet1"]
-    skip_rows: 2
+    skip_rows_by_sheet:
+      Sheet1: 1
+      Sheet2: 2
+      Sheet3: 3
   - name: write_csv
     type: file
-    path: test-result.csv
+    path: test-result_{{ macro "uuid" }}.csv
