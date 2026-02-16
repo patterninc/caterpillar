@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"mime"
 	"path/filepath"
+
 	"github.com/jhillyerd/enmime"
 )
 
@@ -29,18 +30,17 @@ func (c *eml) convert(data []byte, _ string) ([]converterOutput, error) {
 		// Fallback for filename length
 		if len(fileName) > 200 {
 			ext := filepath.Ext(fileName)
-			if len(ext) > 50 {
-				fileName = fileName[:100]
-			} else {
-				base := fileName[:len(fileName)-len(ext)]
-				inputLen := 200 - len(ext)
-				if len(base) > inputLen {
-					base = base[:inputLen]
-				}
+			base := fileName[:len(fileName)-len(ext)]
+
+			maxBaseLen := 200 - len(ext)
+			if maxBaseLen > 0 {
+				base = base[:maxBaseLen]
 				fileName = base + ext
+			} else {
+				fileName = fileName[:200]
 			}
 		}
-		
+
 		// Fallback for missing content type
 		if contentType == "" {
 			opts := mime.TypeByExtension(filepath.Ext(fileName))
