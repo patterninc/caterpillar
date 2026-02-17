@@ -7,4 +7,4 @@ tasks:
     format: eml
   - name: save_output
     type: file
-    path: output/{{ context "filename" }}
+    path: output/{{ context "converter_filename" }}

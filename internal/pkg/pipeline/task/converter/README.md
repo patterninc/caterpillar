@@ -45,12 +45,13 @@ The EML converter does not have specific configuration options. It automatically
 
 -   **HTML Body**: Saved as `body.html`
 -   **Text Body**: Saved as `body.txt`
+-   **Headers**: Saved as `headers.json` (key-value pairs of all email headers)
 -   **Attachments**: Saved with their original filenames (or sanitized/truncated if necessary)
 -   **Inline Images**: Saved with confirmable filenames
 
 Metadata generated for each output:
 
--   `filename`: The name of the output file
+-   `converter_filename`: The name of the output file
 -   `content_type`: The MIME type of the content
 
 ### SST Format Options

@@ -2,6 +2,7 @@ package converter
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"mime"
 	"path/filepath"
@@ -48,8 +49,8 @@ func (c *eml) convert(data []byte, _ string) ([]converterOutput, error) {
 		outputs = append(outputs, converterOutput{
 			Data: content,
 			Metadata: map[string]string{
-				"filename":     fileName,
-				"content_type": contentType,
+				"converter_filename": fileName,
+				"content_type":       contentType,
 			},
 		})
 	}
@@ -59,6 +60,21 @@ func (c *eml) convert(data []byte, _ string) ([]converterOutput, error) {
 	}
 	if envelope.Text != "" {
 		addOutput([]byte(envelope.Text), "body.txt", "text/plain")
+	}
+
+	// Extract headers
+	headerMap := make(map[string]string)
+	for _, key := range envelope.GetHeaderKeys() {
+		headerMap[key] = envelope.GetHeader(key)
+	}
+	if len(headerMap) > 0 {
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(headerMap); err == nil {
+			addOutput(buf.Bytes(), "headers.json", "application/json")
+		}
 	}
 
 	for _, attachment := range envelope.Attachments {
