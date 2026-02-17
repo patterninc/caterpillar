@@ -31,14 +31,8 @@ func (c *eml) convert(data []byte, _ string) ([]converterOutput, error) {
 		if len(fileName) > 200 {
 			ext := filepath.Ext(fileName)
 			base := fileName[:len(fileName)-len(ext)]
-
-			maxBaseLen := 200 - len(ext)
-			if maxBaseLen > 0 {
-				base = base[:maxBaseLen]
-				fileName = base + ext
-			} else {
-				fileName = fileName[:200]
-			}
+			base = base[:200-len(ext)]
+			fileName = base + ext
 		}
 
 		// Fallback for missing content type
