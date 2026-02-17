@@ -1,6 +1,6 @@
 # Converter Task
 
-The `converter` task converts data between different formats, supporting CSV, HTML, XLSX (Excel), and other data format transformations.
+The `converter` task converts data between different formats, supporting CSV, HTML, XLSX (Excel), EML (Email), and other data format transformations.
 
 ## Function
 
@@ -21,7 +21,7 @@ The converter task transforms data between different formats. It receives record
 |-------|------|---------|-------------|
 | `name` | string | - | Task name for identification |
 | `type` | string | `converter` | Must be "converter" |
-| `format` | string | - | Format to convert to (csv, html, sst, xlsx) |
+| `format` | string | - | Format to convert to (csv, html, sst, xlsx, eml) |
 | `delimiter` | string| \t | Used only in sst converter for spliting key and value| 
 
 ### CSV Format Options
@@ -38,6 +38,20 @@ The converter task transforms data between different formats. It receives record
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `container` | string | - | XPath expression to select specific container elements |
+
+### EML Format Options
+
+The EML converter does not have specific configuration options. It automatically parses the email content and extracts:
+
+-   **HTML Body**: Saved as `body.html`
+-   **Text Body**: Saved as `body.txt`
+-   **Attachments**: Saved with their original filenames (or sanitized/truncated if necessary)
+-   **Inline Images**: Saved with confirmable filenames
+
+Metadata generated for each output:
+
+-   `filename`: The name of the output file
+-   `content_type`: The MIME type of the content
 
 ### SST Format Options
 Convert a single line to the SSTable which could be stored on s3 or via file. It expects a single line as input
@@ -58,6 +72,7 @@ The converter supports the following formats:
 - **CSV**: Converts CSV data to JSON with column mapping and type conversion
 - **HTML**: Converts HTML to JSON representation with element structure
 - **XLSX**: Converts Excel files to CSV format. **Note:** Each sheet in the Excel file is emitted as a separate record with the sheet name stored in the context (key: `xlsx_sheet_name`)
+- **EML**: Converts EML (Email) files to their constituent parts (HTML body, Text body, Attachments)
 
 ## Example Configurations
 
@@ -84,6 +99,18 @@ tasks:
     type: converter
     format: html
     container: "//div[@class='content']"
+
+### EML processing:
+```yaml
+tasks:
+  - name: read_email
+    type: file
+    path: test_email
+  - name: process_email
+    type: converter
+    format: eml
+  # Output will correspond to body parts and attachments
+```
 ```
 
 ### Excel to CSV conversion (all sheets):
@@ -140,6 +167,7 @@ tasks:
 ## Use Cases
 
 - **Data format conversion**: Convert between different data formats
+- **Email processing**: Parse MIME/EML files to extract bodies and attachments
 - **Excel processing**: Extract and process data from Excel spreadsheets, with separate handling for each sheet
 - **API integration**: Transform data for different API requirements
 - **Database migration**: Convert data for different database systems
