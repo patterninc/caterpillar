@@ -12,6 +12,7 @@ tasks:
     retry_limit: 1
     cert: |
       {{ indent 6 (secret "/kafka/ca-cert") }}
+    task_concurrency: 3
 
   - name: echo_results
     type: echo
