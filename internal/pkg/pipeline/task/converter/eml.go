@@ -12,6 +12,8 @@ import (
 
 type eml struct{}
 
+const maxFilenameLength = 200
+
 func (c *eml) convert(data []byte, _ string) ([]converterOutput, error) {
 
 	envelope, err := enmime.ReadEnvelope(bytes.NewReader(data))
@@ -21,45 +23,15 @@ func (c *eml) convert(data []byte, _ string) ([]converterOutput, error) {
 
 	var outputs []converterOutput
 
-	addOutput := func(content []byte, fileName string, contentType string) {
-		if len(content) == 0 {
-			return
-		}
-
-		fileName = filepath.Base(fileName)
-
-		// Fallback for filename length
-		if len(fileName) > 200 {
-			ext := filepath.Ext(fileName)
-			base := fileName[:len(fileName)-len(ext)]
-			base = base[:200-len(ext)]
-			fileName = base + ext
-		}
-
-		// Fallback for missing content type
-		if contentType == "" {
-			opts := mime.TypeByExtension(filepath.Ext(fileName))
-			if opts != "" {
-				contentType = opts
-			} else {
-				contentType = "application/octet-stream"
-			}
-		}
-
-		outputs = append(outputs, converterOutput{
-			Data: content,
-			Metadata: map[string]string{
-				"converter_filename": fileName,
-				"content_type":       contentType,
-			},
-		})
-	}
-
 	if envelope.HTML != "" {
-		addOutput([]byte(envelope.HTML), "body.html", "text/html")
+		if out := c.processOutput([]byte(envelope.HTML), "body.html", "text/html"); out != nil {
+			outputs = append(outputs, *out)
+		}
 	}
 	if envelope.Text != "" {
-		addOutput([]byte(envelope.Text), "body.txt", "text/plain")
+		if out := c.processOutput([]byte(envelope.Text), "body.txt", "text/plain"); out != nil {
+			outputs = append(outputs, *out)
+		}
 	}
 
 	// Extract headers
@@ -73,17 +45,57 @@ func (c *eml) convert(data []byte, _ string) ([]converterOutput, error) {
 		enc.SetEscapeHTML(false)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(headerMap); err == nil {
-			addOutput(buf.Bytes(), "headers.json", "application/json")
+			if out := c.processOutput(buf.Bytes(), "headers.json", "application/json"); out != nil {
+				outputs = append(outputs, *out)
+			}
 		}
 	}
 
 	for _, attachment := range envelope.Attachments {
-		addOutput(attachment.Content, attachment.FileName, attachment.ContentType)
+		if out := c.processOutput(attachment.Content, attachment.FileName, attachment.ContentType); out != nil {
+			outputs = append(outputs, *out)
+		}
 	}
 
 	for _, inline := range envelope.Inlines {
-		addOutput(inline.Content, inline.FileName, inline.ContentType)
+		if out := c.processOutput(inline.Content, inline.FileName, inline.ContentType); out != nil {
+			outputs = append(outputs, *out)
+		}
 	}
 
 	return outputs, nil
+}
+
+func (c *eml) processOutput(content []byte, fileName string, contentType string) *converterOutput {
+	if len(content) == 0 {
+		return nil
+	}
+
+	fileName = filepath.Base(fileName)
+
+	// Fallback for filename length
+	if len(fileName) > maxFilenameLength {
+		ext := filepath.Ext(fileName)
+		base := fileName[:len(fileName)-len(ext)]
+		base = base[:maxFilenameLength-len(ext)]
+		fileName = base + ext
+	}
+
+	// Fallback for missing content type
+	if contentType == "" {
+		opts := mime.TypeByExtension(filepath.Ext(fileName))
+		if opts != "" {
+			contentType = opts
+		} else {
+			contentType = "application/octet-stream"
+		}
+	}
+
+	return &converterOutput{
+		Data: content,
+		Metadata: map[string]string{
+			"converter_filename": fileName,
+			"content_type":       contentType,
+		},
+	}
 }
