@@ -46,6 +46,7 @@ type kafka struct {
 	BatchSize          int               `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`                     // number of messages to read/write in a batch
 	RetryLimit         *int              `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`                   // number of retries for read errors
 	ExitOnEmpty        bool              `yaml:"exit_on_empty,omitempty" json:"exit_on_empty,omitempty"`               // exit when no more messages are available
+	Partition		   int               `yaml:"partition,omitempty" json:"partition,omitempty"`                       // partition to read from or write to (optional, defaults to all partitions)
 	ctx                context.Context   // parent context
 	timeout            time.Duration     // timeout duration calculated from Timeout
 	batchFlushInterval time.Duration     // batch flush interval calculated from BatchFlushInterval
@@ -238,6 +239,7 @@ func (k *kafka) getReader(dialer *kg.Dialer) *kg.Reader {
 		Topic:         k.Topic,
 		Dialer:        dialer,
 		QueueCapacity: k.BatchSize,
+		Partition:     k.Partition,
 	}
 	if k.GroupID != "" {
 		readerConfig.GroupID = k.GroupID
