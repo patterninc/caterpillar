@@ -1,0 +1,10 @@
+tasks:
+  - name: read_eml_file
+    type: file
+    path: test/pipelines/converter/test_mail
+  - name: convert_from_eml
+    type: converter
+    format: eml
+  - name: save_output
+    type: file
+    path: output/{{ context "converter_filename" }}

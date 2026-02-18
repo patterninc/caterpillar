@@ -40,6 +40,7 @@ func (c *core) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		`html`: new(html),
 		`sst`:  new(sst),
 		`xlsx`: new(xlsx),
+		`eml`:  new(eml),
 	}
 
 	// let's figure out what converter we'll use
