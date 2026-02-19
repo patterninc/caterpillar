@@ -164,10 +164,7 @@ func (k *kafka) read(output chan<- *record.Record, runCtx context.Context) error
 		}
 	}()
 
-	// per-run retry counters (local to this invocation)
-	readErrRetries := *k.RetryLimit
-	emptyReads := 0
-
+	retriesNumber := 0
 	for {
 		select {
 		case <-runCtx.Done():
@@ -179,14 +176,18 @@ func (k *kafka) read(output chan<- *record.Record, runCtx context.Context) error
 			cancel()
 
 			if err != nil {
-				err, ok := k.handleReadError(err, &readErrRetries, &emptyReads)
-				if !ok {
+				if !k.shouldRetry(err) {
 					return err
+				}
+				retriesNumber++
+				fmt.Printf("kafka error while reading message for attempt #%d with error: %v\n", retriesNumber, err)
+				if retriesNumber > *k.RetryLimit {
+					fmt.Printf("kafka error while reading message, reached retry limit (%d), stopping reader\n", *k.RetryLimit)
+					return nil
 				}
 				continue
 			}
-			readErrRetries = *k.RetryLimit
-			emptyReads = 0
+			retriesNumber = 0
 
 			// process the message
 			k.SendData(runCtx, m.Value, output)
@@ -274,34 +275,24 @@ func (k *kafka) handleWriteError(err error) error {
 }
 
 // handleReadError processes errors returned from reader.FetchMessage
-func (k *kafka) handleReadError(err error, readErrRetries *int, emptyReads *int) (returnErr error, shouldRetry bool) {
+func (k *kafka) shouldRetry(err error) bool {
 	if errors.Is(err, io.EOF) {
 		// this is not reliable for kafka end of topic detection
 		fmt.Printf("kafka reached end of topic: %v\n", k.Topic)
-		return nil, false
+		return false
 	}
 	if errors.Is(err, context.Canceled) {
 		// not an error, just context cancellation
 		fmt.Printf("kafka reader context canceled: %v\n", err)
-		return nil, false
+		return false
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
+
+	if errors.Is(err, context.DeadlineExceeded)  && !k.ExitOnEmpty {
 		// not an error, just context deadline exceeded
-		(*emptyReads)++
-		fmt.Printf("kafka no message returned while reading message for attempt #%d with error: %v\n", *emptyReads, err)
-		if k.ExitOnEmpty && *emptyReads > *k.RetryLimit {
-			fmt.Printf("kafka no message returned, reached retry limit (%d), stopping reader\n", *k.RetryLimit)
-			return nil, false
-		}
-		return nil, true
+		fmt.Printf("kafka no message returned while reading message with error: %v\n", err)
+		return false
 	}
-	// other errors - log and retry up to retry limit
-	fmt.Printf("kafka error while reading message for attempt #%d with error: %v\n", (*k.RetryLimit-*readErrRetries)+1, err)
-	(*readErrRetries)--
-	if *readErrRetries <= 0 {
-		return fmt.Errorf("kafka reached read error retry limit (%d), stopping reader", *k.RetryLimit), false
-	}
-	return nil, true
+	return true
 }
 
 // createDialer creates a kafka dialer with optional SASL mechanism and TLS configuration
