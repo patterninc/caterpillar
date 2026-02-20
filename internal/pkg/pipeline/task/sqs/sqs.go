@@ -86,7 +86,7 @@ func (s *sqs) extractRegionFromQueueURL() string {
 	return defaultRegion
 }
 
-func (s *sqs) Run(input <-chan *record.Record, output chan<- *record.Record) error {
+func (s *sqs) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) error {
 
 	// Client is already initialized in RunPreHook - just use it
 	if input != nil {
@@ -159,7 +159,7 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record, rec
 				// create new record and send it downstream
 
 				if output != nil {
-					s.SendData(ctx, []byte(*m.Body), output)
+					s.SendData(nil, []byte(*m.Body), output)
 				}
 
 				// send receipt to receipts channel for deletion

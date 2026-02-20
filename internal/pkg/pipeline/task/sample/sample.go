@@ -1,6 +1,7 @@
 package sample
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
@@ -48,7 +49,7 @@ func New() (task.Task, error) {
 	}, nil
 }
 
-func (s *sample) Run(input <-chan *record.Record, output chan<- *record.Record) error {
+func (s *sample) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) error {
 
 	// if this task is first or last in the pipeline, let's bail...
 	if input == nil || output == nil {

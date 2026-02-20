@@ -2,6 +2,7 @@ package compress
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 
@@ -47,7 +48,7 @@ func (c *core) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return nil
 }
 
-func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
+func (c *core) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
 	if input == nil {
 		return task.ErrNilInput
@@ -83,7 +84,7 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 		}
 
 		if output != nil {
-			c.SendData(r.Context, transformedData, output)
+			c.SendData(r.Meta, transformedData, output)
 		}
 	}
 

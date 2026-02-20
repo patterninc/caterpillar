@@ -1,6 +1,7 @@
 package jq
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -20,7 +21,7 @@ func New() (task.Task, error) {
 	return &jq{}, nil
 }
 
-func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
+func (j *jq) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
 	if input != nil && output != nil {
 		for {
@@ -46,24 +47,24 @@ func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err
 			if splitItems, ok := items.([]any); j.Explode && ok {
 				for _, splitItem := range splitItems {
 					if j.AsRaw {
-						j.SendData(r.Context, fmt.Appendf(nil, "%v", splitItem), output)
+						j.SendData(r.Meta, fmt.Appendf(nil, "%v", splitItem), output)
 					} else {
 						jsonItem, err := json.Marshal(splitItem)
 						if err != nil {
 							return err
 						}
-						j.SendData(r.Context, jsonItem, output)
+						j.SendData(r.Meta, jsonItem, output)
 					}
 				}
 			} else {
 				if j.AsRaw {
-					j.SendData(r.Context, fmt.Appendf(nil, "%v", items), output)
+					j.SendData(r.Meta, fmt.Appendf(nil, "%v", items), output)
 				} else {
 					jsonItem, err := json.Marshal(items)
 					if err != nil {
 						return err
 					}
-					j.SendData(r.Context, jsonItem, output)
+					j.SendData(r.Meta, jsonItem, output)
 				}
 			}
 		}

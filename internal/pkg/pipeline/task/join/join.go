@@ -40,7 +40,7 @@ func New() (task.Task, error) {
 	}, nil
 }
 
-func (j *join) Run(input <-chan *record.Record, output chan<- *record.Record) error {
+func (j *join) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) error {
 
 	if input == nil || output == nil {
 		return ErrIncorrectInputOutput
@@ -103,6 +103,6 @@ func (j *join) sendJoinedRecords(output chan<- *record.Record) {
 		joinedData.Write(r.Data)
 	}
 
-	j.SendData(ctx, []byte(joinedData.String()), output)
+	j.SendData(nil, []byte(joinedData.String()), output)
 
 }

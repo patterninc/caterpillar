@@ -124,7 +124,7 @@ func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 
 }
 
-func (h *httpCore) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
+func (h *httpCore) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
 	// if we have input, treat each value as a URL and try to get data from it...
 	if input != nil {
@@ -160,9 +160,9 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 		return nil
 	}
 
-	// create a default record context if none provided
+	// create a default record if none provided
 	if rc == nil {
-		rc = &record.Record{Context: context.Background()}
+		rc = &record.Record{}
 	}
 
 	// TODO: perhaps expose the starting page number as a parameter for the task
@@ -181,10 +181,10 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 			// Header names are preserved as-is and stored with the http-header- prefix
 			for headerName, headerValues := range result.Headers {
 				contextKey := fmt.Sprintf(headerContextPrefix, headerName)
-				rc.SetContextValue(contextKey, strings.Join(headerValues, "; "))
+				rc.SetMetaValue(contextKey, strings.Join(headerValues, "; "))
 			}
 
-			h.SendData(rc.Context, []byte(result.Data), output)
+			h.SendData(rc.Meta, []byte(result.Data), output)
 		}
 
 		// if we do not have a way to define the next page, we bail...

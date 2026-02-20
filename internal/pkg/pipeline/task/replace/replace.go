@@ -1,6 +1,7 @@
 package replace
 
 import (
+	"context"
 	"regexp"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
@@ -17,7 +18,7 @@ func New() (task.Task, error) {
 	return &replace{}, nil
 }
 
-func (r *replace) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
+func (r *replace) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
 	rx, err := regexp.Compile(r.Expression)
 	if err != nil {
@@ -30,7 +31,7 @@ func (r *replace) Run(input <-chan *record.Record, output chan<- *record.Record)
 			if !ok {
 				break
 			}
-			r.SendData(record.Context, []byte(rx.ReplaceAllString(string(record.Data), r.Replacement)), output)
+			r.SendData(record.Meta, []byte(rx.ReplaceAllString(string(record.Data), r.Replacement)), output)
 		}
 	}
 

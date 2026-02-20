@@ -1,6 +1,7 @@
 package archive
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
@@ -83,7 +84,7 @@ func (c *core) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return nil
 }
 
-func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
+func (c *core) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
 	if input == nil {
 		return task.ErrNilInput

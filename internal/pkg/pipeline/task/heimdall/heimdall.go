@@ -1,6 +1,7 @@
 package heimdall
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -53,7 +54,7 @@ func New() (task.Task, error) {
 	return h, nil
 }
 
-func (h *heimdall) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
+func (h *heimdall) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
 	// If input is provided, override the job request context
 	if input != nil {

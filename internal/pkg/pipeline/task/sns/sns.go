@@ -64,7 +64,7 @@ func (s *snsTask) Init() error {
 	return nil
 }
 
-func (s *snsTask) Run(input <-chan *record.Record, output chan<- *record.Record) error {
+func (s *snsTask) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) error {
 	if input == nil {
 		return task.ErrNilInput
 	}
@@ -101,7 +101,7 @@ func (s *snsTask) Run(input <-chan *record.Record, output chan<- *record.Record)
 			}
 		}
 
-		_, err := s.client.Publish(r.Context, publishInput)
+		_, err := s.client.Publish(ctx, publishInput)
 		if err != nil {
 			return fmt.Errorf("failed to publish to SNS topic %s: %w", s.TopicArn, err)
 		}

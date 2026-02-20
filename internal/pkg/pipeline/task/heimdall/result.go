@@ -54,7 +54,7 @@ func (h *heimdall) sendToOutput(result *result, output chan<- *record.Record) er
 	}
 
 	for _, item := range items {
-		h.SendData(ctx, item, output)
+		h.SendData(nil, item, output)
 	}
 
 	return nil

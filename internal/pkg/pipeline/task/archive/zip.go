@@ -39,7 +39,7 @@ func (z *zipArchive) Read() {
 			// check the file type is regular file
 			if f.FileInfo().Mode().IsRegular() {
 
-				rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), filepath.Base(f.Name))
+				rc.SetMetaValue(task.MetaKeyArchiveFileNameWrite, filepath.Base(f.Name))
 
 				fs, err := f.Open()
 				if err != nil {
@@ -55,7 +55,7 @@ func (z *zipArchive) Read() {
 
 				fs.Close()
 
-				z.SendData(rc.Context, buf, z.OutputChan)
+				z.SendData(rc.Meta, buf, z.OutputChan)
 			}
 		}
 	}
@@ -73,7 +73,7 @@ func (z *zipArchive) Write() {
 			break
 		}
 
-		filePath, found := rec.GetContextValue(string(task.CtxKeyFileNameWrite))
+		filePath, found := rec.GetMetaValue(task.MetaKeyFileNameWrite)
 		if !found {
 			log.Fatal("filepath not set in context")
 		}
@@ -93,7 +93,7 @@ func (z *zipArchive) Write() {
 			log.Fatal(err)
 		}
 
-		rc.Context = rec.Context
+		rc.Meta = rec.Meta
 	}
 
 	if err := zipWriter.Close(); err != nil {
@@ -101,6 +101,6 @@ func (z *zipArchive) Write() {
 	}
 
 	// Send the complete ZIP archive
-	z.SendData(rc.Context, zipBuf.Bytes(), z.OutputChan)
+	z.SendData(rc.Meta, zipBuf.Bytes(), z.OutputChan)
 
 }

@@ -28,7 +28,7 @@ func (s String) Get(r *record.Record) (string, error) {
 		return resolveMacro, nil
 	}
 
-	return evaluateContext(resolveMacro, r)
+	return evaluateMeta(resolveMacro, r)
 
 }
 
@@ -63,7 +63,7 @@ func Load(configFile string, obj interface{}) error {
 		"env":     getEnvironmentVariable, // returns environment variable
 		"macro":   setMacroPlaceholder,    // set placeholder string for macro replacement
 		"secret":  getSecret,              // we use this template function to inject secrets from parameter store
-		"context": setContextPlaceholder,  // set placeholder string for context replacement
+		"context": SetMetaPlaceholder,     // set placeholder string for context replacement. Maintaining "context" as a template function name for backward compatibility
 		// indent: add `n` spaces after every newline in the value (useful when
 		// injecting multiline values into YAML block scalars)
 		"indent": func(n int, v string) string {

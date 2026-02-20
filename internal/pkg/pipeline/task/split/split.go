@@ -1,6 +1,7 @@
 package split
 
 import (
+	"context"
 	"strings"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
@@ -21,7 +22,7 @@ func New() (task.Task, error) {
 		Delimiter: defaultDelimiter,
 	}, nil
 }
-func (s *split) Run(input <-chan *record.Record, output chan<- *record.Record) error {
+func (s *split) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) error {
 
 	for {
 		r, ok := s.GetRecord(input)
@@ -30,7 +31,7 @@ func (s *split) Run(input <-chan *record.Record, output chan<- *record.Record) e
 		}
 		lines := strings.Split(strings.TrimSuffix(string(r.Data), s.Delimiter), s.Delimiter)
 		for _, line := range lines {
-			s.SendData(r.Context, []byte(line), output)
+			s.SendData(r.Meta, []byte(line), output)
 		}
 	}
 

@@ -53,7 +53,7 @@ func (p *parameterStore) Init() error {
 	return nil
 }
 
-func (p *parameterStore) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
+func (p *parameterStore) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
 	for {
 		r, ok := p.GetRecord(input)

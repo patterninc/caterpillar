@@ -1,6 +1,7 @@
 package flatten
 
 import (
+	"context"
 	"encoding/json"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
@@ -16,7 +17,7 @@ func New() (task.Task, error) {
 	return &flatten{}, nil
 }
 
-func (f *flatten) Run(input <-chan *record.Record, output chan<- *record.Record) error {
+func (f *flatten) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) error {
 
 	for {
 		r, ok := f.GetRecord(input)
@@ -41,7 +42,7 @@ func (f *flatten) Run(input <-chan *record.Record, output chan<- *record.Record)
 			return err
 		}
 
-		f.SendData(r.Context, flatJson, output)
+		f.SendData(r.Meta, flatJson, output)
 	}
 
 	return nil

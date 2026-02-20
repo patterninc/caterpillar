@@ -1,6 +1,7 @@
 package delay
 
 import (
+	"context"
 	"time"
 
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
@@ -23,7 +24,7 @@ func New() (task.Task, error) {
 	}, nil
 }
 
-func (d *delay) Run(input <-chan *record.Record, output chan<- *record.Record) error {
+func (d *delay) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) error {
 
 	for {
 		r, ok := d.GetRecord(input)

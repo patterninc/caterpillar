@@ -57,7 +57,7 @@ func New() (task.Task, error) {
 	}, nil
 }
 
-func (f *file) Run(input <-chan *record.Record, output chan<- *record.Record) error {
+func (f *file) Run(ctx context.Context, input <-chan *record.Record, output chan<- *record.Record) error {
 
 	// let's check if we read file or we write file...
 	if input != nil && output != nil {
@@ -134,12 +134,12 @@ func (f *file) readFile(output chan<- *record.Record) error {
 			return err
 		}
 
-		// Create a default record with context
-		rc := &record.Record{Context: ctx}
-		rc.SetContextValue(string(task.CtxKeyFileNameWrite), filepath.Base(path))
+		// create a default record with file name in context
+		rc := &record.Record{}
+		rc.SetMetaValue(task.MetaKeyFileNameWrite, filepath.Base(path))
 
 		// let's write content to output channel
-		f.SendData(rc.Context, content, output)
+		f.SendData(rc.Meta, content, output)
 
 	}
 
@@ -174,7 +174,7 @@ func (f *file) writeFile(input <-chan *record.Record) error {
 		var fs file
 
 		fs = *f
-		filePath, found := rc.GetContextValue(string(task.CtxKeyArchiveFileNameWrite))
+		filePath, found := rc.GetMetaValue(task.MetaKeyArchiveFileNameWrite)
 		if found {
 			if filePath == "" {
 				log.Fatal("required file path")

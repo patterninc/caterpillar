@@ -66,7 +66,7 @@ func (s *server) createPathHandler(pathConfig pathConfig, output chan<- *record.
 		}
 
 		// create a new record with the request information
-		s.SendData(ctx, jsonData, output)
+		s.SendData(nil, jsonData, output)
 
 		w.Header().Set(contentTypeKey, contentTypeJson)
 		w.WriteHeader(http.StatusOK)
