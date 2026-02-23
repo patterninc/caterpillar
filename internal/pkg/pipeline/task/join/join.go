@@ -30,12 +30,10 @@ type join struct {
 	Number    int               `yaml:"number,omitempty" json:"number,omitempty"`
 	Duration  duration.Duration `yaml:"duration,omitempty" json:"duration,omitempty"`
 	Delimiter string            `yaml:"delimiter,omitempty" json:"delimiter,omitempty"`
-	buffer    []*record.Record
 }
 
 func New() (task.Task, error) {
 	return &join{
-		buffer:    make([]*record.Record, 0, defaultBufferSize),
 		Delimiter: defaultDelimiter,
 	}, nil
 }
@@ -49,6 +47,7 @@ func (j *join) Run(input <-chan *record.Record, output chan<- *record.Record) er
 	totalSize := 0
 	var ticker *time.Ticker
 	var tickerCh <-chan time.Time
+	buffer := make([]*record.Record, 0, defaultBufferSize)
 
 	if j.Duration > 0 {
 		ticker = time.NewTicker(time.Duration(j.Duration))
@@ -63,40 +62,40 @@ func (j *join) Run(input <-chan *record.Record, output chan<- *record.Record) er
 			r, ok := j.GetRecord(input)
 			if !ok {
 				// Input channel closed, send any remaining records
-				j.flushBuffer(output)
+				j.flushBuffer(&buffer, output)
 				return nil
 			}
 
-			j.buffer = append(j.buffer, r)
+			buffer = append(buffer, r)
 			totalSize += len(r.Data)
 
 			// Check if we've reached the size or number limit
-			if (j.Size > 0 && totalSize >= j.Size) || (j.Number > 0 && len(j.buffer) >= j.Number) {
-				j.flushBuffer(output)
+			if (j.Size > 0 && totalSize >= j.Size) || (j.Number > 0 && len(buffer) >= j.Number) {
+				j.flushBuffer(&buffer, output)
 				totalSize = 0
 			}
 
 		case <-tickerCh:
 			// Timer expired, send any buffered records
-			j.flushBuffer(output)
+			j.flushBuffer(&buffer, output)
 			totalSize = 0
 		}
 	}
 }
 
 // flushBuffer sends any buffered records and resets the buffer
-func (j *join) flushBuffer(output chan<- *record.Record) {
-	if len(j.buffer) > 0 {
-		j.sendJoinedRecords(output)
-		j.buffer = j.buffer[:0]
+func (j *join) flushBuffer(buffer *[]*record.Record, output chan<- *record.Record) {
+	if len(*buffer) > 0 {
+		j.sendJoinedRecords(*buffer, output)
+		*buffer = (*buffer)[:0]
 	}
 }
 
-func (j *join) sendJoinedRecords(output chan<- *record.Record) {
+func (j *join) sendJoinedRecords(buffer []*record.Record, output chan<- *record.Record) {
 
 	// Join all data with the specified delimiter
 	var joinedData strings.Builder
-	for i, r := range j.buffer {
+	for i, r := range buffer {
 		if i > 0 {
 			joinedData.WriteString(j.Delimiter)
 		}
