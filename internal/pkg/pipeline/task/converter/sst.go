@@ -37,7 +37,7 @@ func (c *sst) convert(data []byte, d string) ([]converterOutput, error) {
 		return nil, err
 	}
 	defer os.Remove(fileName)
-	
+
 	sstData, err := os.ReadFile(fileName)
 	if err != nil {
 		return nil, err

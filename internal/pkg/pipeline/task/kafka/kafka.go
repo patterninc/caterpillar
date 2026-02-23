@@ -45,12 +45,8 @@ type kafka struct {
 	GroupID            string            `yaml:"group_id,omitempty" json:"group_id,omitempty"`                         // the consumer group id (optional)
 	BatchSize          int               `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`                     // number of messages to read/write in a batch
 	RetryLimit         *int              `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`                   // number of retries for read errors
-	ExitOnEmpty        bool              `yaml:"exit_on_empty,omitempty" json:"exit_on_empty,omitempty"`               // exit when no more messages are available
-	ctx                context.Context   // parent context
 	timeout            time.Duration     // timeout duration calculated from Timeout
 	batchFlushInterval time.Duration     // batch flush interval calculated from BatchFlushInterval
-	readErrorRetries   int               // number of retries left for read errors
-	emptyReadRetries   int               // a counter to track empty reads retries
 }
 
 func New() (task.Task, error) {
@@ -58,7 +54,6 @@ func New() (task.Task, error) {
 }
 
 func (k *kafka) Init() error {
-	k.ctx = context.Background()
 	if k.BootstrapServer == "" {
 		return fmt.Errorf("bootstrap_server is required")
 	}
@@ -86,15 +81,13 @@ func (k *kafka) Init() error {
 	}
 	k.timeout = time.Duration(k.Timeout)
 	k.batchFlushInterval = time.Duration(k.BatchFlushInterval)
-	k.readErrorRetries = *k.RetryLimit
-	k.emptyReadRetries = 0
 
 	// try connecting to kafka broker to validate config
 	dialer, err := k.dial()
 	if err != nil {
 		return fmt.Errorf("failed to create kafka dialer: %w", err)
 	}
-	dialCtx, cancel := context.WithTimeout(k.ctx, k.timeout)
+	dialCtx, cancel := context.WithTimeout(context.Background(), k.timeout)
 	defer cancel()
 	conn, err := dialer.DialContext(dialCtx, "tcp", k.BootstrapServer)
 	if err != nil {
@@ -110,17 +103,19 @@ func (k *kafka) Run(input <-chan *record.Record, output chan<- *record.Record) e
 		return task.ErrPresentInputOutput
 	}
 
+	ctx := context.Background()
+
 	// if input is not nil, this is a sink task
 	if input != nil {
-		return k.write(input)
+		return k.write(ctx, input)
 	}
 
 	// else, this is a source task
-	return k.read(output)
+	return k.read(ctx, output)
 }
 
 // write writes records from the input channel to the Kafka topic
-func (k *kafka) write(input <-chan *record.Record) error {
+func (k *kafka) write(ctx context.Context, input <-chan *record.Record) error {
 	if k.batchFlushInterval >= k.timeout {
 		return fmt.Errorf("batch_flush_interval (%s) must be less than timeout (%s)", k.batchFlushInterval, k.timeout)
 	}
@@ -145,7 +140,7 @@ func (k *kafka) write(input <-chan *record.Record) error {
 		}
 
 		// create a write context with timeout per message batch
-		wctx, cancel := context.WithTimeout(k.ctx, k.timeout)
+		wctx, cancel := context.WithTimeout(ctx, k.timeout)
 		err := writer.WriteMessages(wctx, kg.Message{Value: r.Data})
 		cancel()
 		if err != nil {
@@ -156,7 +151,7 @@ func (k *kafka) write(input <-chan *record.Record) error {
 }
 
 // read reads messages from the Kafka topic and sends them to the output channel
-func (k *kafka) read(output chan<- *record.Record) error {
+func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 	dialer, err := k.dial()
 	if err != nil {
 		return fmt.Errorf("failed to create kafka dialer: %w", err)
@@ -168,40 +163,30 @@ func (k *kafka) read(output chan<- *record.Record) error {
 		}
 	}()
 
+	retriesNumber := 0
 	for {
-		select {
-		case <-k.ctx.Done():
-			return nil
-		default:
-			// read with a timeout so we can check for cancellation periodically
-			fetchCtx, cancel := context.WithTimeout(k.ctx, k.timeout)
-			m, err := reader.FetchMessage(fetchCtx)
-			cancel()
-
-			if err != nil {
-				err, ok := k.handleReadError(err)
-				if !ok {
-					return err
-				}
-				continue
+		fetchCtx, cancel := context.WithTimeout(ctx, k.timeout)
+		m, err := reader.FetchMessage(fetchCtx)
+		cancel()
+		if err != nil {
+			if !k.shouldRetry(err) {
+				return err
 			}
-			k.readErrorRetries = *k.RetryLimit
-			k.emptyReadRetries = 0
-
-			// process the message
-			k.SendData(k.ctx, m.Value, output)
-
-			if k.GroupID == "" {
-				// if not using consumer group, no need to commit messages
-				continue
+			retriesNumber++
+			fmt.Printf("kafka error while reading message for attempt #%d with error: %v\n", retriesNumber, err)
+			if retriesNumber > *k.RetryLimit {
+				fmt.Printf("kafka error while reading message, reached retry limit (%d), stopping reader\n", *k.RetryLimit)
+				return nil
 			}
+			continue
+		}
+		retriesNumber = 0
 
-			// commit the message after successful processing
-			cctx, cancel := context.WithTimeout(k.ctx, k.timeout)
+		k.SendData(ctx, m.Value, output)
+
+		if k.GroupID != "" {
+			cctx, cancel := context.WithTimeout(ctx, k.timeout)
 			if err = reader.CommitMessages(cctx, m); err != nil {
-				// log the commit error but continue processing
-				// any new message will ensure that all previous
-				// messages are eventually committed
 				fmt.Printf("failed to commit message: %v\n", err)
 			}
 			cancel()
@@ -273,35 +258,18 @@ func (k *kafka) handleWriteError(err error) error {
 	return fmt.Errorf("failed to write message to kafka: %w", err)
 }
 
-// handleReadError processes errors returned from reader.FetchMessage
-func (k *kafka) handleReadError(err error) (returnErr error, shouldRetry bool) {
+// shouldRetry determines if a read error should be retried
+func (k *kafka) shouldRetry(err error) bool {
 	if errors.Is(err, io.EOF) {
-		// this is not reliable for kafka end of topic detection
 		fmt.Printf("kafka reached end of topic: %v\n", k.Topic)
-		return nil, false
+		return false
 	}
 	if errors.Is(err, context.Canceled) {
-		// not an error, just context cancellation
 		fmt.Printf("kafka reader context canceled: %v\n", err)
-		return nil, false
+		return false
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		// not an error, just context deadline exceeded
-		k.emptyReadRetries++
-		fmt.Printf("kafka no message returned while reading message for attempt #%d with error: %v\n", k.emptyReadRetries, err)
-		if k.ExitOnEmpty && k.emptyReadRetries > *k.RetryLimit {
-			fmt.Printf("kafka no message returned, reached retry limit (%d), stopping reader", *k.RetryLimit)
-			return nil, false
-		}
-		return nil, true
-	}
-	// other errors - log and retry up to retry limit
-	fmt.Printf("kafka error while reading message for attempt #%d with error: %v\n", *k.RetryLimit-k.readErrorRetries+1, err)
-	k.readErrorRetries--
-	if k.readErrorRetries <= 0 {
-		return fmt.Errorf("kafka reached read error retry limit (%d), stopping reader", *k.RetryLimit), false
-	}
-	return nil, true
+
+	return true
 }
 
 // createDialer creates a kafka dialer with optional SASL mechanism and TLS configuration

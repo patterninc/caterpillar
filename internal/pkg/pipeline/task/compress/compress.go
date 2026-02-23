@@ -53,7 +53,6 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 		return task.ErrNilInput
 	}
 
-
 	for {
 		r, ok := c.GetRecord(input)
 		if !ok {

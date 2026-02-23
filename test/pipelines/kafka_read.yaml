@@ -7,7 +7,6 @@ tasks:
     username: test-caterpillar
     password: {{ secret "/kafka/test-caterpillar/secret" }}
     server_auth_type: tls
-    exit_on_empty: false # this is the default value
     timeout: 2s
     cert: |
       {{ indent 6 (secret "/kafka/ca-cert") }}
