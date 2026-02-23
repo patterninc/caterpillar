@@ -6,7 +6,7 @@ The `kafka` task reads from or writes to Apache Kafka topics.
 
 The Kafka task operates in two modes depending on whether an input channel is provided:
 - **Write mode** (with input channel): receives records from the input channel and sends them as messages to the Kafka topic. Writes are buffered and flushed in batches (see `batch_size` and `batch_flush_interval`). The task validates `batch_flush_interval < timeout` at runtime and will return an error in write mode if it's violated.
-- **Read mode** (no input channel): polls messages from the Kafka topic and sends them to the output channel. The reader's polling is controlled by the configured `timeout` and `exit_on_empty` behavior (see below).
+- **Read mode** (no input channel): polls messages from the Kafka topic and sends them to the output channel. The reader's polling is controlled by the configured `timeout` and `retry_limit` behavior (see below).
 
 The task automatically determines its mode based on the presence of input/output channels.
 
@@ -16,21 +16,6 @@ When reading from a Kafka topic, there are two main modes of operation:
 
 - **Standalone reader** (no consumer group): omit `group_id`; the reader pulls messages directly from partitions. Offsets are not coordinated across instances and are not committed.
 - **Group consumer** (recommended for production): set `group_id`. Multiple instances with the same `group_id` split partitions between them and coordinate offsets. When `group_id` is set the task will commit offsets after processing messages.
-
-#### ***Read termination***
-
-The Kafka task exposes `exit_on_empty` to control how the reader responds to polling timeouts (`context.DeadlineExceeded`):
-
-- **Indefinite mode (default)**: `exit_on_empty: false` (or omitted). The reader treats `context.DeadlineExceeded` as a normal "no message available" event and continues polling indefinitely. Empty polls do not stop the reader in this mode.
-
-- **Exit-on-empty**: `exit_on_empty: true`. The reader counts consecutive `context.DeadlineExceeded` events in an `empty read` counter (starts at 0). When this counter becomes greater than `retry_limit` the reader stops gracefully. The counter is reset to 0 on any successful read.
-
-#### Separate retry counter for other errors
-
-There is a second retry counter for non-deadline errors (network, auth, broker errors). This `other error` counter is initialized to `retry_limit` in `Init()` and is decremented each time such an error occurs. When it reaches zero the reader stops with an error. The `other error` counter is reset to `retry_limit` on successful reads.  
-Why two counters?
-- Keeps normal polling timeouts (no messages available) from exhausting retries intended for real errors.
-- Allows an explicit "exit on quiet" behavior when `exit_on_empty: true` without reducing tolerance for transient broker errors.
 
 ## Configuration Fields
 
@@ -44,7 +29,6 @@ Why two counters?
 | `batch_size` | int | `100` | Number of messages to buffer/flush for write and reader |
 | `batch_flush_interval` | duration string | `2s` | Interval to flush incomplete write batches; must be less than `timeout` |
 | `retry_limit` | int | `5` | Number used to initialize retry counters for read behavior |
-| `exit_on_empty` | bool | `false` | When true the reader will stop after `retry_limit` consecutive empty polls (`context.DeadlineExceeded`). When false the reader continues polling indefinitely. |
 | `group_id` | string | - | Consumer group id for group consumption (optional) |
 | `server_auth_type` | string | `none` | `none` or `tls` — server certificate verification mode |
 | `cert` | string | - | CA certificate PEM/CRT content used when `server_auth_type: tls` (alternatively use `cert_path`) |
@@ -162,7 +146,6 @@ tasks:
     type: kafka
     bootstrap_server: kafka.local:9092
     topic: input-topic
-    exit_on_empty: true
     retry_limit: 10
     timeout: 5s
 ```
@@ -172,7 +155,6 @@ tasks:
  - Group consumers enable scaling: Kafka will assign partitions across group members so each message is delivered only once to the group. When `group_id` is set, the task will commit offsets after processing messages.
  - The task uses a single configured `timeout` (default 15s) for dial, read, write and commit operations. Dial attempts use the same `timeout` value for each connection attempt.
 - Writes use the kafka-go `Writer` with configured `BatchSize` and `BatchTimeout` (`batch_flush_interval`). The task calls `WriteMessages` per record; kafka-go will buffer and flush according to these settings. This means write throughput and latency are primarily controlled by those kafka-go settings rather than explicit batching logic in this task.
-- If you expect frequent short `timeout` values and `exit_on_empty: false`, the reader can busy-poll (repeated `DeadlineExceeded`) at the configured timeout rate. Consider increasing `timeout`, enabling `exit_on_empty` with an appropriate `retry_limit`, if you observe high CPU from tight polling loops.
 - `mtls` is a placeholder in the code and currently returns an error / not implemented; client certificate authentication is not provided yet.
 
 ## Troubleshooting
