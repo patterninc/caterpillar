@@ -22,7 +22,7 @@ The system is particularly useful for:
 
 ### Prerequisites
 
-- Go 1.24.5 or later
+- Go 1.24.7 or later
 - AWS CLI configured (for AWS-related tasks)
 
 ### Building and Running
@@ -50,9 +50,9 @@ The system is particularly useful for:
 Caterpillar is built around the concept of **tasks** that process **records** in a pipeline. Here's how it works:
 
 1. **Records**: Each piece of data in the pipeline is wrapped in a `Record` object containing:
-   - `Data`: The actual data string
+   - `Data`: The payload data (`[]byte`; serialized as string in JSON)
    - `Origin`: The name of the task that created this record
-   - `ID`: A unique identifier for the record
+   - `ID`: A unique identifier for the record (int)
    - `Context`: Additional metadata that can be shared between tasks
 
 2. **Task Processing**: Each task:
@@ -224,6 +224,7 @@ tasks:
 
 Caterpillar supports the following tasks, each of which can serve different roles depending on their configuration:
 
+- **`archive`** - [Package or extract files using archive formats (ZIP, TAR)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/archive/README.md)
 - **`aws_parameter_store`** - [Read parameters from AWS Systems Manager Parameter Store](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/aws/parameter_store/README.md)
 - **`compress`** - [Compress or decompress data using various algorithms](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/compress/README.md)
 - **`converter`** - [Convert data between different formats (CSV, HTML, JSON, XML, SST)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/converter/README.md)
@@ -233,7 +234,7 @@ Caterpillar supports the following tasks, each of which can serve different role
 - **`flatten`** - [Flatten nested JSON structures into single-level key-value pairs](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/flatten/README.md)
 - **`heimdall`** - [Submit jobs to Heimdall data orchestration platform and return results](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/heimdall/README.md)
 - **`http`** - [Make HTTP requests with OAuth support and retry logic](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/http/README.md)
-- **`http_server`** -[Start an HTTP server to receive incoming data](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/http/server/README.md)
+- **`http_server`** - [Start an HTTP server to receive incoming data](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/http/server/README.md)
 - **`join`** - [Combine multiple records into a single record](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/join/README.md)
 - **`jq`** - [Transform JSON data using JQ queries](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/jq/README.md)
 - **`kafka`** - [Read from or write to Kafka topics (acts as source or sink)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/kafka/README.md)
