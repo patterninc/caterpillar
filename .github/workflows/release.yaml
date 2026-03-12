@@ -44,7 +44,7 @@ jobs:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Extract taggerdata for Docker
+    - name: Extract metadata for Docker
       id: tagger
       uses: docker/metadata-action@v5
       with:

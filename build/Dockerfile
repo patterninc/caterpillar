@@ -6,7 +6,7 @@ COPY . .
 
 # build executable
 RUN go build -o caterpillar ./cmd/caterpillar/caterpillar.go
-RUN chmod 777 caterpillar
+RUN chmod 755 caterpillar
 
 FROM alpine:3.20
 RUN mkdir -p /output
