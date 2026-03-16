@@ -36,24 +36,4 @@ jobs:
       with:
         push: true
         context: build/Dockerfile
-        tags: ${{ steps.login-ecr.outputs.registry }}/prod-serp-collector:${{ github.sha }},${{ steps.login-ecr.outputs.registry }}/prod-serp-collector:latest 
-        cache-from: type=local,src=/tmp/.buildx-cache
-        cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-
-    - name: API:- Output image tag
-      id: build-image
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        ECR_REPOSITORY: caterpillar
-        IMAGE_TAG: ${{ github.sha }}
-      run: |
-        echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-
-    - name: Deploy to ECR
-      uses: aws-actions/amazon-ecr-deploy-image@v1
-      with:
-        image-tag: ${{ steps.build-image.outputs.image }}
-        repository-name: ${{ steps.build-image.outputs.repository }}
-        region: us-west-2
-        skip-ci: true
-        force-new-deployment: true
+        tags: ${{ steps.login-ecr.outputs.registry }}/caterpillar:manual-latest
