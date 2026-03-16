@@ -10,4 +10,4 @@ RUN chmod 755 caterpillar
 
 FROM alpine:3.20
 RUN mkdir -p /output
-COPY --from=builder /go/src/github.com/patterninc/caterpillar/caterpillar /caterpillar/
+COPY --from=builder /go/src/github.com/patterninc/caterpillar/caterpillar .
