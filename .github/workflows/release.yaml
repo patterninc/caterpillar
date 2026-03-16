@@ -6,6 +6,7 @@ on:
       - 'v*'
     branches:
       - 'main'
+      - 'ecr_docker_dep'
 
 jobs:
   release:
@@ -20,45 +21,39 @@ jobs:
       with:
         go-version: '1.24.7'
         
-    - name: Build caterpillar
-      run: |
-        CGO_ENABLED=0 GOOS=linux go build -o caterpillar ./cmd/caterpillar/caterpillar.go
-
-    - name: Create Release
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v2
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
       with:
-        files: caterpillar
-        generate_release_notes: true
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        aws-access-key-id: ${{ secrets.AWS_FORKLIFTPROD_ACCESS_KEY }}
+        aws-secret-access-key: ${{ secrets.AWS_FORKLIFTPROD_SECRET_KEY }}
+        aws-region: us-west-2
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Login to Docker Hub
-      uses: docker/login-action@v3
+    - name: Build and push
+      uses: docker/build-push-action@v5.1.0
       with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Extract metadata for Docker
-      id: tagger
-      uses: docker/metadata-action@v5
-      with:
-        images: patternoss/caterpillar
-        tags: |
-          type=semver,pattern={{major}}.{{minor}}.{{patch}}
-          type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
-          type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./build/Dockerfile
         push: true
-        tags: ${{ steps.tagger.outputs.tags }}
-        platforms: linux/amd64,linux/arm64
+        context: build/Dockerfile
+        tags: ${{ steps.login-ecr.outputs.registry }}/prod-serp-collector:${{ github.sha }},${{ steps.login-ecr.outputs.registry }}/prod-serp-collector:latest 
+        cache-from: type=local,src=/tmp/.buildx-cache
+        cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+    - name: API:- Output image tag
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: caterpillar
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+    - name: Deploy to ECR
+      uses: aws-actions/amazon-ecr-deploy-image@v1
+      with:
+        image-tag: ${{ steps.build-image.outputs.image }}
+        repository-name: ${{ steps.build-image.outputs.repository }}
+        region: us-west-2
+        skip-ci: true
+        force-new-deployment: true
