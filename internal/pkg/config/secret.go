@@ -3,6 +3,8 @@ package config
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -15,6 +17,8 @@ var (
 )
 
 func getSecret(path string) (string, error) {
+	var value *ssm.GetParameterOutput
+	var err error
 
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
@@ -23,10 +27,18 @@ func getSecret(path string) (string, error) {
 
 	svc := ssm.NewFromConfig(cfg)
 
-	value, err := svc.GetParameter(ctx, &ssm.GetParameterInput{
-		Name:           aws.String(path),
-		WithDecryption: awsTrue,
-	})
+	for attempt := range 3 {
+		value, err = svc.GetParameter(ctx, &ssm.GetParameterInput{
+			Name:           aws.String(path),
+			WithDecryption: awsTrue,
+		})
+		if err == nil {
+			break
+		}
+		if attempt < 2 {
+			time.Sleep(time.Duration(100+rand.IntN(400)) * time.Millisecond)
+		}
+	}
 
 	if err != nil {
 		return ``, err
