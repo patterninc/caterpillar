@@ -3,10 +3,9 @@ package config
 import (
 	"context"
 	"fmt"
-	"math/rand/v2"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 )
@@ -25,20 +24,20 @@ func getSecret(path string) (string, error) {
 		return ``, err
 	}
 
-	svc := ssm.NewFromConfig(cfg)
-
-	for attempt := range 3 {
-		value, err = svc.GetParameter(ctx, &ssm.GetParameterInput{
-			Name:           aws.String(path),
-			WithDecryption: awsTrue,
+	svc := ssm.NewFromConfig(cfg, func(o *ssm.Options) {
+		o.Retryer = retry.NewAdaptiveMode(func(amo *retry.AdaptiveModeOptions) {
+			amo.StandardOptions = []func(*retry.StandardOptions){
+				func(so *retry.StandardOptions) {
+					so.MaxAttempts = 15
+				},
+			}
 		})
-		if err == nil {
-			break
-		}
-		if attempt < 2 {
-			time.Sleep(time.Duration(100+rand.IntN(400)) * time.Millisecond)
-		}
-	}
+	})
+
+	value, err = svc.GetParameter(ctx, &ssm.GetParameterInput{
+		Name:           aws.String(path),
+		WithDecryption: awsTrue,
+	})
 
 	if err != nil {
 		return ``, err
