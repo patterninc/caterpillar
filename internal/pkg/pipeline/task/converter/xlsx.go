@@ -4,6 +4,7 @@ import (
 	"bytes"
 	csvEncoder "encoding/csv"
 	"fmt"
+	"strings"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -16,6 +17,7 @@ type xlsx struct {
 	Sheets          []string       `yaml:"sheets,omitempty" json:"sheets,omitempty"`
 	SkipRows        int            `yaml:"skip_rows,omitempty" json:"skip_rows,omitempty"`
 	SkipRowsBySheet map[string]int `yaml:"skip_rows_by_sheet,omitempty" json:"skip_rows_by_sheet,omitempty"`
+	SanitizeHeaders bool           `yaml:"sanitize_headers,omitempty" json:"sanitize_headers,omitempty"`
 }
 
 func (x *xlsx) convert(data []byte, _ string) ([]converterOutput, error) {
@@ -39,7 +41,7 @@ func (x *xlsx) convert(data []byte, _ string) ([]converterOutput, error) {
 	outputs := make([]converterOutput, 0, len(sheets))
 
 	for _, sheet := range sheets {
-		output, err := readSheet(reader, sheet, x.getRowsToSkip(sheet))
+		output, err := readSheet(reader, sheet, x.getRowsToSkip(sheet), x.SanitizeHeaders)
 		if err != nil {
 			return nil, err
 		}
@@ -50,7 +52,7 @@ func (x *xlsx) convert(data []byte, _ string) ([]converterOutput, error) {
 	return outputs, nil
 }
 
-func readSheet(reader *excelize.File, sheet string, rowsToSkip int) (converterOutput, error) {
+func readSheet(reader *excelize.File, sheet string, rowsToSkip int, sanitizeHeaders bool) (converterOutput, error) {
 	// Create buffer for this sheet
 	var buff bytes.Buffer
 	writer := csvEncoder.NewWriter(&buff)
@@ -64,6 +66,7 @@ func readSheet(reader *excelize.File, sheet string, rowsToSkip int) (converterOu
 
 	// Write rows to buffer
 	i := 0
+	isHeaderRow := true
 	for rows.Next() {
 		if i < rowsToSkip {
 			i++
@@ -73,6 +76,13 @@ func readSheet(reader *excelize.File, sheet string, rowsToSkip int) (converterOu
 		cols, err := rows.Columns()
 		if err != nil {
 			return converterOutput{}, err
+		}
+
+		if sanitizeHeaders && isHeaderRow {
+			for j, col := range cols {
+				cols[j] = strings.ToLower(columnNameRegex.ReplaceAllString(col, "_"))
+			}
+			isHeaderRow = false
 		}
 
 		if err := writer.Write(cols); err != nil {

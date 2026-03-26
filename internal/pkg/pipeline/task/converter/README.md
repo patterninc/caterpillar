@@ -64,6 +64,7 @@ Convert a single line to the SSTable which could be stored on s3 or via file. It
 | `sheets` | array | all sheets | Optional array of sheet names to process. If not specified, all sheets are processed |
 | `skip_rows` | int | `0` | Number of rows to skip from the beginning of each sheet (e.g., for header rows) |
 | `skip_rows_by_sheet` | map[string]int | - | Per-sheet row skip overrides. Keys are sheet names, values are rows to skip. Takes precedence over `skip_rows` |
+| `sanitize_headers` | bool | `false` | If true, normalizes header row values to lowercase with non-alphanumeric characters replaced by underscores. Assumes the first unskipped row to be header |
 
 **Important:** The XLSX converter emits **one record per sheet**. Each record contains the sheet's data in CSV format, with the sheet name available in the record context under the key `xlsx_sheet_name`.
 
@@ -141,6 +142,18 @@ tasks:
   - name: echo_sheet_name
     type: echo
     # Each record will have xlsx_sheet_name in context
+```
+
+### Excel to CSV with sanitized headers:
+```yaml
+tasks:
+  - name: read_excel
+    type: file
+    path: report.xlsx
+  - name: convert_excel
+    type: converter
+    format: xlsx
+    sanitize_headers: true  # "First Name" becomes "first_name", "Sales (USD)" becomes "sales__usd_"
 ```
 
 ### Excel to CSV with row skipping:
