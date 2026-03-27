@@ -153,7 +153,7 @@ tasks:
   - name: convert_excel
     type: converter
     format: xlsx
-    sanitize_headers: true  # "First Name" becomes "first_name", "Sales (USD)" becomes "sales__usd_"
+    sanitize_headers: true  # "First Name" becomes "first_name", "Sales (USD)" becomes "sales_usd_"
 ```
 
 ### Excel to CSV with row skipping:
