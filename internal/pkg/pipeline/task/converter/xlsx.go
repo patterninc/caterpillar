@@ -4,7 +4,6 @@ import (
 	"bytes"
 	csvEncoder "encoding/csv"
 	"fmt"
-	"strings"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -80,7 +79,7 @@ func readSheet(reader *excelize.File, sheet string, rowsToSkip int, sanitizeHead
 
 		if sanitizeHeaders && isHeaderRow {
 			for j, col := range cols {
-				cols[j] = strings.ToLower(columnNameRegex.ReplaceAllString(col, "_"))
+				cols[j] = sanitizeColumnName(col)
 			}
 			isHeaderRow = false
 		}
