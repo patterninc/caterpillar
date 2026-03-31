@@ -32,6 +32,7 @@ When used with an input channel, the task acts as a destination. It processes ea
 | `headers` | map[string]string | - | HTTP headers for API requests |
 | `poll_interval` | int | `5` | Polling interval in seconds for async jobs |
 | `timeout` | int | `300` | Job timeout in seconds |
+| `get_result` | bool | `true` | Whether to fetch results from the `/result` endpoint after job completion.
 | `job` | object | - | Job configuration (see Job Configuration) |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
