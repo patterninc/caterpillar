@@ -2,10 +2,18 @@ package converter
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
+
+var columnNameRegex = regexp.MustCompile(`[^a-zA-Z0-9]+`)
+
+func sanitizeColumnName(name string) string {
+	return strings.ToLower(columnNameRegex.ReplaceAllString(name, "_"))
+}
 
 type converterOutput struct {
 	Data     []byte
