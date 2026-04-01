@@ -46,8 +46,8 @@ The EML converter does not have specific configuration options. It automatically
 -   **HTML Body**: Saved as `body.html`
 -   **Text Body**: Saved as `body.txt`
 -   **Headers**: Saved as `headers.json` (key-value pairs of all email headers)
--   **Attachments**: Saved with their original filenames (or sanitized/truncated if necessary)
--   **Inline Images**: Saved with confirmable filenames
+-   **Attachments**: Saved with sanitized filenames — characters not in `[a-zA-Z0-9_-.]` are replaced with hyphens, consecutive hyphens are collapsed, and names longer than 200 characters are truncated
+-   **Inline Images**: Saved with sanitized filenames (same rules as attachments)
 
 Metadata generated for each output:
 
