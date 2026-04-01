@@ -40,7 +40,7 @@ func (z *zipArchive) Read() {
 			// check the file type is regular file
 			if f.FileInfo().Mode().IsRegular() {
 
-				rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), converter.Sanitize(filepath.Base(f.Name)))
+				rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), converter.SanitizeFileName(filepath.Base(f.Name)))
 
 				fs, err := f.Open()
 				if err != nil {
