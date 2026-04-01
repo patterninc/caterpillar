@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -20,9 +19,6 @@ type csv struct {
 	SkipFirst bool         `yaml:"skip_first,omitempty" json:"skip_first,omitempty"`
 	Columns   []*csvColumn `yaml:"columns" json:"columns"`
 }
-
-// Pre-compile regex for column name sanitization
-var columnNameRegex = regexp.MustCompile(`[^a-zA-Z0-9]+`)
 
 func (c *csv) convert(data []byte, _ string) ([]converterOutput, error) {
 	// Initialize columns if not provided
@@ -93,7 +89,7 @@ func (c *csv) initializeColumns(data []byte) error {
 	if c.SkipFirst {
 		// Use first row as column headers
 		for i, name := range firstRow {
-			sanitizedName := strings.ToLower(columnNameRegex.ReplaceAllString(name, "_"))
+			sanitizedName := sanitizeColumnName(name)
 			c.Columns[i] = &csvColumn{Name: sanitizedName}
 		}
 		// Keep SkipFirst as true so the convert function knows to skip this row
