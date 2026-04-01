@@ -89,7 +89,7 @@ func (c *csv) initializeColumns(data []byte) error {
 	if c.SkipFirst {
 		// Use first row as column headers
 		for i, name := range firstRow {
-			sanitizedName := sanitizeColumnName(name)
+			sanitizedName := Sanitize(name)
 			c.Columns[i] = &csvColumn{Name: sanitizedName}
 		}
 		// Keep SkipFirst as true so the convert function knows to skip this row

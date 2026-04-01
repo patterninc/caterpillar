@@ -11,7 +11,7 @@ import (
 
 var columnNameRegex = regexp.MustCompile(`[^a-zA-Z0-9]+`)
 
-func sanitizeColumnName(name string) string {
+func Sanitize(name string) string {
 	return strings.ToLower(columnNameRegex.ReplaceAllString(name, "_"))
 }
 
