@@ -16,6 +16,8 @@ The archive task processes data based on the `action` field:
 
 The task receives records from its input channel, applies the archiving operation, and sends the processed records to its output channel.
 
+During **unpack**, the sanitized base filename of each extracted entry is stored in the record context under the key `CATERPILLAR_ARCHIVE_FILE_NAME_WRITE`. The stem is lowercased with non-alphanumeric characters replaced by underscores, while the extension is preserved and lowercased (e.g. `"Report 1.CSV"` → `"report_1.csv"`).
+
 ## Configuration Fields
 
 | Field | Type | Default | Description |

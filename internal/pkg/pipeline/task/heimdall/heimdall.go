@@ -37,6 +37,7 @@ type heimdall struct {
 	Headers      map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
 	PollInterval duration.Duration `yaml:"poll_interval,omitempty" json:"poll_interval,omitempty"`
 	Timeout      duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	GetResult    bool              `yaml:"get_result" json:"get_result"`
 	JobRequest   *jobRequest       `yaml:"job,omitempty" json:"job,omitempty" validate:"required"`
 }
 
@@ -45,6 +46,7 @@ func New() (task.Task, error) {
 		Endpoint:     defaultEndpoint,
 		PollInterval: defaultPollInterval,
 		Timeout:      defaultTimeout,
+		GetResult:    true,
 		JobRequest: &jobRequest{
 			Name:    defaultJobName,
 			Version: defaultJobVersion,
@@ -115,12 +117,14 @@ func (h *heimdall) submitJob(jobReq *jobRequest, output chan<- *record.Record) e
 
 	// If job is synchronous, handle the result immediately
 	if response.IsSync {
+		if !h.GetResult {
+			return nil
+		}
 		return h.sendToOutput(response.Result, output)
-	} else {
-		// For asynchronous jobs, poll until completion
-		return h.processAsyncJob(response.ID, output)
 	}
 
+	// For asynchronous jobs, poll until completion
+	return h.processAsyncJob(response.ID, output)
 }
 
 func (h *heimdall) processAsyncJob(jobID string, output chan<- *record.Record) error {
@@ -139,7 +143,9 @@ func (h *heimdall) processAsyncJob(jobID string, output chan<- *record.Record) e
 
 		switch response.Status {
 		case jobStatusSucceeded:
-			// Get the job result directly from the result endpoint
+			if !h.GetResult {
+				return nil
+			}
 			result := &result{}
 			if err := h.api(http.MethodGet, fmt.Sprintf(h.Endpoint+endpointJobResult, jobID), nil, result); err != nil {
 				return err
