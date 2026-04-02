@@ -10,6 +10,7 @@ import (
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/converter"
 )
 
 type tarArchive struct {
@@ -48,7 +49,7 @@ func (t *tarArchive) Read() {
 				if _, err := io.ReadFull(r, buf); err != nil && err != io.EOF {
 					log.Fatal(err)
 				}
-				rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), filepath.Base(header.Name))
+				rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), converter.SanitizeFileName(filepath.Base(header.Name)))
 				t.SendData(rc.Context, buf, t.OutputChan)
 			}
 

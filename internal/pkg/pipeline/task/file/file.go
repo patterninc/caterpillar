@@ -13,6 +13,7 @@ import (
 	"github.com/patterninc/caterpillar/internal/pkg/config"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/converter"
 )
 
 const (
@@ -136,7 +137,7 @@ func (f *file) readFile(output chan<- *record.Record) error {
 
 		// Create a default record with context
 		rc := &record.Record{Context: ctx}
-		rc.SetContextValue(string(task.CtxKeyFileNameWrite), filepath.Base(path))
+		rc.SetContextValue(string(task.CtxKeyFileNameWrite), converter.SanitizeFileName(filepath.Base(path)))
 
 		// let's write content to output channel
 		f.SendData(rc.Context, content, output)

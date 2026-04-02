@@ -20,6 +20,8 @@ The file task operates in two modes depending on whether an input channel is pro
 
 The task automatically determines its mode based on the presence of input/output channels.
 
+In read mode, the sanitized base filename is stored in the record context under the key `CATERPILLAR_FILE_NAME_WRITE`. The stem is lowercased with non-alphanumeric characters replaced by underscores, while the extension is preserved and lowercased (e.g. `"Report 1.CSV"` → `"report_1.csv"`).
+
 ## Configuration Fields
 
 | Field | Type | Default | Description |

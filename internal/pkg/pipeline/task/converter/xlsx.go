@@ -13,10 +13,11 @@ const (
 )
 
 type xlsx struct {
-	Sheets          []string       `yaml:"sheets,omitempty" json:"sheets,omitempty"`
-	SkipRows        int            `yaml:"skip_rows,omitempty" json:"skip_rows,omitempty"`
-	SkipRowsBySheet map[string]int `yaml:"skip_rows_by_sheet,omitempty" json:"skip_rows_by_sheet,omitempty"`
-	SanitizeHeaders bool           `yaml:"sanitize_headers,omitempty" json:"sanitize_headers,omitempty"`
+	Sheets             []string       `yaml:"sheets,omitempty" json:"sheets,omitempty"`
+	SkipRows           int            `yaml:"skip_rows,omitempty" json:"skip_rows,omitempty"`
+	SkipRowsBySheet    map[string]int `yaml:"skip_rows_by_sheet,omitempty" json:"skip_rows_by_sheet,omitempty"`
+	SanitizeHeaders    bool           `yaml:"sanitize_headers,omitempty" json:"sanitize_headers,omitempty"`
+	SanitizeSheetNames bool           `yaml:"sanitize_sheet_names,omitempty" json:"sanitize_sheet_names,omitempty"`
 }
 
 func (x *xlsx) convert(data []byte, _ string) ([]converterOutput, error) {
@@ -40,7 +41,7 @@ func (x *xlsx) convert(data []byte, _ string) ([]converterOutput, error) {
 	outputs := make([]converterOutput, 0, len(sheets))
 
 	for _, sheet := range sheets {
-		output, err := readSheet(reader, sheet, x.getRowsToSkip(sheet), x.SanitizeHeaders)
+		output, err := x.readSheet(reader, sheet)
 		if err != nil {
 			return nil, err
 		}
@@ -51,7 +52,8 @@ func (x *xlsx) convert(data []byte, _ string) ([]converterOutput, error) {
 	return outputs, nil
 }
 
-func readSheet(reader *excelize.File, sheet string, rowsToSkip int, sanitizeHeaders bool) (converterOutput, error) {
+func (x *xlsx) readSheet(reader *excelize.File, sheet string) (converterOutput, error) {
+	rowsToSkip := x.getRowsToSkip(sheet)
 	// Create buffer for this sheet
 	var buff bytes.Buffer
 	writer := csvEncoder.NewWriter(&buff)
@@ -77,9 +79,9 @@ func readSheet(reader *excelize.File, sheet string, rowsToSkip int, sanitizeHead
 			return converterOutput{}, err
 		}
 
-		if sanitizeHeaders && isHeaderRow {
+		if x.SanitizeHeaders && isHeaderRow {
 			for j, col := range cols {
-				cols[j] = sanitizeColumnName(col)
+				cols[j] = Sanitize(col)
 			}
 			isHeaderRow = false
 		}
@@ -92,10 +94,15 @@ func readSheet(reader *excelize.File, sheet string, rowsToSkip int, sanitizeHead
 	// Flush the writer
 	writer.Flush()
 
+	outputSheetName := sheet
+	if x.SanitizeSheetNames {
+		outputSheetName = Sanitize(sheet)
+	}
+
 	return converterOutput{
 		Data: buff.Bytes(),
 		Metadata: map[string]string{
-			sheetName: sheet,
+			sheetName: outputSheetName,
 		},
 	}, nil
 }
