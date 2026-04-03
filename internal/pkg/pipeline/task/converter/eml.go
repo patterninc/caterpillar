@@ -8,11 +8,10 @@ import (
 	"path/filepath"
 
 	"github.com/jhillyerd/enmime"
+	"github.com/patterninc/caterpillar/internal/pkg/textutil"
 )
 
 type eml struct{}
-
-const maxFilenameLength = 200
 
 func (c *eml) convert(data []byte, _ string) ([]converterOutput, error) {
 
@@ -72,14 +71,7 @@ func (c *eml) processOutput(content []byte, fileName string, contentType string)
 	}
 
 	fileName = filepath.Base(fileName)
-
-	// Fallback for filename length
-	if len(fileName) > maxFilenameLength {
-		ext := filepath.Ext(fileName)
-		base := fileName[:len(fileName)-len(ext)]
-		base = base[:maxFilenameLength-len(ext)]
-		fileName = base + ext
-	}
+	fileName = textutil.SlugifyFileName(fileName)
 
 	// Fallback for missing content type
 	if contentType == "" {

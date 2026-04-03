@@ -2,29 +2,10 @@ package converter
 
 import (
 	"fmt"
-	"path/filepath"
-	"regexp"
-	"strings"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
-
-var columnNameRegex = regexp.MustCompile(`[^a-zA-Z0-9]+`)
-
-func Sanitize(name string) string {
-	return strings.ToLower(columnNameRegex.ReplaceAllString(name, "_"))
-}
-
-// SanitizeFileName sanitizes a filename while preserving the extension.
-// The stem is lowercased with non-alphanumeric characters replaced by underscores,
-// and the extension is lowercased and re-appended unchanged.
-// e.g. "Report 1.CSV" -> "report_1.csv"
-func SanitizeFileName(name string) string {
-	ext := filepath.Ext(name)
-	stem := strings.TrimSuffix(name, ext)
-	return Sanitize(stem) + strings.ToLower(ext)
-}
 
 type converterOutput struct {
 	Data     []byte

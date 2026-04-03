@@ -5,6 +5,7 @@ import (
 	csvEncoder "encoding/csv"
 	"fmt"
 
+	"github.com/patterninc/caterpillar/internal/pkg/textutil"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -81,7 +82,7 @@ func (x *xlsx) readSheet(reader *excelize.File, sheet string) (converterOutput, 
 
 		if x.SanitizeHeaders && isHeaderRow {
 			for j, col := range cols {
-				cols[j] = Sanitize(col)
+				cols[j] = textutil.Slugify(col)
 			}
 			isHeaderRow = false
 		}
@@ -96,7 +97,7 @@ func (x *xlsx) readSheet(reader *excelize.File, sheet string) (converterOutput, 
 
 	outputSheetName := sheet
 	if x.SanitizeSheetNames {
-		outputSheetName = Sanitize(sheet)
+		outputSheetName = textutil.Slugify(sheet)
 	}
 
 	return converterOutput{
