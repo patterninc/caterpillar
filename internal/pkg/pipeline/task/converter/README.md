@@ -46,7 +46,7 @@ The EML converter does not have specific configuration options. It automatically
 -   **HTML Body**: Saved as `body.html`
 -   **Text Body**: Saved as `body.txt`
 -   **Headers**: Saved as `headers.json` (key-value pairs of all email headers)
--   **Attachments**: Saved with sanitized filenames — characters not in `[a-zA-Z0-9_-.]` are replaced with hyphens, consecutive hyphens are collapsed, and names longer than 200 characters are truncated
+-   **Attachments**: Saved with sanitized filenames — non-alphanumeric characters are replaced with underscores, leading/trailing underscores are trimmed, the result is lowercased, and names longer than 200 characters are truncated
 -   **Inline Images**: Saved with sanitized filenames (same rules as attachments)
 
 Metadata generated for each output:
@@ -64,8 +64,8 @@ Convert a single line to the SSTable which could be stored on s3 or via file. It
 | `sheets` | array | all sheets | Optional array of sheet names to process. If not specified, all sheets are processed |
 | `skip_rows` | int | `0` | Number of rows to skip from the beginning of each sheet (e.g., for header rows) |
 | `skip_rows_by_sheet` | map[string]int | - | Per-sheet row skip overrides. Keys are sheet names, values are rows to skip. Takes precedence over `skip_rows` |
-| `sanitize_headers` | bool | `false` | If true, normalizes header row values to lowercase with non-alphanumeric characters replaced by underscores. Assumes the first unskipped row to be header |
-| `sanitize_sheet_names` | bool | `false` | If true, normalizes sheet names to lowercase with non-alphanumeric characters replaced by underscores before storing in the `xlsx_sheet_name` context key |
+| `sanitize_headers` | bool | `false` | If true, normalizes header row values: non-alphanumeric characters are replaced by underscores, leading/trailing underscores are trimmed, and the result is lowercased. Assumes the first unskipped row to be header |
+| `sanitize_sheet_names` | bool | `false` | If true, normalizes sheet names: non-alphanumeric characters are replaced by underscores, leading/trailing underscores are trimmed, and the result is lowercased before storing in the `xlsx_sheet_name` context key |
 
 **Important:** The XLSX converter emits **one record per sheet**. Each record contains the sheet's data in CSV format, with the sheet name available in the record context under the key `xlsx_sheet_name`.
 
@@ -154,7 +154,7 @@ tasks:
   - name: convert_excel
     type: converter
     format: xlsx
-    sanitize_headers: true  # "First Name" becomes "first_name", "Sales (USD)" becomes "sales_usd_"
+    sanitize_headers: true  # "First Name" becomes "first_name", "Sales (USD)" becomes "sales_usd"
 ```
 
 ### Excel to CSV with sanitized sheet names:

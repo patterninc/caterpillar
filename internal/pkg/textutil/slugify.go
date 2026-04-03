@@ -21,7 +21,7 @@ func Slugify(name string) string {
 
 // SlugifyFileName slugifies a filename while preserving the extension.
 // The stem is slugified via Slugify and the extension is lowercased.
-// Empty stems default to "attachment". Filenames exceeding 200 characters
+// Empty stems default to "file". Filenames exceeding 200 characters
 // are truncated.
 // e.g. "Report (1).CSV" -> "report_1.csv"
 func SlugifyFileName(name string) string {
@@ -29,7 +29,7 @@ func SlugifyFileName(name string) string {
 	stem := strings.TrimSuffix(name, ext)
 	sanitized := Slugify(stem)
 	if sanitized == "" {
-		sanitized = "attachment"
+		sanitized = "file"
 	}
 	ext = strings.ToLower(ext)
 	fileName := sanitized + ext
