@@ -7,4 +7,4 @@ tasks:
     action: unpack
   - name: store_unpacked_file
     type: file
-    path: unpacked_birds.txt
+    path: unpacked_birds/
