@@ -49,12 +49,11 @@ func (z *zipArchive) Read() {
 
 				buf := make([]byte, f.FileInfo().Size())
 
-				_, err = fs.Read(buf)
+				_, err = io.ReadFull(fs, buf)
+				fs.Close()
 				if err != nil && err != io.EOF {
 					log.Fatal(err)
 				}
-
-				fs.Close()
 
 				z.SendData(rc.Context, buf, z.OutputChan)
 			}
