@@ -1,0 +1,69 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(./caterpillar -conf *)",
+      "Bash(.claude/scripts/run-pipeline.sh *)",
+      "Bash(mkdir -p test/pipelines/probes)",
+      "Bash(rm -f test/pipelines/probes/*)",
+      "Bash(ls test/pipelines*)",
+      "Bash(cat test/pipelines/*)",
+      "Bash(aws sts get-caller-identity*)",
+      "Bash(aws iam list-account-aliases*)",
+      "Bash(aws sqs get-queue-attributes*)",
+      "Bash(aws sqs get-queue-url*)",
+      "Bash(aws sns get-topic-attributes*)",
+      "Bash(aws sns list-topics*)",
+      "Bash(aws sns list-subscriptions-by-topic*)",
+      "Bash(aws s3api head-bucket*)",
+      "Bash(aws s3api get-bucket-location*)",
+      "Bash(aws s3 ls *)",
+      "Bash(aws ssm get-parameter*)",
+      "Bash(aws ssm get-parameters-by-path*)",
+      "Bash(nc -zv *)"
+    ],
+    "deny": [
+      "Bash(git push*)",
+      "Bash(git push --force*)",
+      "Bash(aws s3 rm *)",
+      "Bash(aws s3api delete*)",
+      "Bash(aws sqs delete*)",
+      "Bash(aws sqs purge*)",
+      "Bash(aws sns delete*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/preflight-check.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/validate-on-save.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/run-summary.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
