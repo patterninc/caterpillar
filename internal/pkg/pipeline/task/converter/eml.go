@@ -6,20 +6,12 @@ import (
 	"fmt"
 	"mime"
 	"path/filepath"
-	"regexp"
-	"strings"
 
 	"github.com/jhillyerd/enmime"
-)
-
-var (
-	unsafePathChars    = regexp.MustCompile(`[^\w\-.]`)
-	consecutiveHyphens = regexp.MustCompile(`-{2,}`)
+	"github.com/patterninc/caterpillar/internal/pkg/textutil"
 )
 
 type eml struct{}
-
-const maxFilenameLength = 200
 
 func (c *eml) convert(data []byte, _ string) ([]converterOutput, error) {
 
@@ -73,33 +65,13 @@ func (c *eml) convert(data []byte, _ string) ([]converterOutput, error) {
 	return outputs, nil
 }
 
-func sanitizeFilename(name string) string {
-	ext := filepath.Ext(name)
-	base := strings.TrimSuffix(name, ext)
-	base = unsafePathChars.ReplaceAllString(base, "-")
-	base = consecutiveHyphens.ReplaceAllString(base, "-")
-	base = strings.Trim(base, "-")
-	if base == "" {
-		base = "attachment"
-	}
-	return base + ext
-}
-
 func (c *eml) processOutput(content []byte, fileName string, contentType string) *converterOutput {
 	if len(content) == 0 {
 		return nil
 	}
 
 	fileName = filepath.Base(fileName)
-	fileName = sanitizeFilename(fileName)
-
-	// Fallback for filename length
-	if len(fileName) > maxFilenameLength {
-		ext := filepath.Ext(fileName)
-		base := fileName[:len(fileName)-len(ext)]
-		base = base[:maxFilenameLength-len(ext)]
-		fileName = base + ext
-	}
+	fileName = textutil.SlugifyFileName(fileName)
 
 	// Fallback for missing content type
 	if contentType == "" {

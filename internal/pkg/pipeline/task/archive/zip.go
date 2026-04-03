@@ -10,7 +10,7 @@ import (
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
-	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/converter"
+	"github.com/patterninc/caterpillar/internal/pkg/textutil"
 )
 
 type zipArchive struct {
@@ -40,7 +40,7 @@ func (z *zipArchive) Read() {
 			// check the file type is regular file
 			if f.FileInfo().Mode().IsRegular() {
 
-				rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), converter.SanitizeFileName(filepath.Base(f.Name)))
+				rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), textutil.SlugifyFileName(filepath.Base(f.Name)))
 
 				fs, err := f.Open()
 				if err != nil {
