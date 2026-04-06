@@ -90,9 +90,10 @@ func writeS3File(f *file, rec *record.Record, reader io.Reader) error {
 	}
 
 	_, err = client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: &bucket,
-		Key:    &key,
-		Body:   reader,
+		Bucket:       &bucket,
+		Key:          &key,
+		Body:         reader,
+		StorageClass: f.StorageClass,
 	})
 
 	return err
