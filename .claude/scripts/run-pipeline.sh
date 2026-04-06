@@ -16,6 +16,14 @@ if [ ! -f "$PIPELINE_FILE" ]; then
   exit 1
 fi
 
+# Verify sandbox environment before running against AWS resources
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if grep -qE 'type:\s*(sqs|sns|kafka|aws_parameter_store)' "$PIPELINE_FILE" || grep -qE 's3://' "$PIPELINE_FILE"; then
+  echo "Pipeline uses AWS resources — running sandbox check..."
+  bash "$SCRIPT_DIR/ensure-sandbox.sh"
+  echo ""
+fi
+
 # Build binary if missing
 if [ ! -f "./caterpillar" ]; then
   echo "Building caterpillar..."
