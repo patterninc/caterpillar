@@ -56,14 +56,14 @@ oauth:
   scope: [<string>, ...]
 ```
 
-### Pagination object schema
-```yaml
-next_page:
-  endpoint: <string>   # JQ expr for next URL
-  method: <string>
-  body: <string>
-  headers: <map>
-```
+### Pagination (`next_page`)
+
+`next_page` is a JQ expression evaluated after every HTTP response to drive
+automatic pagination. It receives `{"data": "<body>", "headers": {...}}` and
+must return a URL string, a request object, or `null`/`empty` to stop.
+
+**For full documentation, patterns, and examples see the dedicated
+[pagination skill](../pagination/SKILL.md).**
 
 ## Decision Rules
 
@@ -96,7 +96,7 @@ Header names use Go canonical form (e.g. `content-type` → `Content-Type`).
 - `expected_statuses` is a **string**, not an array: `"200,201"` not `["200","201"]`
 - Secrets/tokens must never be hardcoded — always `{{ env "VAR" }}` or `{{ secret "/path" }}`
 - In sink mode, record data must be valid JSON — add a `jq` task upstream if needed
-- `next_page` as a string is a JQ expression applied to the response body
+- `next_page` — see the [pagination skill](../pagination/SKILL.md) for full validation rules
 - `batch_flush_interval` not applicable here — see `kafka` skill
 
 ## Examples
@@ -126,14 +126,22 @@ Header names use Go canonical form (e.g. `content-type` → `Content-Type`).
   expected_statuses: "200,201"
 ```
 
-### Paginated GET
+### Paginated GET (basic)
 ```yaml
 - name: fetch_all_pages
   type: http
   method: GET
-  endpoint: https://api.example.com/items?page=1
-  next_page: ".links.next"
+  endpoint: https://api.example.com/items?limit=100
+  next_page: >-
+    .data | fromjson |
+    if .nextCursor != null then
+      "https://api.example.com/items?limit=100&cursor=\(.nextCursor)"
+    else null end
 ```
+
+See the [pagination skill](../pagination/SKILL.md) for 13 pagination patterns
+covering cursors, offsets, Link headers, HATEOAS links, signed requests,
+GraphQL, rate-limiting gates, dynamic upstream `next_page`, and more.
 
 ### Extract context from response
 ```yaml
@@ -178,3 +186,4 @@ Header names use Go canonical form (e.g. `content-type` → `Content-Type`).
 - `expected_statuses` as array `["200"]` → must be string `"200"`
 - Omitting `fail_on_error: true` on critical source tasks
 - Sink mode without a `jq` task upstream when data is not already a valid HTTP request JSON object
+- See [pagination skill](../pagination/SKILL.md) for pagination-specific anti-patterns
