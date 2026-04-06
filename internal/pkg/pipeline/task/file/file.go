@@ -46,19 +46,26 @@ type file struct {
 	SuccessFile     bool          `yaml:"success_file,omitempty" json:"success_file,omitempty"`
 	SuccessFileName config.String `yaml:"success_file_name,omitempty" json:"success_file_name,omitempty"`
 	Region          string        `yaml:"region,omitempty" json:"region,omitempty"`
+	StorageClass    storageClass  `yaml:"storage_class,omitempty" json:"storage_class,omitempty"`
 	Delimiter       string        `yaml:"delimiter,omitempty" json:"delimiter,omitempty"`
 }
 
 func New() (task.Task, error) {
+	ensureStorageClasses()
 	return &file{
 		Path:            defaultPath,
 		Region:          defaultRegion,
+		StorageClass:    defaultStorageClass,
 		Delimiter:       defaultDelimiter,
 		SuccessFileName: defaultSuccessFileName,
 	}, nil
 }
 
 func (f *file) Run(input <-chan *record.Record, output chan<- *record.Record) error {
+
+	if err := validateStorageClass(f.StorageClass); err != nil {
+		return err
+	}
 
 	// let's check if we read file or we write file...
 	if input != nil && output != nil {
@@ -231,8 +238,9 @@ func (f *file) writeSuccessFile() error {
 	}
 
 	successFile := &file{
-		Path:   config.String(successFileName),
-		Region: f.Region,
+		Path:         config.String(successFileName),
+		Region:       f.Region,
+		StorageClass: f.StorageClass,
 	}
 
 	return writerFunction(successFile, nil, bytes.NewReader([]byte{}))
