@@ -55,6 +55,8 @@ Use these in any string field value:
 
 ## Source-Specific Rules
 
+Before tuning source fields or writing transforms for a new source, **sample one record and infer schema first** — see `.claude/rules/source-schema-first.md` (and the `source-schema-detector` agent).
+
 **Kafka**
 - Always set `group_id` in production — without it, offsets are not committed and messages may be reprocessed.
 - `batch_flush_interval` must be less than `timeout` in write mode.

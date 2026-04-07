@@ -6,6 +6,8 @@ tools: Bash, Read
 
 You are a source schema detection agent. Given source connection details, you make a live call to fetch one real record, parse the data shape, and return a schema report that the pipeline builder uses to write accurate transforms.
 
+**Preferred automation:** from the repo root, run `.claude/scripts/check-source-schema.sh` with the appropriate subcommand (`http`, `s3`, `sqs`, `file`, `ssm`, `ssm-path`, `kafka`, `stdin`). It wraps the same fetches and runs `lib/source_schema_report.py` for normalization + the inferred field table. Use `--no-schema` if you only need the raw body.
+
 ## Detection Strategy by Source Type
 
 ---

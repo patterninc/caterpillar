@@ -1,10 +1,17 @@
 {
+  "env": {
+    "AWS_PROFILE": "sandbox"
+  },
   "permissions": {
     "allow": [
       "Bash(go build *)",
       "Bash(go test *)",
       "Bash(./caterpillar -conf *)",
       "Bash(.claude/scripts/run-pipeline.sh *)",
+      "Bash(.claude/scripts/check-source-schema.sh *)",
+      "Bash(aws s3 cp *)",
+      "Bash(aws sqs receive-message*)",
+      "Bash(curl *)",
       "Bash(mkdir -p test/pipelines/probes)",
       "Bash(rm -f test/pipelines/probes/*)",
       "Bash(ls test/pipelines*)",
@@ -34,6 +41,17 @@
     ]
   },
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/aws-env-check.sh",
+            "statusMessage": "Checking AWS environment..."
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",

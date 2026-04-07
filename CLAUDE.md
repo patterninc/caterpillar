@@ -74,3 +74,7 @@ test/pipelines/
 ```
 
 Use examples as templates. Match the user's request to the closest pattern, read that file, then adapt it.
+
+## Source schema first
+
+Whenever you have concrete **source** connection details (URL, queue, topic, bucket/path, parameters, local file), your **first** step is to **fetch at least one real record** and infer field names, types, and nesting before writing `jq`, `context:`, or transforms. Prefer `.claude/scripts/check-source-schema.sh` (subcommands: `http`, `s3`, `sqs`, `file`, `ssm`, `ssm-path`, `kafka`, `stdin`) or the `source-schema-detector` agent (`.claude/agents/source-schema-detector.md`). If live access is impossible, ask for a pasted sample and pipe it through `check-source-schema.sh stdin`. Do not guess the payload shape.
