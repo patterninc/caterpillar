@@ -68,10 +68,6 @@ func (f *file) Run(input <-chan *record.Record, output chan<- *record.Record) er
 		return err
 	}
 
-	if err := validateS3Tags(f.Tags); err != nil {
-		return err
-	}
-
 	// let's check if we read file or we write file...
 	if input != nil && output != nil {
 		return task.ErrPresentInputOutput

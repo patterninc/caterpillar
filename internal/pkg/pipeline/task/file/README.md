@@ -77,7 +77,13 @@ S3 enforces the following constraints ([docs](https://docs.aws.amazon.com/Amazon
 - Tag **keys** up to **128 UTF-16 code units**.
 - Tag **values** up to **256 UTF-16 code units**.
 
-Tag counts and key lengths are validated at task startup; resolved value lengths are validated per record. In UTF-16, most characters take 1 code unit and supplementary characters (e.g. many emoji) take 2.
+Tag count and key length are validated on the first S3 write; resolved value length is validated per write. In UTF-16, most characters take 1 code unit and supplementary characters (e.g. many emoji) take 2. Validation runs only when actually writing to S3 — local or read-mode runs are not affected by tag configuration.
+
+### `success_file` marker
+
+The `_SUCCESS` marker is not tied to any record, so tag values for the success marker must only use static strings or startup-time templates (`env`, `secret`, `macro`). A tag that references `{{ context "..." }}` will fail at the success-marker write with `context keys were not set: ...`, since there is no record context to resolve against.
+
+If you need record-derived tag values, either drop the context reference from the success-marker tags, or disable `success_file`.
 
 Read mode does not apply tags (objects are read as-is).
 

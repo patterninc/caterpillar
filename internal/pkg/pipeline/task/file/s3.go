@@ -83,6 +83,13 @@ func (r *s3Reader) parse(glob string) ([]string, error) {
 
 func writeS3File(f *file, rec *record.Record, reader io.Reader) error {
 
+	// Validate static tag constraints (count, key length) here rather than
+	// at task startup so read-mode and local-scheme writes are unaffected
+	// when tags are configured but never applied.
+	if err := validateS3Tags(f.Tags); err != nil {
+		return err
+	}
+
 	// create s3 client
 	client, err := s3client.New(ctx, f.Region)
 	if err != nil {
@@ -120,19 +127,29 @@ func writeS3File(f *file, rec *record.Record, reader io.Reader) error {
 // buildTags evaluates each tag value against the record and returns a
 // URL-encoded query string (key1=value1&key2=value2) as required by the
 // S3 PutObject Tagging header. Returns nil if no tags are configured.
+//
+// When rec is nil (e.g. the _SUCCESS marker write), a synthetic empty
+// record is substituted so any unresolved {{ context }} placeholders
+// surface as a clear "context keys were not set" error instead of being
+// uploaded as the internal placeholder string.
 func buildTags(tags map[string]config.String, rec *record.Record) (*string, error) {
 
 	if len(tags) == 0 {
 		return nil, nil
 	}
 
+	evalRec := rec
+	if evalRec == nil {
+		evalRec = &record.Record{Context: ctx}
+	}
+
 	values := make(url.Values, len(tags))
 	for k, v := range tags {
-		resolved, err := v.Get(rec)
+		resolved, err := v.Get(evalRec)
 		if err != nil {
 			return nil, fmt.Errorf("tag %q: %w", k, err)
 		}
-		if n := utf16Len(resolved); n > s3MaxTagValueLen {
+		if n := len(utf16.Encode([]rune(resolved))); n > s3MaxTagValueLen {
 			return nil, fmt.Errorf("tag %q: value length %d exceeds S3 limit of %d UTF-16 code units", k, n, s3MaxTagValueLen)
 		}
 		values.Set(k, resolved)
@@ -156,23 +173,11 @@ func validateS3Tags(tags map[string]config.String) error {
 		if k == "" {
 			return fmt.Errorf("tags: empty key is not allowed")
 		}
-		if n := utf16Len(k); n > s3MaxTagKeyLen {
+		if n := len(utf16.Encode([]rune(k))); n > s3MaxTagKeyLen {
 			return fmt.Errorf("tag %q: key length %d exceeds S3 limit of %d UTF-16 code units", k, n, s3MaxTagKeyLen)
 		}
 	}
 
 	return nil
-
-}
-
-// utf16Len returns the number of UTF-16 code units that would encode s,
-// which is how S3 measures tag key and value lengths.
-func utf16Len(s string) int {
-
-	n := 0
-	for _, r := range s {
-		n += utf16.RuneLen(r)
-	}
-	return n
 
 }
