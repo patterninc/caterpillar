@@ -77,7 +77,7 @@ S3 enforces the following constraints ([docs](https://docs.aws.amazon.com/Amazon
 - Tag **keys** up to **128 UTF-16 code units**.
 - Tag **values** up to **256 UTF-16 code units**.
 
-Tag count and key length are validated on the first S3 write; resolved value length is validated per write. In UTF-16, most characters take 1 code unit and supplementary characters (e.g. many emoji) take 2. Validation runs only when actually writing to S3 — local or read-mode runs are not affected by tag configuration.
+Tag count, key length, and resolved value length are validated on every S3 write (the count and keys don't change per record, but the checks are cheap and run alongside per-record value validation). In UTF-16, most characters take 1 code unit and supplementary characters (e.g. many emoji) take 2. Validation runs only when actually writing to S3 — local or read-mode runs are not affected by tag configuration.
 
 ### `success_file` marker
 
