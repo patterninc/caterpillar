@@ -42,12 +42,13 @@ var (
 
 type file struct {
 	task.Base       `yaml:",inline" json:",inline"`
-	Path            config.String `yaml:"path,omitempty" json:"path,omitempty"`
-	SuccessFile     bool          `yaml:"success_file,omitempty" json:"success_file,omitempty"`
-	SuccessFileName config.String `yaml:"success_file_name,omitempty" json:"success_file_name,omitempty"`
-	Region          string        `yaml:"region,omitempty" json:"region,omitempty"`
-	StorageClass    storageClass  `yaml:"storage_class,omitempty" json:"storage_class,omitempty"`
-	Delimiter       string        `yaml:"delimiter,omitempty" json:"delimiter,omitempty"`
+	Path            config.String            `yaml:"path,omitempty" json:"path,omitempty"`
+	SuccessFile     bool                     `yaml:"success_file,omitempty" json:"success_file,omitempty"`
+	SuccessFileName config.String            `yaml:"success_file_name,omitempty" json:"success_file_name,omitempty"`
+	Region          string                   `yaml:"region,omitempty" json:"region,omitempty"`
+	StorageClass    storageClass             `yaml:"storage_class,omitempty" json:"storage_class,omitempty"`
+	Tags            map[string]config.String `yaml:"tags,omitempty" json:"tags,omitempty"`
+	Delimiter       string                   `yaml:"delimiter,omitempty" json:"delimiter,omitempty"`
 }
 
 func New() (task.Task, error) {
@@ -241,6 +242,7 @@ func (f *file) writeSuccessFile() error {
 		Path:         config.String(successFileName),
 		Region:       f.Region,
 		StorageClass: f.StorageClass,
+		Tags:         f.Tags,
 	}
 
 	return writerFunction(successFile, nil, bytes.NewReader([]byte{}))
