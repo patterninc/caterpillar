@@ -334,9 +334,9 @@ func (h *httpCore) call(endpoint string) (*result, error) {
 			}
 			break
 		}
+		defer response.Body.Close()
 
 		body, err := io.ReadAll(response.Body)
-		response.Body.Close()
 		if err != nil {
 			lastErr = err
 			if attempt < h.MaxRetries {
