@@ -3,14 +3,25 @@ package file
 import (
 	"fmt"
 	"io"
+	"net/url"
+	"unicode/utf16"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/patterninc/caterpillar/internal/pkg/config"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	s3client "github.com/patterninc/caterpillar/internal/pkg/pipeline/task/file/s3_client"
 )
 
 const (
 	s3Scheme = `s3`
+
+	// S3 object tagging limits (see
+	// https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html).
+	// Lengths are measured in UTF-16 code units.
+	s3MaxTagsPerObject = 10
+	s3MaxTagKeyLen     = 128
+	s3MaxTagValueLen   = 256
 )
 
 type s3Reader struct {
@@ -72,6 +83,13 @@ func (r *s3Reader) parse(glob string) ([]string, error) {
 
 func writeS3File(f *file, rec *record.Record, reader io.Reader) error {
 
+	// Validate static tag constraints (count, key length) here rather than
+	// at task startup so read-mode and local-scheme writes are unaffected
+	// when tags are configured but never applied.
+	if err := validateS3Tags(f.Tags); err != nil {
+		return err
+	}
+
 	// create s3 client
 	client, err := s3client.New(ctx, f.Region)
 	if err != nil {
@@ -89,13 +107,77 @@ func writeS3File(f *file, rec *record.Record, reader io.Reader) error {
 		return err
 	}
 
+	tags, err := buildTags(f.Tags, rec)
+	if err != nil {
+		return err
+	}
+
 	_, err = client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:       &bucket,
 		Key:          &key,
 		Body:         reader,
 		StorageClass: f.StorageClass,
+		Tagging:      tags,
 	})
 
 	return err
+
+}
+
+// buildTags evaluates each tag value against the record and returns a
+// URL-encoded query string (key1=value1&key2=value2) as required by the
+// S3 PutObject Tagging header. Returns nil if no tags are configured.
+//
+// When rec is nil (e.g. the _SUCCESS marker write), a synthetic empty
+// record is substituted so any unresolved {{ context }} placeholders
+// surface as a clear "context keys were not set" error instead of being
+// uploaded as the internal placeholder string.
+func buildTags(tags map[string]config.String, rec *record.Record) (*string, error) {
+
+	if len(tags) == 0 {
+		return nil, nil
+	}
+
+	evalRec := rec
+	if evalRec == nil {
+		evalRec = &record.Record{Context: ctx}
+	}
+
+	values := make(url.Values, len(tags))
+	for k, v := range tags {
+		resolved, err := v.Get(evalRec)
+		if err != nil {
+			return nil, fmt.Errorf("tag %q: %w", k, err)
+		}
+		if n := len(utf16.Encode([]rune(resolved))); n > s3MaxTagValueLen {
+			return nil, fmt.Errorf("tag %q: value length %d exceeds S3 limit of %d UTF-16 code units", k, n, s3MaxTagValueLen)
+		}
+		values.Set(k, resolved)
+	}
+
+	return aws.String(values.Encode()), nil
+
+}
+
+// validateS3Tags checks the static tag constraints enforced by S3: at most
+// 10 tags per object and tag keys up to 128 UTF-16 code units. Uniqueness
+// is already guaranteed by the map. Value lengths depend on per-record
+// templating and are validated in buildTags.
+func validateS3Tags(tags map[string]config.String) error {
+
+	if len(tags) > s3MaxTagsPerObject {
+		return fmt.Errorf("tags: %d tags configured, S3 allows at most %d per object", len(tags), s3MaxTagsPerObject)
+	}
+
+	for k := range tags {
+		if k == "" {
+			return fmt.Errorf("tags: empty key is not allowed")
+		}
+		if n := len(utf16.Encode([]rune(k))); n > s3MaxTagKeyLen {
+			return fmt.Errorf("tag %q: key length %d exceeds S3 limit of %d UTF-16 code units", k, n, s3MaxTagKeyLen)
+		}
+	}
+
+	return nil
 
 }

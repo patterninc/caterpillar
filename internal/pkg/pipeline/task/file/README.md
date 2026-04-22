@@ -31,6 +31,7 @@ In read mode, the sanitized base filename is stored in the record context under 
 | `path` | string | `/tmp/caterpillar.txt` | File path or S3 URL (`s3://bucket/key`); glob patterns supported in read mode |
 | `region` | string | `us-west-2` | AWS region for S3 operations |
 | `storage_class` | string | `STANDARD` | S3 **write** only: on `PutObject`. Ignored for local paths. See [S3 storage class](#s3-storage-class). |
+| `tags` | map[string]string | - | S3 **write** only: object tags applied on `PutObject`. Ignored for local paths. Values support macros and context templates. See [S3 object tags](#s3-object-tags). |
 | `delimiter` | string | `\n` | Delimiter used to separate records when reading |
 | `success_file` | bool | `false` | Whether to create a success file after writing |
 | `success_file_name` | string | `_SUCCESS` | Name of the success file |
@@ -60,6 +61,45 @@ Allowed values are the **PutObject storage class** strings known to the AWS SDK 
 AWS may add or adjust classes in newer SDK releases; if a value is rejected as unknown, compare with the [S3 PutObject storage class documentation](https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html#AmazonS3-PutObject-request-header-StorageClass) or upgrade the SDK in this project.
 
 Read mode does not set storage class (objects are read as-is).
+
+## S3 object tags
+
+When the write `path` is an S3 URI (`s3://...`), each object is uploaded with the configured `tags` applied as the `x-amz-tagging` header on `PutObject`. The same tags are applied to the optional `success_file` marker.
+
+Tag values are evaluated per record, so macros and context templates (e.g. `{{ macro "timestamp" }}`, `{{ context "user_id" }}`) are resolved against the record being written.
+
+### Limits
+
+S3 enforces the following constraints ([docs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html)):
+
+- At most **10 tags** per object.
+- Tag keys must be unique (enforced by the YAML map).
+- Tag **keys** up to **128 UTF-16 code units**.
+- Tag **values** up to **256 UTF-16 code units**.
+
+Tag count, key length, and resolved value length are validated on every S3 write (the count and keys don't change per record, but the checks are cheap and run alongside per-record value validation). In UTF-16, most characters take 1 code unit and supplementary characters (e.g. many emoji) take 2. Validation runs only when actually writing to S3 — local or read-mode runs are not affected by tag configuration.
+
+### `success_file` marker
+
+The `_SUCCESS` marker is not tied to any record, so tag values for the success marker must only use static strings or startup-time templates (`env`, `secret`, `macro`). A tag that references `{{ context "..." }}` will fail at the success-marker write with `context keys were not set: ...`, since there is no record context to resolve against.
+
+If you need record-derived tag values, either drop the context reference from the success-marker tags, or disable `success_file`.
+
+Read mode does not apply tags (objects are read as-is).
+
+### Example
+
+```yaml
+tasks:
+  - name: write_to_s3_tagged
+    type: file
+    path: s3://my-bucket/events/{{ macro "timestamp" }}.jsonl
+    region: us-east-1
+    tags:
+      env: prod
+      pipeline: events
+      user_id: '{{ context "user_id" }}'
+```
 
 ## Path Schemes
 
