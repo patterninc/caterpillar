@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/patterninc/caterpillar/internal/pkg/config"
@@ -63,6 +64,7 @@ type httpCore struct {
 	MaxRetries       int               `yaml:"max_retries,omitempty" json:"max_retries,omitempty"`
 	RetryDelay       duration.Duration `yaml:"retry_delay,omitempty" json:"retry_delay,omitempty"`
 	client           *http.Client
+	clientOnce       sync.Once
 }
 
 type result struct {
@@ -88,15 +90,15 @@ func New() (task.Task, error) {
 }
 
 func (h *httpCore) getClient() *http.Client {
-	if h.client == nil {
+	h.clientOnce.Do(func() {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.MaxConnsPerHost = defaultMaxConnsPerHost
+		transport.MaxIdleConnsPerHost = defaultMaxConnsPerHost
 		h.client = &http.Client{
-			Timeout: time.Duration(h.Timeout),
-			Transport: &http.Transport{
-				MaxConnsPerHost:     defaultMaxConnsPerHost,
-				MaxIdleConnsPerHost: defaultMaxConnsPerHost,
-			},
+			Timeout:   time.Duration(h.Timeout),
+			Transport: transport,
 		}
-	}
+	})
 	return h.client
 }
 
@@ -118,7 +120,6 @@ func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 		Timeout:          h.Timeout,
 		MaxRetries:       h.MaxRetries,
 		RetryDelay:       h.RetryDelay,
-		client:           h.getClient(),
 	}
 
 	if err := json.Unmarshal(data, newHttp); err != nil {
