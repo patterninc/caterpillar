@@ -29,22 +29,22 @@ const (
 
 type kafkaTask struct {
 	task.Base              `yaml:",inline" json:",inline"`
-	BootstrapServer        string            `yaml:"bootstrap_server" json:"bootstrap_server"`
-	Topic                  string            `yaml:"topic" json:"topic"`
-	ServerAuthType         string            `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"`
-	Cert                   string            `yaml:"cert,omitempty" json:"cert,omitempty"`
-	CertPath               string            `yaml:"cert_path,omitempty" json:"cert_path,omitempty"`
-	UserAuthType           string            `yaml:"user_auth_type" json:"user_auth_type"`
-	Username               string            `yaml:"username,omitempty" json:"username,omitempty"`
-	Password               string            `yaml:"password,omitempty" json:"password,omitempty"`
-	Timeout                duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
-	BatchFlushInterval     duration.Duration `yaml:"batch_flush_interval,omitempty" json:"batch_flush_interval,omitempty"`
-	GroupID                string            `yaml:"group_id,omitempty" json:"group_id,omitempty"`
-	RetryLimit             *int              `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`
-	Idempotent             bool              `yaml:"idempotent,omitempty" json:"idempotent,omitempty"`
-	SchemaRegistryURL      string            `yaml:"schema_registry_url,omitempty" json:"schema_registry_url,omitempty"`
-	SchemaRegistryUsername string            `yaml:"schema_registry_username,omitempty" json:"schema_registry_username,omitempty"`
-	SchemaRegistryPassword string            `yaml:"schema_registry_password,omitempty" json:"schema_registry_password,omitempty"`
+	BootstrapServer        string            `yaml:"bootstrap_server" json:"bootstrap_server"`                                     // "host:port"
+	Topic                  string            `yaml:"topic" json:"topic"`                                                           // topic to read from or write to
+	ServerAuthType         string            `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"`                 // "none", "tls"
+	Cert                   string            `yaml:"cert,omitempty" json:"cert,omitempty"`                                         // used for Server TLS authentication
+	CertPath               string            `yaml:"cert_path,omitempty" json:"cert_path,omitempty"`                               // used for Server TLS authentication
+	UserAuthType           string            `yaml:"user_auth_type" json:"user_auth_type"`                                         // "none", "sasl", "scram"
+	Username               string            `yaml:"username,omitempty" json:"username,omitempty"`                                 // used for user SASL/Scram authentication
+	Password               string            `yaml:"password,omitempty" json:"password,omitempty"`                                 // used for user SASL/Scram authentication
+	Timeout                duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`                                   // connection, read, write, commit timeout
+	BatchFlushInterval     duration.Duration `yaml:"batch_flush_interval,omitempty" json:"batch_flush_interval,omitempty"`         // interval to flush incomplete batches
+	GroupID                string            `yaml:"group_id,omitempty" json:"group_id,omitempty"`                                 // the consumer group id (optional)
+	RetryLimit             *int              `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`                           // number of retries for read errors
+	Idempotent             bool              `yaml:"idempotent,omitempty" json:"idempotent,omitempty"`                             // enable idempotent producer
+	SchemaRegistryURL      string            `yaml:"schema_registry_url,omitempty" json:"schema_registry_url,omitempty"`           // enables Avro serialization/deserialization
+	SchemaRegistryUsername string            `yaml:"schema_registry_username,omitempty" json:"schema_registry_username,omitempty"` // Schema Registry basic auth username
+	SchemaRegistryPassword string            `yaml:"schema_registry_password,omitempty" json:"schema_registry_password,omitempty"` // Schema Registry basic auth password
 }
 
 func New() (task.Task, error) {
