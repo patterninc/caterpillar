@@ -5,17 +5,19 @@ The `kafka` task reads from or writes to Apache Kafka topics.
 ## Behavior
 
 The Kafka task operates in two modes depending on whether an input channel is provided:
-- **Write mode** (with input channel): receives records from the input channel and sends them as messages to the Kafka topic. Writes are buffered and flushed in batches (see `batch_size` and `batch_flush_interval`). The task validates `batch_flush_interval < timeout` at runtime and will return an error in write mode if it's violated.
+- **Write mode** (with input channel): receives records from the input channel and enqueues them to the Kafka topic with the Confluent producer. `batch_flush_interval` maps to the producer's `linger.ms`, and the task flushes pending deliveries before exiting.
 - **Read mode** (no input channel): polls messages from the Kafka topic and sends them to the output channel. The reader's polling is controlled by the configured `timeout` and `retry_limit` behavior (see below).
 
 The task automatically determines its mode based on the presence of input/output channels.
 
 ### Reading Modes
 
-When reading from a Kafka topic, there are two main modes of operation:
+There are two read modes, controlled by whether `group_id` is set:
 
-- **Standalone reader** (no consumer group): omit `group_id`; the reader pulls messages directly from partitions. Offsets are not coordinated across instances and are not committed.
-- **Group consumer** (recommended for production): set `group_id`. Multiple instances with the same `group_id` split partitions between them and coordinate offsets. When `group_id` is set the task will commit offsets after processing messages.
+- **Standalone** (no `group_id`): assigns all partitions directly at `OffsetBeginning` and reads without committing offsets. Every run re-reads from the start of the topic. Useful for one-shot batch reads or testing.
+- **Group consumer** (`group_id` set): subscribes via the Kafka consumer group protocol, reads from committed offsets, and commits new offsets periodically. Multiple instances with the same `group_id` split partitions and each message is delivered once to the group.
+
+> **Broker ACL requirement for standalone mode**: confluent-kafka-go requires a non-empty `group.id` even for direct-assign reads. Standalone mode uses the group ID `caterpillar-standalone-<topic>`. The Kafka principal used by this task must have `READ` permission on `GROUP` resource `caterpillar-standalone-` with `PREFIXED` pattern type. Without this ACL, standalone reads will fail with a group authorization error.
 
 ## Configuration Fields
 
@@ -25,19 +27,20 @@ When reading from a Kafka topic, there are two main modes of operation:
 | `type` | string | `kafka` | Must be "kafka" |
 | `bootstrap_server` | string | - | Kafka broker's bootstrap address (required) |
 | `topic` | string | - | Topic to read from or write to (required) |
-| `timeout` | duration string | `15s` | Per-operation timeout (used for dial, read, write, commit by default). Uses Go duration format (e.g. `25s`, `1m`). |
-| `batch_size` | int | `100` | Number of messages to buffer/flush for write and reader |
-| `batch_flush_interval` | duration string | `2s` | Interval to flush incomplete write batches; must be less than `timeout` |
-| `retry_limit` | int | `5` | Number used to initialize retry counters for read behavior |
-| `group_id` | string | - | Consumer group id for group consumption (optional) |
+| `timeout` | duration string | `15s` | Read polling timeout and producer delivery/flush timeout. Uses Go duration format (e.g. `25s`, `1m`). |
+| `batch_flush_interval` | duration string | `2s` | Producer linger interval (`linger.ms`) for batching queued writes |
+| `retry_limit` | int | `5` | Read retry threshold; reading stops when consecutive retryable errors or timeouts exceed this value |
+| `group_id` | string | - | Consumer group id. If omitted, standalone mode is used (reads from beginning, no offset commits). |
 | `server_auth_type` | string | `none` | `none` or `tls` — server certificate verification mode |
 | `cert` | string | - | CA certificate PEM/CRT content used when `server_auth_type: tls` (alternatively use `cert_path`) |
 | `cert_path` | string | - | Path to CA certificate (PEM/CRT) |
-| `user_auth_type` | string | `none` | `none`, `sasl`, `scram`, or `mtls` — client authentication method |
+| `user_auth_type` | string | `none` | `none`, `sasl`, `scram`, or `mtls` — `mtls` is currently not implemented and returns an error |
 | `username` | string | - | Username for SASL/SCRAM authentication |
 | `password` | string | - | Password for SASL/SCRAM authentication |
-| `user_cert` | string | - | Client certificate PEM content for mTLS (alternatively use `user_cert_path`) |
-| `user_cert_path` | string | - | Client certificate path for mTLS (not implemented) |
+| `idempotent` | bool | `false` | Enables the idempotent producer (`enable.idempotence=true`, `max.in.flight.requests.per.connection=5`) |
+| `schema_registry_url` | string | - | Schema Registry URL. When set, the producer serializes JSON→Avro using the latest registered value schema and the consumer deserializes Avro→JSON. Schemas are not auto-registered. |
+| `schema_registry_username` | string | - | Schema Registry basic auth username |
+| `schema_registry_password` | string | - | Schema Registry basic auth password |
 
 ## Authentication
 
@@ -46,7 +49,7 @@ When reading from a Kafka topic, there are two main modes of operation:
 - `user_auth_type: scram` uses SCRAM-SHA-512 authentication (requires `username` and `password`).
 - `user_auth_type: mtls` is reserved for mTLS (client cert) but is not implemented in this task yet and will return an error if configured.
 
-If you choose SASL/SCRAM and `server_auth_type: tls`, both TLS and the SASL mechanism will be configured on the dialer.
+If you choose SASL/SCRAM and `server_auth_type: tls`, the task configures Confluent's `security.protocol` as `SASL_SSL`. Without TLS, SASL uses `SASL_PLAINTEXT`.
 
 ## Example Configurations
 
@@ -57,6 +60,7 @@ tasks:
     type: kafka
     bootstrap_server: kafka.local:9092
     topic: output-topic
+    idempotent: true
     user_auth_type: sasl
     username: my-user
     password: my-pass
@@ -80,7 +84,7 @@ tasks:
     timeout: 2s
 ```
 
-### Reading from a Kafka topic
+### Standalone read (no group_id — reads from beginning every run)
 ```yaml
 tasks:
   - name: read_messages
@@ -89,16 +93,6 @@ tasks:
     topic: input-topic
     user_auth_type: none
     timeout: 10s
-```
-
-### Standalone reader (no consumer group)
-```yaml
-tasks:
-  - name: read_standalone
-    type: kafka
-    bootstrap_server: kafka.local:9092
-    topic: input-topic
-    timeout: 25s
 ```
 
 ### Group consumer
@@ -151,15 +145,25 @@ tasks:
 ```
 
 ## Notes and Limitations
- - Standalone reader reads partitions directly and does not perform coordinated offset commits across multiple readers. When `group_id` is empty the task will not commit offsets.
- - Group consumers enable scaling: Kafka will assign partitions across group members so each message is delivered only once to the group. When `group_id` is set, the task will commit offsets after processing messages.
- - The task uses a single configured `timeout` (default 15s) for dial, read, write and commit operations. Dial attempts use the same `timeout` value for each connection attempt.
-- Writes use the kafka-go `Writer` with configured `BatchSize` and `BatchTimeout` (`batch_flush_interval`). The task calls `WriteMessages` per record; kafka-go will buffer and flush according to these settings. This means write throughput and latency are primarily controlled by those kafka-go settings rather than explicit batching logic in this task.
-- `mtls` is a placeholder in the code and currently returns an error / not implemented; client certificate authentication is not provided yet.
+ - **Standalone mode** reads all partitions from `OffsetBeginning` on every run and never commits offsets. It requires a broker PREFIXED ACL on group `caterpillar-standalone-` (see Reading Modes above).
+ - **Group consumer mode** resumes from committed offsets. `auto.offset.reset: earliest` only fires if the group has no prior committed offsets. To re-read from the beginning, reset group offsets via `kafka-consumer-groups.sh --reset-offsets --to-earliest`.
+ - **Group commits** use Kafka auto-commit every 5000ms. Auto offset store is disabled, so offsets are stored only after a message is sent downstream.
+ - **Read isolation** is set to `read_committed` for both standalone and group consumers — this is the consumer-side complement to `idempotent: true` on the producer and ensures consumers never read uncommitted or aborted messages.
+ - The init broker probe always uses the 15s default timeout regardless of the configured `timeout` to allow for SCRAM+TLS handshake round trips.
+ - When `schema_registry_url` is set, producer input must be valid JSON. The current JSON decode path uses Go's default `json.Unmarshal`, so JSON numbers are decoded as `float64`; Avro schemas with `int` or `long` fields can fail until numbers are converted to schema-appropriate integer types before serialization.
+
 
 ## Troubleshooting
 
 - If TLS connections fail, verify the CA at `cert_path` or `cert` matches the broker's certificate chain. Also check whether the certificate at `cert` is correctly formatted (PEM) in multiline YAML (use `|` and indentation).
 - If SASL/SCRAM authentication fails, double-check `username`/`password` and the broker's configured mechanism.
 
-**Thanks to the _[kafka-go](https://github.com/segmentio/kafka-go)_ library for Kafka client functionality.**
+- If standalone reads fail with a group authorization error, ask your Kafka admin to run:
+  ```
+  kafka-acls.sh --add --allow-principal User:<principal> \
+    --operation Read --group caterpillar-standalone- \
+    --resource-pattern-type prefixed \
+    --bootstrap-server <host>:<port>
+  ```
+
+**Thanks to the [Confluent Kafka Go client](https://github.com/confluentinc/confluent-kafka-go) for the Kafka client implementation.**
