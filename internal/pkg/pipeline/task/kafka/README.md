@@ -38,7 +38,8 @@ There are two read modes, controlled by whether `group_id` is set:
 | `username` | string | - | Username for SASL/SCRAM authentication |
 | `password` | string | - | Password for SASL/SCRAM authentication |
 | `idempotent` | bool | `false` | Enables the idempotent producer (`enable.idempotence=true`, `max.in.flight.requests.per.connection=5`) |
-| `schema_registry_url` | string | - | Schema Registry URL. When set, the producer serializes JSON→Avro using the latest registered value schema and the consumer deserializes Avro→JSON. Schemas are not auto-registered. |
+| `format` | string | `json` | Message serialization format. `json` passes raw bytes through unchanged (default, backward compatible). `avro` serializes JSON→Avro on write and Avro→JSON on read using Confluent Schema Registry. |
+| `schema_registry_url` | string | - | Schema Registry URL. Required when `format: avro`. Schemas must be pre-registered; auto-registration is disabled. |
 | `schema_registry_username` | string | - | Schema Registry basic auth username |
 | `schema_registry_password` | string | - | Schema Registry basic auth password |
 
@@ -133,6 +134,22 @@ tasks:
     timeout: 25s
 ```
 
+### Writing with Avro serialization (Schema Registry)
+```yaml
+tasks:
+  - name: send_avro_messages
+    type: kafka
+    bootstrap_server: kafka.local:9092
+    topic: avro-topic
+    format: avro
+    schema_registry_url: http://schema-registry.local:8081
+    schema_registry_username: sr-user       # optional
+    schema_registry_password: sr-pass       # optional
+    timeout: 30s
+```
+
+> The schema for `avro-topic-value` must be pre-registered in the Schema Registry before writing. The producer uses the latest registered version and does not auto-register schemas.
+
 ### Stop after 10 consecutive empty retry polls
 ```yaml
 tasks:
@@ -150,7 +167,8 @@ tasks:
  - **Group commits** use Kafka auto-commit every 5000ms. Auto offset store is disabled, so offsets are stored only after a message is sent downstream.
  - **Read isolation** is set to `read_committed` for both standalone and group consumers — this is the consumer-side complement to `idempotent: true` on the producer and ensures consumers never read uncommitted or aborted messages.
  - The init broker probe always uses the 15s default timeout regardless of the configured `timeout` to allow for SCRAM+TLS handshake round trips.
- - When `schema_registry_url` is set, producer input must be valid JSON. The current JSON decode path uses Go's default `json.Unmarshal`, so JSON numbers are decoded as `float64`; Avro schemas with `int` or `long` fields can fail until numbers are converted to schema-appropriate integer types before serialization.
+ - **Message format** defaults to `json` (raw bytes pass through). Set `format: avro` to enable Confluent Avro serialization; this requires `schema_registry_url` and a pre-registered schema. The `schema_registry_url` field alone does **not** activate Avro — `format: avro` must be set explicitly.
+ - When `format: avro` is used, producer input must be valid JSON. Go's `json.Unmarshal` decodes all numbers as `float64`; Avro schemas with `int` or `long` fields may reject these — convert to integer types before serialization if needed.
 
 
 ## Troubleshooting

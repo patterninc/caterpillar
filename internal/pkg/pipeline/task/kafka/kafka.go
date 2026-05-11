@@ -2,15 +2,11 @@ package kafka
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
 	ckafka "github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
-	"github.com/confluentinc/confluent-kafka-go/v2/schemaregistry/serde"
-	"github.com/confluentinc/confluent-kafka-go/v2/schemaregistry/serde/avrov2"
 
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
@@ -22,36 +18,44 @@ const (
 	defaultRetryLimit       = 5
 	defaultFlushInterval    = duration.Duration(2 * time.Second)
 	defaultCommitIntervalMs = 5000
+	defaultBatchSize        = 100
 
 	// standaloneGroupPrefix is the group.id used for direct-assign reads (no group_id set); broker needs PREFIXED ACL on this prefix.
 	standaloneGroupPrefix = "caterpillar-standalone-"
 )
 
-type kafkaTask struct {
-	task.Base              `yaml:",inline" json:",inline"`
-	BootstrapServer        string            `yaml:"bootstrap_server" json:"bootstrap_server"`                                     // "host:port"
-	Topic                  string            `yaml:"topic" json:"topic"`                                                           // topic to read from or write to
-	ServerAuthType         string            `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"`                 // "none", "tls"
-	Cert                   string            `yaml:"cert,omitempty" json:"cert,omitempty"`                                         // used for Server TLS authentication
-	CertPath               string            `yaml:"cert_path,omitempty" json:"cert_path,omitempty"`                               // used for Server TLS authentication
-	UserAuthType           string            `yaml:"user_auth_type" json:"user_auth_type"`                                         // "none", "sasl", "scram"
-	Username               string            `yaml:"username,omitempty" json:"username,omitempty"`                                 // used for user SASL/Scram authentication
-	Password               string            `yaml:"password,omitempty" json:"password,omitempty"`                                 // used for user SASL/Scram authentication
-	Timeout                duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`                                   // connection, read, write, commit timeout
-	BatchFlushInterval     duration.Duration `yaml:"batch_flush_interval,omitempty" json:"batch_flush_interval,omitempty"`         // interval to flush incomplete batches
-	GroupID                string            `yaml:"group_id,omitempty" json:"group_id,omitempty"`                                 // the consumer group id (optional)
-	RetryLimit             *int              `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`                           // number of retries for read errors
-	Idempotent             bool              `yaml:"idempotent,omitempty" json:"idempotent,omitempty"`                             // enable idempotent producer
-	SchemaRegistryURL      string            `yaml:"schema_registry_url,omitempty" json:"schema_registry_url,omitempty"`           // enables Avro serialization/deserialization
-	SchemaRegistryUsername string            `yaml:"schema_registry_username,omitempty" json:"schema_registry_username,omitempty"` // Schema Registry basic auth username
-	SchemaRegistryPassword string            `yaml:"schema_registry_password,omitempty" json:"schema_registry_password,omitempty"` // Schema Registry basic auth password
+// schemaRegistryConfig holds Schema Registry connection details; required when format is "avro".
+type schemaRegistryConfig struct {
+	URL      string `yaml:"schema_registry_url,omitempty" json:"schema_registry_url,omitempty"`           // Schema Registry URL; required when format is "avro"
+	Username string `yaml:"schema_registry_username,omitempty" json:"schema_registry_username,omitempty"` // Schema Registry basic auth username
+	Password string `yaml:"schema_registry_password,omitempty" json:"schema_registry_password,omitempty"` // Schema Registry basic auth password
+}
+
+type kafka struct {
+	task.Base          `yaml:",inline" json:",inline"`
+	BootstrapServer    string               `yaml:"bootstrap_server" json:"bootstrap_server"`                             // "host:port"
+	Topic              string               `yaml:"topic" json:"topic"`                                                   // topic to read from or write to
+	ServerAuthType     string               `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"`         // "none", "tls"
+	Cert               string               `yaml:"cert,omitempty" json:"cert,omitempty"`                                 // used for Server TLS authentication
+	CertPath           string               `yaml:"cert_path,omitempty" json:"cert_path,omitempty"`                       // used for Server TLS authentication
+	UserAuthType       string               `yaml:"user_auth_type" json:"user_auth_type"`                                 // "none", "sasl", "scram"
+	Username           string               `yaml:"username,omitempty" json:"username,omitempty"`                         // used for user SASL/Scram authentication
+	Password           string               `yaml:"password,omitempty" json:"password,omitempty"`                         // used for user SASL/Scram authentication
+	Timeout            duration.Duration    `yaml:"timeout,omitempty" json:"timeout,omitempty"`                           // connection, read, write, commit timeout
+	BatchFlushInterval duration.Duration    `yaml:"batch_flush_interval,omitempty" json:"batch_flush_interval,omitempty"` // interval to flush incomplete batches
+	GroupID            string               `yaml:"group_id,omitempty" json:"group_id,omitempty"`                         // the consumer group id (optional)
+	BatchSize          int                  `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`                     // max messages per producer batch (maps to batch.num.messages); defaults to 100
+	RetryLimit         *int                 `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`                   // number of retries for read errors
+	Idempotent         bool                 `yaml:"idempotent,omitempty" json:"idempotent,omitempty"`                     // enable idempotent producer
+	Format             string               `yaml:"format,omitempty" json:"format,omitempty"`                             // message format: "json" (default) or "avro"
+	SchemaRegistry     schemaRegistryConfig `yaml:",inline" json:",inline"`                                                // Schema Registry connection — required when format is "avro"
 }
 
 func New() (task.Task, error) {
-	return &kafkaTask{}, nil
+	return &kafka{}, nil
 }
 
-func (k *kafkaTask) Init() error {
+func (k *kafka) Init() error {
 	if k.BootstrapServer == "" {
 		return fmt.Errorf("bootstrap_server is required")
 	}
@@ -69,6 +73,9 @@ func (k *kafkaTask) Init() error {
 	}
 	if k.BatchFlushInterval <= 0 {
 		k.BatchFlushInterval = defaultFlushInterval
+	}
+	if k.BatchSize <= 0 {
+		k.BatchSize = defaultBatchSize
 	}
 	if k.RetryLimit == nil || *k.RetryLimit < 0 {
 		k.RetryLimit = new(int)
@@ -93,7 +100,7 @@ func (k *kafkaTask) Init() error {
 	return nil
 }
 
-func (k *kafkaTask) Run(input <-chan *record.Record, output chan<- *record.Record) error {
+func (k *kafka) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 	if input != nil && output != nil {
 		return task.ErrPresentInputOutput
 	}
@@ -105,9 +112,8 @@ func (k *kafkaTask) Run(input <-chan *record.Record, output chan<- *record.Recor
 	return k.read(context.Background(), output)
 }
 
-// write produces records to the Kafka topic, serializes to Avro when schema_registry_url is set,
-// otherwise sends raw bytes.
-func (k *kafkaTask) write(input <-chan *record.Record) error {
+// write produces records to the Kafka topic using the codec selected by the format field.
+func (k *kafka) write(input <-chan *record.Record) error {
 	cfg, err := k.buildProducerConfig()
 	if err != nil {
 		return fmt.Errorf("failed to build producer config: %w", err)
@@ -119,19 +125,9 @@ func (k *kafkaTask) write(input <-chan *record.Record) error {
 	}
 	defer p.Close()
 
-	var ser *avrov2.Serializer
-	if k.SchemaRegistryURL != "" {
-		srClient, err := k.buildSchemaRegistryClient()
-		if err != nil {
-			return fmt.Errorf("failed to create schema registry client: %w", err)
-		}
-		serConf := avrov2.NewSerializerConfig()
-		serConf.AutoRegisterSchemas = false
-		serConf.UseLatestVersion = true
-		ser, err = avrov2.NewSerializer(srClient, serde.ValueSerde, serConf)
-		if err != nil {
-			return fmt.Errorf("failed to create avro serializer: %w", err)
-		}
+	codec, err := k.newCodec()
+	if err != nil {
+		return err
 	}
 
 	// deliveryCh is drained by a goroutine; closed after Flush so wg.Wait() guarantees no race on firstDeliveryErr.
@@ -159,7 +155,7 @@ func (k *kafkaTask) write(input <-chan *record.Record) error {
 			break
 		}
 
-		msgBytes, err := k.serializeRecord(ser, r.Data)
+		msgBytes, err := codec.serialize(k.Topic, r.Data)
 		if err != nil {
 			produceErr = fmt.Errorf("failed to serialize record for topic %s: %w", k.Topic, err)
 			break
@@ -193,7 +189,7 @@ func (k *kafkaTask) write(input <-chan *record.Record) error {
 }
 
 // read polls messages from the topic, standalone mode reads from beginning on every run, group mode resumes from committed offsets.
-func (k *kafkaTask) read(ctx context.Context, output chan<- *record.Record) error {
+func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 	standalone := k.GroupID == ""
 
 	var cfg *ckafka.ConfigMap
@@ -228,16 +224,9 @@ func (k *kafkaTask) read(ctx context.Context, output chan<- *record.Record) erro
 		}
 	}
 
-	var deser *avrov2.Deserializer
-	if k.SchemaRegistryURL != "" {
-		srClient, err := k.buildSchemaRegistryClient()
-		if err != nil {
-			return fmt.Errorf("failed to create schema registry client: %w", err)
-		}
-		deser, err = avrov2.NewDeserializer(srClient, serde.ValueSerde, avrov2.NewDeserializerConfig())
-		if err != nil {
-			return fmt.Errorf("failed to create avro deserializer: %w", err)
-		}
+	codec, err := k.newCodec()
+	if err != nil {
+		return err
 	}
 
 	timeout := time.Duration(k.Timeout)
@@ -263,7 +252,7 @@ func (k *kafkaTask) read(ctx context.Context, output chan<- *record.Record) erro
 		}
 		retriesNumber = 0
 
-		data, err := k.deserializeMessage(deser, msg.Value)
+		data, err := codec.deserialize(k.Topic, msg.Value)
 		if err != nil {
 			return fmt.Errorf("failed to deserialize message from topic %s: %w", k.Topic, err)
 		}
@@ -280,47 +269,12 @@ func (k *kafkaTask) read(ctx context.Context, output chan<- *record.Record) erro
 	}
 }
 
-// serializeRecord encodes data to Avro when a serializer is provided; returns raw bytes unchanged when ser is nil.
-func (k *kafkaTask) serializeRecord(ser *avrov2.Serializer, data []byte) ([]byte, error) {
-	if ser == nil {
-		return data, nil
-	}
-	var msg map[string]interface{}
-	if err := json.Unmarshal(data, &msg); err != nil {
-		return nil, fmt.Errorf("record must be valid JSON for Avro serialization: %w", err)
-	}
-	return ser.Serialize(k.Topic, &msg)
-}
-
-// deserializeMessage decodes Avro bytes to JSON when a deserializer is provided; returns raw bytes unchanged when deser is nil.
-func (k *kafkaTask) deserializeMessage(deser *avrov2.Deserializer, payload []byte) ([]byte, error) {
-	if deser == nil {
-		return payload, nil
-	}
-	var result map[string]interface{}
-	if err := deser.DeserializeInto(k.Topic, payload, &result); err != nil {
-		return nil, err
-	}
-	return json.Marshal(result)
-}
-
-// buildSchemaRegistryClient creates a schema registry client with basic auth if credentials are set.
-func (k *kafkaTask) buildSchemaRegistryClient() (schemaregistry.Client, error) {
-	var cfg *schemaregistry.Config
-	if k.SchemaRegistryUsername != "" {
-		cfg = schemaregistry.NewConfigWithBasicAuthentication(
-			k.SchemaRegistryURL,
-			k.SchemaRegistryUsername,
-			k.SchemaRegistryPassword,
-		)
-	} else {
-		cfg = schemaregistry.NewConfig(k.SchemaRegistryURL)
-	}
-	return schemaregistry.NewClient(cfg)
+func (k *kafka) newCodec() (messageCodec, error) {
+	return newCodecForFormat(k.Format, k.SchemaRegistry)
 }
 
 // assignAllPartitions assigns all topic partitions at OffsetBeginning, bypassing the consumer group protocol.
-func (k *kafkaTask) assignAllPartitions(c *ckafka.Consumer) error {
+func (k *kafka) assignAllPartitions(c *ckafka.Consumer) error {
 	initTimeoutMs := int(time.Duration(defaultTimeout).Milliseconds())
 	meta, err := c.GetMetadata(&k.Topic, false, initTimeoutMs)
 	if err != nil {
@@ -344,7 +298,7 @@ func (k *kafkaTask) assignAllPartitions(c *ckafka.Consumer) error {
 }
 
 // buildBaseConfig builds the ConfigMap entries shared by both producers and consumers.
-func (k *kafkaTask) buildBaseConfig() (*ckafka.ConfigMap, error) {
+func (k *kafka) buildBaseConfig() (*ckafka.ConfigMap, error) {
 	cfg := &ckafka.ConfigMap{
 		"bootstrap.servers": k.BootstrapServer,
 		"security.protocol": k.securityProtocol(),
@@ -386,13 +340,14 @@ func (k *kafkaTask) buildBaseConfig() (*ckafka.ConfigMap, error) {
 	return cfg, nil
 }
 
-func (k *kafkaTask) buildProducerConfig() (*ckafka.ConfigMap, error) {
+func (k *kafka) buildProducerConfig() (*ckafka.ConfigMap, error) {
 	cfg, err := k.buildBaseConfig()
 	if err != nil {
 		return nil, err
 	}
 
 	_ = cfg.SetKey("linger.ms", int(time.Duration(k.BatchFlushInterval).Milliseconds()))
+	_ = cfg.SetKey("batch.num.messages", k.BatchSize)
 	_ = cfg.SetKey("message.timeout.ms", int(time.Duration(k.Timeout).Milliseconds()))
 	_ = cfg.SetKey("acks", "all")
 
@@ -406,7 +361,7 @@ func (k *kafkaTask) buildProducerConfig() (*ckafka.ConfigMap, error) {
 }
 
 // buildConsumerConfig builds config for group consumer mode; auto-commits every 5s, offsets stored only after downstream delivery.
-func (k *kafkaTask) buildConsumerConfig() (*ckafka.ConfigMap, error) {
+func (k *kafka) buildConsumerConfig() (*ckafka.ConfigMap, error) {
 	cfg, err := k.buildBaseConfig()
 	if err != nil {
 		return nil, err
@@ -425,7 +380,7 @@ func (k *kafkaTask) buildConsumerConfig() (*ckafka.ConfigMap, error) {
 }
 
 // buildStandaloneConsumerConfig builds config for standalone read mode; never commits offsets, always reads from OffsetBeginning.
-func (k *kafkaTask) buildStandaloneConsumerConfig() (*ckafka.ConfigMap, error) {
+func (k *kafka) buildStandaloneConsumerConfig() (*ckafka.ConfigMap, error) {
 	cfg, err := k.buildBaseConfig()
 	if err != nil {
 		return nil, err
@@ -440,7 +395,7 @@ func (k *kafkaTask) buildStandaloneConsumerConfig() (*ckafka.ConfigMap, error) {
 }
 
 // securityProtocol returns the Confluent security.protocol value based on TLS and auth settings.
-func (k *kafkaTask) securityProtocol() string {
+func (k *kafka) securityProtocol() string {
 	hasTLS := k.ServerAuthType == "tls"
 	hasSASL := k.UserAuthType == "sasl" || k.UserAuthType == "scram"
 	switch {
@@ -455,7 +410,7 @@ func (k *kafkaTask) securityProtocol() string {
 	}
 }
 
-func (k *kafkaTask) shouldRetry(err error) bool {
+func (k *kafka) shouldRetry(err error) bool {
 	if kafkaErr, ok := err.(ckafka.Error); ok {
 		switch kafkaErr.Code() {
 		case ckafka.ErrUnknownTopicOrPart, ckafka.ErrTopicException,
