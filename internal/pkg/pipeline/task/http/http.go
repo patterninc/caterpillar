@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/patterninc/caterpillar/internal/pkg/config"
@@ -16,6 +17,8 @@ import (
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/http/status"
 )
+
+const defaultMaxConnsPerHost = 100
 
 const (
 	defaultOAuthVersion     = `1.0`
@@ -60,6 +63,8 @@ type httpCore struct {
 	Timeout          duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	MaxRetries       int               `yaml:"max_retries,omitempty" json:"max_retries,omitempty"`
 	RetryDelay       duration.Duration `yaml:"retry_delay,omitempty" json:"retry_delay,omitempty"`
+	client           *http.Client
+	clientOnce       sync.Once
 }
 
 type result struct {
@@ -82,6 +87,19 @@ func New() (task.Task, error) {
 		Timeout:          defaultTimeout,
 	}, nil
 
+}
+
+func (h *httpCore) getClient() *http.Client {
+	h.clientOnce.Do(func() {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.MaxConnsPerHost = defaultMaxConnsPerHost
+		transport.MaxIdleConnsPerHost = defaultMaxConnsPerHost
+		h.client = &http.Client{
+			Timeout:   time.Duration(h.Timeout),
+			Transport: transport,
+		}
+	})
+	return h.client
 }
 
 func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
@@ -292,12 +310,7 @@ func (h *httpCore) call(endpoint string) (*result, error) {
 			}
 		}
 
-		// Create HTTP client with proxy configuration if specified
-		client := &http.Client{
-			Timeout: time.Duration(h.Timeout),
-		}
-
-		// Do we use proxy for this one?
+		client := h.getClient()
 		if h.Proxy != nil {
 			transport, err := h.Proxy.getTransport()
 			if err != nil {
@@ -307,7 +320,10 @@ func (h *httpCore) call(endpoint string) (*result, error) {
 				}
 				break
 			}
-			client.Transport = transport
+			client = &http.Client{
+				Timeout:   time.Duration(h.Timeout),
+				Transport: transport,
+			}
 		}
 
 		response, err := client.Do(request)
@@ -319,7 +335,6 @@ func (h *httpCore) call(endpoint string) (*result, error) {
 			}
 			break
 		}
-
 		defer response.Body.Close()
 
 		body, err := io.ReadAll(response.Body)
