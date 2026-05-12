@@ -1,4 +1,4 @@
-# NOTE: Schema Registry credentials must be set in SSM before running this pipeline.
+# NOTE: Schema Registry credentials must be set before running this pipeline.
 tasks:
   - name: kafka_schema_read
     type: kafka
@@ -13,6 +13,7 @@ tasks:
     schema_registry_url: '{{ secret "/kafka/schema-registry/url" }}'
     schema_registry_username: '{{ secret "/kafka/schema-registry/username" }}'
     schema_registry_password: '{{ secret "/kafka/schema-registry/password" }}'
+    schema_format: avro
     timeout: 10s
     retry_limit: 3
 

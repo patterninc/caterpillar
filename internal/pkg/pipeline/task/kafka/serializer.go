@@ -21,20 +21,38 @@ type messageCodec interface {
 	deserialize(topic string, data []byte) ([]byte, error)
 }
 
+// codecFormat holds the constructor for a message codec.
+type codecFormat struct {
+	newCodec func(schemaCfg schemaRegistryConfig) (messageCodec, error)
+}
+
+var formatHandlers = map[string]codecFormat{
+	FormatJSON: {
+		newCodec: func(_ schemaRegistryConfig) (messageCodec, error) {
+			return jsonCodec{}, nil
+		},
+	},
+	FormatAvro: {
+		newCodec: func(cfg schemaRegistryConfig) (messageCodec, error) {
+			if cfg.URL == "" {
+				return nil, fmt.Errorf("schema_registry_url is required for format %q", FormatAvro)
+			}
+			return newAvroCodec(cfg)
+		},
+	},
+}
+
 // newCodecForFormat returns the codec for the given format string.
 // An empty format defaults to FormatJSON (backward compatible).
 func newCodecForFormat(format string, schemaCfg schemaRegistryConfig) (messageCodec, error) {
-	switch format {
-	case "", FormatJSON:
-		return jsonCodec{}, nil
-	case FormatAvro:
-		if schemaCfg.URL == "" {
-			return nil, fmt.Errorf("schema_registry_url is required for avro format")
-		}
-		return newAvroCodec(schemaCfg)
-	default:
+	if format == "" {
+		format = FormatJSON
+	}
+	h, ok := formatHandlers[format]
+	if !ok {
 		return nil, fmt.Errorf("unsupported format %q — supported values: %s, %s", format, FormatJSON, FormatAvro)
 	}
+	return h.newCodec(schemaCfg)
 }
 
 // jsonCodec passes raw bytes through unchanged (default format).

@@ -9,7 +9,7 @@ RUN apk add --no-cache gcc musl-dev pkgconf \
 
 COPY . .
 
-
+# build executable
 RUN CGO_ENABLED=1 go build -tags dynamic -o caterpillar ./cmd/caterpillar/caterpillar.go
 RUN chmod 755 caterpillar
 

@@ -20,6 +20,7 @@ tasks:
     username: test-caterpillar
     password: {{ secret "/kafka/test-caterpillar/secret" }}
     schema_registry_url: '{{ secret "/kafka/schema-registry/url" }}'
+    schema_format: avro
     idempotent: true
     schema_registry_username: '{{ secret "/kafka/schema-registry/username" }}'
     schema_registry_password: '{{ secret "/kafka/schema-registry/password" }}'
