@@ -7,6 +7,7 @@ import (
 	"time"
 
 	ckafka "github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/google/uuid"
 
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
@@ -386,7 +387,7 @@ func (k *kafka) buildStandaloneConsumerConfig() (*ckafka.ConfigMap, error) {
 		return nil, err
 	}
 
-	_ = cfg.SetKey("group.id", standaloneGroupPrefix+k.Topic)
+	_ = cfg.SetKey("group.id", standaloneGroupPrefix+k.Topic+"-"+uuid.New().String())
 	_ = cfg.SetKey("enable.auto.commit", false)
 	_ = cfg.SetKey("auto.offset.reset", "earliest")
 	_ = cfg.SetKey("isolation.level", "read_committed")
