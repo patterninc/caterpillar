@@ -2,19 +2,12 @@ package kafka
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
-	"errors"
 	"fmt"
-	"io"
-	"os"
-	"strings"
+	"sync"
 	"time"
 
-	kg "github.com/segmentio/kafka-go"
-	"github.com/segmentio/kafka-go/sasl"
-	"github.com/segmentio/kafka-go/sasl/plain"
-	"github.com/segmentio/kafka-go/sasl/scram"
+	ckafka "github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/google/uuid"
 
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
@@ -22,31 +15,41 @@ import (
 )
 
 const (
-	defaultTimeout       = duration.Duration(15 * time.Second)
-	defaultBatchSize     = 100
-	defaultRetryLimit    = 5
-	defaultFlushInterval = duration.Duration(2 * time.Second)
+	defaultTimeout          = duration.Duration(15 * time.Second)
+	defaultRetryLimit       = 5
+	defaultFlushInterval    = duration.Duration(2 * time.Second)
+	defaultCommitIntervalMs = 5000
+	defaultBatchSize        = 100
+
+	// standaloneGroupPrefix is the group.id used for direct-assign reads (no group_id set); broker needs PREFIXED ACL on this prefix.
+	standaloneGroupPrefix = "caterpillar-standalone-"
 )
+
+// schemaRegistryConfig holds Schema Registry connection details; required when format is "avro".
+type schemaRegistryConfig struct {
+	URL      string `yaml:"schema_registry_url,omitempty" json:"schema_registry_url,omitempty"`           // Schema Registry URL; required when format is "avro"
+	Username string `yaml:"schema_registry_username,omitempty" json:"schema_registry_username,omitempty"` // Schema Registry basic auth username
+	Password string `yaml:"schema_registry_password,omitempty" json:"schema_registry_password,omitempty"` // Schema Registry basic auth password
+}
 
 type kafka struct {
 	task.Base          `yaml:",inline" json:",inline"`
-	BootstrapServer    string            `yaml:"bootstrap_server" json:"bootstrap_server"`                             // "host:port"
-	Topic              string            `yaml:"topic" json:"topic"`                                                   // topic to read from or write to
-	ServerAuthType     string            `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"`         // "none", "tls"
-	Cert               string            `yaml:"cert,omitempty" json:"cert,omitempty"`                                 // used for Server TLS authentication
-	CertPath           string            `yaml:"cert_path,omitempty" json:"cert_path,omitempty"`                       // used for Server TLS authentication
-	UserAuthType       string            `yaml:"user_auth_type" json:"user_auth_type"`                                 // "none", "sasl", "scram", "mtls"
-	UserCert           string            `yaml:"user_cert,omitempty" json:"user_cert,omitempty"`                       // used for user mTLS authentication
-	UserCertPath       string            `yaml:"user_cert_path,omitempty" json:"user_cert_path,omitempty"`             // used for user mTLS authentication
-	Username           string            `yaml:"username,omitempty" json:"username,omitempty"`                         // used for user SASL/Scram authentication
-	Password           string            `yaml:"password,omitempty" json:"password,omitempty"`                         // used for user SASL/Scram authentication
-	Timeout            duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`                           // connection, read, write, commit timeout
-	BatchFlushInterval duration.Duration `yaml:"batch_flush_interval,omitempty" json:"batch_flush_interval,omitempty"` // interval to flush incomplete batches
-	GroupID            string            `yaml:"group_id,omitempty" json:"group_id,omitempty"`                         // the consumer group id (optional)
-	BatchSize          int               `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`                     // number of messages to read/write in a batch
-	RetryLimit         *int              `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`                   // number of retries for read errors
-	timeout            time.Duration     // timeout duration calculated from Timeout
-	batchFlushInterval time.Duration     // batch flush interval calculated from BatchFlushInterval
+	BootstrapServer    string               `yaml:"bootstrap_server" json:"bootstrap_server"`                             // "host:port"
+	Topic              string               `yaml:"topic" json:"topic"`                                                   // topic to read from or write to
+	ServerAuthType     string               `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"`         // "none", "tls"
+	Cert               string               `yaml:"cert,omitempty" json:"cert,omitempty"`                                 // used for Server TLS authentication
+	CertPath           string               `yaml:"cert_path,omitempty" json:"cert_path,omitempty"`                       // used for Server TLS authentication
+	UserAuthType       string               `yaml:"user_auth_type" json:"user_auth_type"`                                 // "none", "sasl", "scram"
+	Username           string               `yaml:"username,omitempty" json:"username,omitempty"`                         // used for user SASL/Scram authentication
+	Password           string               `yaml:"password,omitempty" json:"password,omitempty"`                         // used for user SASL/Scram authentication
+	Timeout            duration.Duration    `yaml:"timeout,omitempty" json:"timeout,omitempty"`                           // connection, read, write, commit timeout
+	BatchFlushInterval duration.Duration    `yaml:"batch_flush_interval,omitempty" json:"batch_flush_interval,omitempty"` // interval to flush incomplete batches
+	GroupID            string               `yaml:"group_id,omitempty" json:"group_id,omitempty"`                         // the consumer group id (optional)
+	BatchSize          int                  `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`                     // max messages per producer batch (maps to batch.num.messages); defaults to 100
+	RetryLimit         *int                 `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`                   // number of retries for read errors
+	Idempotent         bool                 `yaml:"idempotent,omitempty" json:"idempotent,omitempty"`                     // enable idempotent producer
+	Format             string               `yaml:"format,omitempty" json:"format,omitempty"`                             // message format: "json" (default) or "avro"
+	SchemaRegistry     schemaRegistryConfig `yaml:",inline" json:",inline"`                                                // Schema Registry connection — required when format is "avro"
 }
 
 func New() (task.Task, error) {
@@ -69,31 +72,31 @@ func (k *kafka) Init() error {
 	if k.UserAuthType == "" {
 		k.UserAuthType = "none"
 	}
-	if k.BatchSize <= 0 {
-		k.BatchSize = defaultBatchSize
-	}
 	if k.BatchFlushInterval <= 0 {
 		k.BatchFlushInterval = defaultFlushInterval
+	}
+	if k.BatchSize <= 0 {
+		k.BatchSize = defaultBatchSize
 	}
 	if k.RetryLimit == nil || *k.RetryLimit < 0 {
 		k.RetryLimit = new(int)
 		*k.RetryLimit = defaultRetryLimit
 	}
-	k.timeout = time.Duration(k.Timeout)
-	k.batchFlushInterval = time.Duration(k.BatchFlushInterval)
 
-	// try connecting to kafka broker to validate config
-	dialer, err := k.dial()
+	cfg, err := k.buildBaseConfig()
 	if err != nil {
-		return fmt.Errorf("failed to create kafka dialer: %w", err)
+		return fmt.Errorf("failed to build kafka config: %w", err)
 	}
-	dialCtx, cancel := context.WithTimeout(context.Background(), k.timeout)
-	defer cancel()
-	conn, err := dialer.DialContext(dialCtx, "tcp", k.BootstrapServer)
+	a, err := ckafka.NewAdminClient(cfg)
 	if err != nil {
+		return fmt.Errorf("failed to create kafka admin client: %w", err)
+	}
+	defer a.Close()
+	// Use defaultTimeout for init probe — SCRAM+TLS handshake needs multiple round trips, short user timeouts would fail.
+	initTimeoutMs := int(time.Duration(defaultTimeout).Milliseconds())
+	if _, err = a.GetMetadata(nil, false, initTimeoutMs); err != nil {
 		return fmt.Errorf("failed to connect to kafka broker: %w", err)
 	}
-	conn.Close()
 
 	return nil
 }
@@ -103,77 +106,145 @@ func (k *kafka) Run(input <-chan *record.Record, output chan<- *record.Record) e
 		return task.ErrPresentInputOutput
 	}
 
-	ctx := context.Background()
-
-	// if input is not nil, this is a sink task
 	if input != nil {
-		return k.write(ctx, input)
+		return k.write(input)
 	}
 
-	// else, this is a source task
-	return k.read(ctx, output)
+	return k.read(context.Background(), output)
 }
 
-// write writes records from the input channel to the Kafka topic
-func (k *kafka) write(ctx context.Context, input <-chan *record.Record) error {
-	if k.batchFlushInterval >= k.timeout {
-		return fmt.Errorf("batch_flush_interval (%s) must be less than timeout (%s)", k.batchFlushInterval, k.timeout)
-	}
-
-	dialer, err := k.dial()
+// write produces records to the Kafka topic using the codec selected by the format field.
+func (k *kafka) write(input <-chan *record.Record) error {
+	cfg, err := k.buildProducerConfig()
 	if err != nil {
-		return fmt.Errorf("failed to create kafka dialer: %w", err)
+		return fmt.Errorf("failed to build producer config: %w", err)
 	}
 
-	writer := k.getWriter(dialer)
+	p, err := ckafka.NewProducer(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create producer: %w", err)
+	}
+	defer p.Close()
 
-	defer func() {
-		if err := writer.Close(); err != nil {
-			fmt.Printf("warning: error closing kafka writer: %v\n", err)
+	codec, err := k.newCodec()
+	if err != nil {
+		return err
+	}
+
+	// deliveryCh is drained by a goroutine; closed after Flush so wg.Wait() guarantees no race on firstDeliveryErr.
+	deliveryCh := make(chan ckafka.Event, 100)
+	var (
+		wg               sync.WaitGroup
+		firstDeliveryErr error
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for e := range deliveryCh {
+			if m, ok := e.(*ckafka.Message); ok && m.TopicPartition.Error != nil && firstDeliveryErr == nil {
+				firstDeliveryErr = m.TopicPartition.Error
+				fmt.Printf("delivery failed for topic %s partition %d: %v\n",
+					k.Topic, m.TopicPartition.Partition, m.TopicPartition.Error)
+			}
 		}
 	}()
 
+	var produceErr error
 	for {
 		r, ok := k.GetRecord(input)
 		if !ok {
 			break
 		}
 
-		// create a write context with timeout per message batch
-		wctx, cancel := context.WithTimeout(ctx, k.timeout)
-		err := writer.WriteMessages(wctx, kg.Message{Value: r.Data})
-		cancel()
+		msgBytes, err := codec.serialize(k.Topic, r.Data)
 		if err != nil {
-			return k.handleWriteError(err)
+			produceErr = fmt.Errorf("failed to serialize record for topic %s: %w", k.Topic, err)
+			break
 		}
+
+		if err = p.Produce(&ckafka.Message{
+			TopicPartition: ckafka.TopicPartition{Topic: &k.Topic, Partition: ckafka.PartitionAny},
+			Value:          msgBytes,
+		}, deliveryCh); err != nil {
+			produceErr = fmt.Errorf("failed to enqueue message to topic %s: %w", k.Topic, err)
+			break
+		}
+	}
+
+	// Always flush so enqueued messages get delivery reports and the goroutine exits cleanly.
+	timeout := time.Duration(k.Timeout)
+	remaining := p.Flush(int(timeout.Milliseconds()))
+	close(deliveryCh)
+	wg.Wait()
+
+	if produceErr != nil {
+		return produceErr
+	}
+	if firstDeliveryErr != nil {
+		return fmt.Errorf("delivery failed for topic %s: %w", k.Topic, firstDeliveryErr)
+	}
+	if remaining > 0 {
+		return fmt.Errorf("%d messages failed to deliver to topic %s within %s", remaining, k.Topic, timeout)
 	}
 	return nil
 }
 
-// read reads messages from the Kafka topic and sends them to the output channel
+// read polls messages from the topic, standalone mode reads from beginning on every run, group mode resumes from committed offsets.
 func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
-	dialer, err := k.dial()
-	if err != nil {
-		return fmt.Errorf("failed to create kafka dialer: %w", err)
+	standalone := k.GroupID == ""
+
+	var cfg *ckafka.ConfigMap
+	var err error
+	if standalone {
+		cfg, err = k.buildStandaloneConsumerConfig()
+	} else {
+		cfg, err = k.buildConsumerConfig()
 	}
-	reader := k.getReader(dialer)
+	if err != nil {
+		return fmt.Errorf("failed to build consumer config: %w", err)
+	}
+
+	c, err := ckafka.NewConsumer(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create consumer: %w", err)
+	}
 	defer func() {
-		if err := reader.Close(); err != nil {
-			fmt.Printf("warning: error closing kafka reader: %v\n", err)
+		if err := c.Close(); err != nil {
+			fmt.Printf("warning: error closing kafka consumer: %v\n", err)
 		}
 	}()
 
+	if standalone {
+		fmt.Printf("no group_id set — standalone read from beginning of topic %s\n", k.Topic)
+		if err := k.assignAllPartitions(c); err != nil {
+			return fmt.Errorf("failed to assign partitions: %w", err)
+		}
+	} else {
+		if err := c.SubscribeTopics([]string{k.Topic}, nil); err != nil {
+			return fmt.Errorf("failed to subscribe to topic %s: %w", k.Topic, err)
+		}
+	}
+
+	codec, err := k.newCodec()
+	if err != nil {
+		return err
+	}
+
+	timeout := time.Duration(k.Timeout)
 	retriesNumber := 0
 	for {
-		fetchCtx, cancel := context.WithTimeout(ctx, k.timeout)
-		m, err := reader.FetchMessage(fetchCtx)
-		cancel()
+		msg, err := c.ReadMessage(timeout)
 		if err != nil {
-			if !k.shouldRetry(err) {
+			if kafkaErr, ok := err.(ckafka.Error); ok && kafkaErr.Code() == ckafka.ErrTimedOut {
+				retriesNumber++
+				fmt.Printf("kafka read timeout for attempt #%d on topic %s\n", retriesNumber, k.Topic)
+			} else if !k.shouldRetry(err) {
 				return err
+			} else {
+				retriesNumber++
+				fmt.Printf("kafka error reading message attempt #%d: %v\n", retriesNumber, err)
 			}
-			retriesNumber++
-			fmt.Printf("kafka error while reading message for attempt #%d with error: %v\n", retriesNumber, err)
+
 			if retriesNumber > *k.RetryLimit {
 				fmt.Printf("kafka error while reading message, reached retry limit (%d), stopping reader\n", *k.RetryLimit)
 				return nil
@@ -182,151 +253,171 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 		}
 		retriesNumber = 0
 
-		k.SendData(ctx, m.Value, output)
+		data, err := codec.deserialize(k.Topic, msg.Value)
+		if err != nil {
+			return fmt.Errorf("failed to deserialize message from topic %s: %w", k.Topic, err)
+		}
 
-		if k.GroupID != "" {
-			cctx, cancel := context.WithTimeout(ctx, k.timeout)
-			if err = reader.CommitMessages(cctx, m); err != nil {
-				fmt.Printf("failed to commit message: %v\n", err)
+		k.SendData(ctx, data, output)
+
+		// Only store offsets for group consumers — standalone reads never commit.
+		if !standalone {
+			if _, err := c.StoreMessage(msg); err != nil {
+				fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
+					k.Topic, msg.TopicPartition.Partition, err)
 			}
-			cancel()
 		}
 	}
 }
 
-// dial creates a kafka dialer based on the authentication configuration
-func (k *kafka) dial() (*kg.Dialer, error) {
-	var mechanism sasl.Mechanism
-	switch k.UserAuthType {
-	case "none":
-		mechanism = nil
-	case "sasl", "scram":
-		m, err := k.getSASLMechanism()
-		if err != nil {
-			return nil, err
+func (k *kafka) newCodec() (messageCodec, error) {
+	return newCodecForFormat(k.Format, k.SchemaRegistry)
+}
+
+// assignAllPartitions assigns all topic partitions at OffsetBeginning, bypassing the consumer group protocol.
+func (k *kafka) assignAllPartitions(c *ckafka.Consumer) error {
+	initTimeoutMs := int(time.Duration(defaultTimeout).Milliseconds())
+	meta, err := c.GetMetadata(&k.Topic, false, initTimeoutMs)
+	if err != nil {
+		return fmt.Errorf("failed to get metadata for topic %s: %w", k.Topic, err)
+	}
+
+	topicMeta, ok := meta.Topics[k.Topic]
+	if !ok || len(topicMeta.Partitions) == 0 {
+		return fmt.Errorf("topic %s not found or has no partitions", k.Topic)
+	}
+
+	partitions := make([]ckafka.TopicPartition, len(topicMeta.Partitions))
+	for i, p := range topicMeta.Partitions {
+		partitions[i] = ckafka.TopicPartition{
+			Topic:     &k.Topic,
+			Partition: p.ID,
+			Offset:    ckafka.OffsetBeginning,
 		}
-		mechanism = m
+	}
+	return c.Assign(partitions)
+}
+
+// buildBaseConfig builds the ConfigMap entries shared by both producers and consumers.
+func (k *kafka) buildBaseConfig() (*ckafka.ConfigMap, error) {
+	cfg := &ckafka.ConfigMap{
+		"bootstrap.servers": k.BootstrapServer,
+		"security.protocol": k.securityProtocol(),
+	}
+
+	if k.ServerAuthType == "tls" {
+		switch {
+		case k.Cert != "":
+			_ = cfg.SetKey("ssl.ca.pem", k.Cert)
+		case k.CertPath != "":
+			_ = cfg.SetKey("ssl.ca.location", k.CertPath)
+		default:
+			return nil, fmt.Errorf("cert or cert_path is required when server_auth_type is tls")
+		}
+	}
+
+	switch k.UserAuthType {
+	case "scram":
+		if k.Username == "" || k.Password == "" {
+			return nil, fmt.Errorf("username and password are required for scram authentication")
+		}
+		_ = cfg.SetKey("sasl.mechanisms", "SCRAM-SHA-512")
+		_ = cfg.SetKey("sasl.username", k.Username)
+		_ = cfg.SetKey("sasl.password", k.Password)
+	case "sasl":
+		if k.Username == "" || k.Password == "" {
+			return nil, fmt.Errorf("username and password are required for sasl authentication")
+		}
+		_ = cfg.SetKey("sasl.mechanisms", "PLAIN")
+		_ = cfg.SetKey("sasl.username", k.Username)
+		_ = cfg.SetKey("sasl.password", k.Password)
 	case "mtls":
-		// TODO: implement mTLS authentication
 		return nil, fmt.Errorf("mtls user authentication is not implemented")
+	case "none":
 	default:
 		return nil, fmt.Errorf("unknown user_auth_type: %s", k.UserAuthType)
 	}
 
-	return k.createDialer(mechanism)
+	return cfg, nil
 }
 
-// getReader creates a kafka reader based on whether GroupID is specified
-func (k *kafka) getReader(dialer *kg.Dialer) *kg.Reader {
-	readerConfig := kg.ReaderConfig{
-		Brokers:       []string{k.BootstrapServer},
-		Topic:         k.Topic,
-		Dialer:        dialer,
-		QueueCapacity: k.BatchSize,
+func (k *kafka) buildProducerConfig() (*ckafka.ConfigMap, error) {
+	cfg, err := k.buildBaseConfig()
+	if err != nil {
+		return nil, err
 	}
-	if k.GroupID != "" {
-		readerConfig.GroupID = k.GroupID
-	} else {
-		fmt.Printf("No group_id specified, will consume as standalone reader.\n")
+
+	_ = cfg.SetKey("linger.ms", int(time.Duration(k.BatchFlushInterval).Milliseconds()))
+	_ = cfg.SetKey("batch.num.messages", k.BatchSize)
+	_ = cfg.SetKey("message.timeout.ms", int(time.Duration(k.Timeout).Milliseconds()))
+	_ = cfg.SetKey("acks", "all")
+
+	if k.Idempotent {
+		// idempotent producer requires acks=all and max.in.flight ≤ 5
+		_ = cfg.SetKey("enable.idempotence", true)
+		_ = cfg.SetKey("max.in.flight.requests.per.connection", 5)
 	}
-	return kg.NewReader(readerConfig)
+
+	return cfg, nil
 }
 
-// getWriter creates a kafka writer for the specified dialer
-func (k *kafka) getWriter(dialer *kg.Dialer) *kg.Writer {
-	return kg.NewWriter(kg.WriterConfig{
-		Brokers:      []string{k.BootstrapServer},
-		Topic:        k.Topic,
-		Dialer:       dialer,
-		Balancer:     &kg.LeastBytes{},     // TODO: look into other balancers
-		BatchSize:    k.BatchSize,          // number of messages to batch before sending
-		BatchTimeout: k.batchFlushInterval, // set flush interval for batch
-	})
-}
-
-// handleWriteError processes errors returned from writer.WriteMessages
-func (k *kafka) handleWriteError(err error) error {
-	var we kg.WriteErrors
-	if errors.As(err, &we) {
-		var errStringBuilder strings.Builder
-		errStringBuilder.WriteString(fmt.Sprintf("failed to write message to kafka with error count = %d.\nThe errors are:\n", we.Count()))
-		for i, individualErr := range we {
-			errStringBuilder.WriteString(fmt.Sprintf("%d   : %v\n", i, individualErr))
-		}
-		return errors.New(errStringBuilder.String())
+// buildConsumerConfig builds config for group consumer mode; auto-commits every 5s, offsets stored only after downstream delivery.
+func (k *kafka) buildConsumerConfig() (*ckafka.ConfigMap, error) {
+	cfg, err := k.buildBaseConfig()
+	if err != nil {
+		return nil, err
 	}
-	return fmt.Errorf("failed to write message to kafka: %w", err)
+
+	_ = cfg.SetKey("auto.offset.reset", "earliest")
+	_ = cfg.SetKey("session.timeout.ms", 30000)
+	_ = cfg.SetKey("heartbeat.interval.ms", 3000)
+	_ = cfg.SetKey("enable.auto.offset.store", false)
+	_ = cfg.SetKey("enable.auto.commit", true)
+	_ = cfg.SetKey("auto.commit.interval.ms", defaultCommitIntervalMs)
+	_ = cfg.SetKey("isolation.level", "read_committed")
+	_ = cfg.SetKey("group.id", k.GroupID)
+
+	return cfg, nil
 }
 
-// shouldRetry determines if a read error should be retried
+// buildStandaloneConsumerConfig builds config for standalone read mode; never commits offsets, always reads from OffsetBeginning.
+func (k *kafka) buildStandaloneConsumerConfig() (*ckafka.ConfigMap, error) {
+	cfg, err := k.buildBaseConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	_ = cfg.SetKey("group.id", standaloneGroupPrefix+k.Topic+"-"+uuid.New().String())
+	_ = cfg.SetKey("enable.auto.commit", false)
+	_ = cfg.SetKey("auto.offset.reset", "earliest")
+	_ = cfg.SetKey("isolation.level", "read_committed")
+
+	return cfg, nil
+}
+
+// securityProtocol returns the Confluent security.protocol value based on TLS and auth settings.
+func (k *kafka) securityProtocol() string {
+	hasTLS := k.ServerAuthType == "tls"
+	hasSASL := k.UserAuthType == "sasl" || k.UserAuthType == "scram"
+	switch {
+	case hasTLS && hasSASL:
+		return "SASL_SSL"
+	case hasTLS:
+		return "SSL"
+	case hasSASL:
+		return "SASL_PLAINTEXT"
+	default:
+		return "PLAINTEXT"
+	}
+}
+
 func (k *kafka) shouldRetry(err error) bool {
-	if errors.Is(err, io.EOF) {
-		fmt.Printf("kafka reached end of topic: %v\n", k.Topic)
-		return false
+	if kafkaErr, ok := err.(ckafka.Error); ok {
+		switch kafkaErr.Code() {
+		case ckafka.ErrUnknownTopicOrPart, ckafka.ErrTopicException,
+			ckafka.ErrGroupAuthorizationFailed, ckafka.ErrTopicAuthorizationFailed:
+			return false
+		}
 	}
-	if errors.Is(err, context.Canceled) {
-		fmt.Printf("kafka reader context canceled: %v\n", err)
-		return false
-	}
-
 	return true
-}
-
-// createDialer creates a kafka dialer with optional SASL mechanism and TLS configuration
-func (k *kafka) createDialer(mechanism sasl.Mechanism) (*kg.Dialer, error) {
-	dialer := &kg.Dialer{
-		Timeout:   k.timeout,
-		DualStack: true, // use both IPv4 and IPv6 in case either is available
-	}
-	if mechanism != nil {
-		dialer.SASLMechanism = mechanism
-	}
-	if k.ServerAuthType == "tls" {
-		tlsCfg, err := k.getTLSConfig()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create tls config: %w", err)
-		}
-		dialer.TLS = tlsCfg
-	}
-	return dialer, nil
-}
-
-// getSASLMechanism returns the appropriate SASL mechanism based on the UserAuthType
-func (k *kafka) getSASLMechanism() (sasl.Mechanism, error) {
-	if k.Username == "" || k.Password == "" {
-		return nil, fmt.Errorf("username and password are required for SASL authentication")
-	}
-	if k.UserAuthType == "sasl" {
-		return plain.Mechanism{Username: k.Username, Password: k.Password}, nil
-	}
-	if k.UserAuthType == "scram" {
-		return scram.Mechanism(scram.SHA512, k.Username, k.Password)
-	}
-	return nil, fmt.Errorf("incorrect auth_type for SASL mechanism: %s", k.UserAuthType)
-}
-
-// getTLSConfig creates a TLS configuration using the provided certificate path for server authentication
-func (k *kafka) getTLSConfig() (*tls.Config, error) {
-	var caCert []byte
-	if k.Cert == "" {
-		if k.CertPath == "" {
-			return nil, fmt.Errorf("cert or cert_path is required for TLS server authentication")
-		}
-		cert, err := os.ReadFile(k.CertPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read cert file: %w", err)
-		}
-		caCert = cert
-	} else {
-		caCert = []byte(k.Cert)
-	}
-
-	caPool := x509.NewCertPool()
-	ok := caPool.AppendCertsFromPEM(caCert)
-	if !ok {
-		return nil, fmt.Errorf("failed to append CA certificate")
-	}
-	return &tls.Config{
-		RootCAs: caPool,
-	}, nil
 }

@@ -1,0 +1,26 @@
+# NOTE: Schema Registry credentials must be set before running this pipeline.
+tasks:
+  - name: data_to_send
+    type: file
+    path: test/pipelines/names.txt
+
+  - name: shape_record
+    type: jq
+    explode: true
+    path: 'split("\n") | map(select(. != "")) | map({"name": ., "age": 0.0})'
+
+  - name: kafka_schema_write
+    type: kafka
+    bootstrap_server: '{{ secret "/kafka/server" }}:9094'
+    topic: test-caterpillar-topic
+    server_auth_type: tls
+    cert: |
+      {{ indent 6 (secret "/kafka/ca-cert") }}
+    user_auth_type: scram
+    username: test-caterpillar
+    password: {{ secret "/kafka/test-caterpillar/secret" }}
+    schema_registry_url: '{{ secret "/kafka/schema-registry/url" }}'
+    schema_format: avro
+    idempotent: true
+    schema_registry_username: '{{ secret "/kafka/schema-registry/username" }}'
+    schema_registry_password: '{{ secret "/kafka/schema-registry/password" }}'
