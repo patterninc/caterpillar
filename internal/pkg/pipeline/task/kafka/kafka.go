@@ -20,6 +20,7 @@ const (
 	defaultFlushInterval    = duration.Duration(2 * time.Second)
 	defaultCommitIntervalMs = 5000
 	defaultBatchSize        = 100
+	defaultAutoOffsetReset  = "earliest"
 
 	// standaloneGroupPrefix is the group.id used for direct-assign reads (no group_id set); broker needs PREFIXED ACL on this prefix.
 	standaloneGroupPrefix = "caterpillar-standalone-"
@@ -33,7 +34,7 @@ type schemaRegistryConfig struct {
 }
 
 type kafka struct {
-	task.Base          `yaml:",inline" json:",inline"`
+	task.ServerBase    `yaml:",inline" json:",inline"`
 	BootstrapServer    string               `yaml:"bootstrap_server" json:"bootstrap_server"`                             // "host:port"
 	Topic              string               `yaml:"topic" json:"topic"`                                                   // topic to read from or write to
 	ServerAuthType     string               `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"`         // "none", "tls"
@@ -45,6 +46,7 @@ type kafka struct {
 	Timeout            duration.Duration    `yaml:"timeout,omitempty" json:"timeout,omitempty"`                           // connection, read, write, commit timeout
 	BatchFlushInterval duration.Duration    `yaml:"batch_flush_interval,omitempty" json:"batch_flush_interval,omitempty"` // interval to flush incomplete batches
 	GroupID            string               `yaml:"group_id,omitempty" json:"group_id,omitempty"`                         // the consumer group id (optional)
+	AutoOffsetReset    string               `yaml:"auto_offset_reset,omitempty" json:"auto_offset_reset,omitempty" validate:"omitempty,oneof=earliest latest"` // group-mode reset policy when stored offset is out of range; "earliest" (default) or "latest"
 	BatchSize          int                  `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`                     // max messages per producer batch (maps to batch.num.messages); defaults to 100
 	RetryLimit         *int                 `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`                   // number of retries for read errors
 	Idempotent         bool                 `yaml:"idempotent,omitempty" json:"idempotent,omitempty"`                     // enable idempotent producer
@@ -81,6 +83,9 @@ func (k *kafka) Init() error {
 	if k.RetryLimit == nil || *k.RetryLimit < 0 {
 		k.RetryLimit = new(int)
 		*k.RetryLimit = defaultRetryLimit
+	}
+	if k.AutoOffsetReset == "" {
+		k.AutoOffsetReset = defaultAutoOffsetReset
 	}
 
 	cfg, err := k.buildBaseConfig()
@@ -194,6 +199,12 @@ func (k *kafka) write(input <-chan *record.Record) error {
 
 // read polls messages from the topic, standalone mode reads from beginning on every run, group mode resumes from committed offsets.
 func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
+	if k.EndAfter > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(k.EndAfter))
+		defer cancel()
+	}
+
 	standalone := k.GroupID == ""
 
 	var cfg *ckafka.ConfigMap
@@ -236,6 +247,13 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 	timeout := time.Duration(k.Timeout)
 	retriesNumber := 0
 	for {
+		select {
+		case <-ctx.Done():
+			fmt.Printf("kafka end_after duration reached for topic %s, stopping reader\n", k.Topic)
+			return nil
+		default:
+		}
+
 		msg, err := c.ReadMessage(timeout)
 		if err != nil {
 			if kafkaErr, ok := err.(ckafka.Error); ok && kafkaErr.Code() == ckafka.ErrTimedOut {
@@ -371,7 +389,7 @@ func (k *kafka) buildConsumerConfig() (*ckafka.ConfigMap, error) {
 		return nil, err
 	}
 
-	_ = cfg.SetKey("auto.offset.reset", "earliest")
+	_ = cfg.SetKey("auto.offset.reset", k.AutoOffsetReset)
 	_ = cfg.SetKey("session.timeout.ms", 30000)
 	_ = cfg.SetKey("heartbeat.interval.ms", 3000)
 	_ = cfg.SetKey("enable.auto.offset.store", false)
