@@ -60,12 +60,15 @@ Decodes binary protobuf payloads to JSON using a compiled `FileDescriptorSet` (p
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `descriptor_path` | string | - | Path to a binary `FileDescriptorSet` file |
+| `descriptor_path` | string | - | Path to a binary `FileDescriptorSet`. Accepts a local filesystem path or an `s3://bucket/key` URI |
 | `message_name` | string | - | Fully-qualified message name (e.g. `pkg.MyMessage`) |
+| `region` | string | `us-west-2` | AWS region used when `descriptor_path` is an `s3://` URI. Ignored for local paths |
 | `use_proto_names` | bool | `false` | Emit field names as defined in `.proto` instead of lowerCamelCase |
 | `emit_unpopulated` | bool | `false` | Include zero-valued fields in output |
 
-Example:
+The descriptor is fetched once per task instance (cached for the lifetime of the run); S3 credentials are resolved from the standard AWS SDK chain (env, profile, IRSA, EC2 IMDS).
+
+Example — local descriptor:
 ```yaml
 tasks:
   - name: decode_event
@@ -73,6 +76,17 @@ tasks:
     format: protobuf
     descriptor_path: schemas/events.desc
     message_name: events.v1.UserEvent
+```
+
+Example — descriptor in S3:
+```yaml
+tasks:
+  - name: decode_event
+    type: converter
+    format: protobuf
+    descriptor_path: s3://my-bucket/schemas/events.desc
+    message_name: events.v1.UserEvent
+    region: us-east-1
 ```
 
 ### SST Format Options
