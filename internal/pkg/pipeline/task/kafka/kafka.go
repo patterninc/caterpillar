@@ -174,6 +174,9 @@ func (k *kafka) write(input <-chan *record.Record) error {
 	// Always flush so enqueued messages get delivery reports and the goroutine exits cleanly.
 	timeout := time.Duration(k.Timeout)
 	remaining := p.Flush(int(timeout.Milliseconds()))
+	
+	// Close the producer BEFORE closing deliveryCh:
+	p.Close()
 	close(deliveryCh)
 	wg.Wait()
 
