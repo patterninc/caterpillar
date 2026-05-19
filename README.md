@@ -226,7 +226,7 @@ Caterpillar supports the following tasks, each of which can serve different role
 
 - **`aws_parameter_store`** - [Read parameters from AWS Systems Manager Parameter Store](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/aws/parameter_store/README.md)
 - **`compress`** - [Compress or decompress data using various algorithms](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/compress/README.md)
-- **`converter`** - [Convert data between different formats (CSV, HTML, JSON, XML, SST)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/converter/README.md)
+- **`converter`** - [Convert data between different formats (CSV, HTML, JSON, XML, SST, Protobuf)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/converter/README.md)
 - **`delay`** - [Add controlled delays between record processing](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/delay/README.md)
 - **`echo`** - [Print data to console for debugging and monitoring](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/echo/README.md)
 - **`file`** - [Read from or write to local files and S3 (acts as source or sink)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/file/README.md)
