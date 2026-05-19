@@ -1,6 +1,6 @@
 # Converter Task
 
-The `converter` task converts data between different formats, supporting CSV, HTML, XLSX (Excel), EML (Email), and other data format transformations.
+The `converter` task converts data between different formats, supporting CSV, HTML, XLSX (Excel), EML (Email), Protobuf, and other data format transformations.
 
 ## Function
 
@@ -21,7 +21,7 @@ The converter task transforms data between different formats. It receives record
 |-------|------|---------|-------------|
 | `name` | string | - | Task name for identification |
 | `type` | string | `converter` | Must be "converter" |
-| `format` | string | - | Format to convert to (csv, html, sst, xlsx, eml) |
+| `format` | string | - | Format to convert to (csv, html, sst, xlsx, eml, protobuf) |
 | `delimiter` | string| \t | Used only in sst converter for spliting key and value| 
 
 ### CSV Format Options
@@ -54,6 +54,41 @@ Metadata generated for each output:
 -   `converter_filename`: The name of the output file
 -   `content_type`: The MIME type of the content
 
+### Protobuf Format Options
+
+Decodes binary protobuf payloads to JSON using a compiled `FileDescriptorSet` (produced by `protoc --descriptor_set_out=foo.desc --include_imports foo.proto`).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `descriptor_path` | string | - | Path to a binary `FileDescriptorSet`. Accepts a local filesystem path or an `s3://bucket/key` URI |
+| `message_name` | string | - | Fully-qualified message name (e.g. `pkg.MyMessage`) |
+| `region` | string | `us-west-2` | AWS region used when `descriptor_path` is an `s3://` URI. Ignored for local paths |
+| `use_proto_names` | bool | `false` | Emit field names as defined in `.proto` instead of lowerCamelCase |
+| `emit_unpopulated` | bool | `false` | Include zero-valued fields in output |
+
+The descriptor is fetched once per task instance (cached for the lifetime of the run); S3 credentials are resolved from the standard AWS SDK chain (env, profile, IRSA, EC2 IMDS).
+
+Example — local descriptor:
+```yaml
+tasks:
+  - name: decode_event
+    type: converter
+    format: protobuf
+    descriptor_path: schemas/events.desc
+    message_name: events.v1.UserEvent
+```
+
+Example — descriptor in S3:
+```yaml
+tasks:
+  - name: decode_event
+    type: converter
+    format: protobuf
+    descriptor_path: s3://my-bucket/schemas/events.desc
+    message_name: events.v1.UserEvent
+    region: us-east-1
+```
+
 ### SST Format Options
 Convert a single line to the SSTable which could be stored on s3 or via file. It expects a single line as input
 
@@ -76,6 +111,7 @@ The converter supports the following formats:
 - **HTML**: Converts HTML to JSON representation with element structure
 - **XLSX**: Converts Excel files to CSV format. **Note:** Each sheet in the Excel file is emitted as a separate record with the sheet name stored in the context (key: `xlsx_sheet_name`)
 - **EML**: Converts EML (Email) files to their constituent parts (HTML body, Text body, Attachments)
+- **Protobuf**: Decodes binary protobuf messages to JSON using a compiled FileDescriptorSet
 
 ## Example Configurations
 

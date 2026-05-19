@@ -36,11 +36,12 @@ func (c *core) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 	// supported formats
 	formats := map[string]converter{
-		`csv`:  new(csv),
-		`html`: new(html),
-		`sst`:  new(sst),
-		`xlsx`: new(xlsx),
-		`eml`:  new(eml),
+		`csv`:      new(csv),
+		`html`:     new(html),
+		`sst`:      new(sst),
+		`xlsx`:     new(xlsx),
+		`eml`:      new(eml),
+		`protobuf`: new(protobuf),
 	}
 
 	// let's figure out what converter we'll use
