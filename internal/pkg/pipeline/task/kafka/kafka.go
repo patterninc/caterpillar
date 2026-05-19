@@ -20,7 +20,7 @@ const (
 	defaultFlushInterval    = duration.Duration(2 * time.Second)
 	defaultCommitIntervalMs = 5000
 	defaultBatchSize        = 100
-	defaultAutoOffsetReset  = "earliest"
+	defaultAutoOffsetReset  = "latest"
 
 	// standaloneGroupPrefix is the group.id used for direct-assign reads (no group_id set); broker needs PREFIXED ACL on this prefix.
 	standaloneGroupPrefix = "caterpillar-standalone-"

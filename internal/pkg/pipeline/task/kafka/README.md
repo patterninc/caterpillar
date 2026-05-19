@@ -15,7 +15,7 @@ The task automatically determines its mode based on the presence of input/output
 There are two read modes, controlled by whether `group_id` is set:
 
 - **Standalone** (no `group_id`): assigns all partitions directly at `OffsetBeginning` and reads without committing offsets. Every run re-reads from the start of the topic. Useful for one-shot batch reads or testing.
-- **Group consumer** (`group_id` set): subscribes via the Kafka consumer group protocol, reads from committed offsets, and commits new offsets periodically. Multiple instances with the same `group_id` split partitions and each message is delivered once to the group. The `auto_offset_reset` field controls behavior when no committed offset is found or the stored offset is out of range (e.g., aged out by retention) — `earliest` (default) starts from the beginning of the available log, `latest` skips to the tail.
+- **Group consumer** (`group_id` set): subscribes via the Kafka consumer group protocol, reads from committed offsets, and commits new offsets periodically. Multiple instances with the same `group_id` split partitions and each message is delivered once to the group. The `auto_offset_reset` field controls behavior when no committed offset is found or the stored offset is out of range (e.g., aged out by retention) — `latest` (default) skips to the tail, `earliest` starts from the beginning of the available log.
 
 > **Broker ACL requirement for standalone mode**: confluent-kafka-go requires a non-empty `group.id` even for direct-assign reads. Standalone mode uses the group ID `caterpillar-standalone-<topic>`. The Kafka principal used by this task must have `READ` permission on `GROUP` resource `caterpillar-standalone-` with `PREFIXED` pattern type. Without this ACL, standalone reads will fail with a group authorization error.
 
@@ -32,7 +32,7 @@ There are two read modes, controlled by whether `group_id` is set:
 | `retry_limit` | int | `5` | Read retry threshold; reading stops when consecutive retryable errors or timeouts exceed this value |
 | `end_after` | duration string | - | Wall-clock deadline for read mode. When set, the reader stops cleanly after this duration regardless of message traffic. Worst-case overshoot is one `timeout` window. |
 | `group_id` | string | - | Consumer group id. If omitted, standalone mode is used (reads from beginning, no offset commits). |
-| `auto_offset_reset` | string | `earliest` | Group-mode reset policy when no committed offset exists or the stored offset is out of range. `earliest` reads from the beginning of the available log; `latest` skips to the tail. Ignored in standalone mode. |
+| `auto_offset_reset` | string | `latest` | Group-mode reset policy when no committed offset exists or the stored offset is out of range. `latest` skips to the tail; `earliest` reads from the beginning of the available log. Ignored in standalone mode. |
 | `server_auth_type` | string | `none` | `none` or `tls` — server certificate verification mode |
 | `cert` | string | - | CA certificate PEM/CRT content used when `server_auth_type: tls` (alternatively use `cert_path`) |
 | `cert_path` | string | - | Path to CA certificate (PEM/CRT) |
@@ -175,15 +175,15 @@ tasks:
     timeout: 10s
 ```
 
-### Group consumer skipping historical data on first run
+### Group consumer reading from the beginning on first run
 ```yaml
 tasks:
-  - name: read_latest_only
+  - name: read_from_start
     type: kafka
     bootstrap_server: kafka.local:9092
     topic: input-topic
     group_id: my-consumer-group
-    auto_offset_reset: latest
+    auto_offset_reset: earliest
 ```
 
 ## Notes and Limitations
