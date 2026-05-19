@@ -6,7 +6,7 @@ The `kafka` task reads from or writes to Apache Kafka topics.
 
 The Kafka task operates in two modes depending on whether an input channel is provided:
 - **Write mode** (with input channel): receives records from the input channel and enqueues them to the Kafka topic with the Confluent producer. `batch_flush_interval` maps to the producer's `linger.ms`, and the task flushes pending deliveries before exiting.
-- **Read mode** (no input channel): polls messages from the Kafka topic and sends them to the output channel. The reader's polling is controlled by the configured `timeout` and `retry_limit` behavior (see below).
+- **Read mode** (no input channel): polls messages from the Kafka topic and sends them to the output channel. The reader's polling is controlled by the configured `timeout` and `retry_limit` behavior (see below). Optionally, `end_after` sets a wall-clock deadline that stops the reader regardless of traffic.
 
 The task automatically determines its mode based on the presence of input/output channels.
 
@@ -15,7 +15,7 @@ The task automatically determines its mode based on the presence of input/output
 There are two read modes, controlled by whether `group_id` is set:
 
 - **Standalone** (no `group_id`): assigns all partitions directly at `OffsetBeginning` and reads without committing offsets. Every run re-reads from the start of the topic. Useful for one-shot batch reads or testing.
-- **Group consumer** (`group_id` set): subscribes via the Kafka consumer group protocol, reads from committed offsets, and commits new offsets periodically. Multiple instances with the same `group_id` split partitions and each message is delivered once to the group.
+- **Group consumer** (`group_id` set): subscribes via the Kafka consumer group protocol, reads from committed offsets, and commits new offsets periodically. Multiple instances with the same `group_id` split partitions and each message is delivered once to the group. The `auto_offset_reset` field controls behavior when no committed offset is found or the stored offset is out of range (e.g., aged out by retention) — `latest` (default) skips to the tail, `earliest` starts from the beginning of the available log.
 
 > **Broker ACL requirement for standalone mode**: confluent-kafka-go requires a non-empty `group.id` even for direct-assign reads. Standalone mode uses the group ID `caterpillar-standalone-<topic>`. The Kafka principal used by this task must have `READ` permission on `GROUP` resource `caterpillar-standalone-` with `PREFIXED` pattern type. Without this ACL, standalone reads will fail with a group authorization error.
 
@@ -30,7 +30,9 @@ There are two read modes, controlled by whether `group_id` is set:
 | `timeout` | duration string | `15s` | Read polling timeout and producer delivery/flush timeout. Uses Go duration format (e.g. `25s`, `1m`). |
 | `batch_flush_interval` | duration string | `2s` | Producer linger interval (`linger.ms`) for batching queued writes |
 | `retry_limit` | int | `5` | Read retry threshold; reading stops when consecutive retryable errors or timeouts exceed this value |
+| `end_after` | duration string | - | Wall-clock deadline for read mode. When set, the reader stops cleanly after this duration regardless of message traffic. Worst-case overshoot is one `timeout` window. |
 | `group_id` | string | - | Consumer group id. If omitted, standalone mode is used (reads from beginning, no offset commits). |
+| `auto_offset_reset` | string | `latest` | Group-mode reset policy when no committed offset exists or the stored offset is out of range. `latest` skips to the tail; `earliest` reads from the beginning of the available log. Ignored in standalone mode. |
 | `server_auth_type` | string | `none` | `none` or `tls` — server certificate verification mode |
 | `cert` | string | - | CA certificate PEM/CRT content used when `server_auth_type: tls` (alternatively use `cert_path`) |
 | `cert_path` | string | - | Path to CA certificate (PEM/CRT) |
@@ -161,9 +163,34 @@ tasks:
     timeout: 5s
 ```
 
+### Stop after a wall-clock duration (regardless of traffic)
+```yaml
+tasks:
+  - name: read_window
+    type: kafka
+    bootstrap_server: kafka.local:9092
+    topic: input-topic
+    group_id: my-consumer-group
+    end_after: 5m
+    timeout: 10s
+```
+
+### Group consumer reading from the beginning on first run
+```yaml
+tasks:
+  - name: read_from_start
+    type: kafka
+    bootstrap_server: kafka.local:9092
+    topic: input-topic
+    group_id: my-consumer-group
+    auto_offset_reset: earliest
+```
+
 ## Notes and Limitations
  - **Standalone mode** reads all partitions from `OffsetBeginning` on every run and never commits offsets. It requires a broker PREFIXED ACL on group `caterpillar-standalone-` (see Reading Modes above).
- - **Group consumer mode** resumes from committed offsets. `auto.offset.reset: earliest` only fires if the group has no prior committed offsets. To re-read from the beginning, reset group offsets via `kafka-consumer-groups.sh --reset-offsets --to-earliest`.
+ - **Group consumer mode** resumes from committed offsets. `auto_offset_reset` fires only if the group has no prior committed offsets or the stored offset is out of range (e.g., aged out by retention). To re-read from the beginning, reset group offsets via `kafka-consumer-groups.sh --reset-offsets --to-earliest`.
+ - **Out-of-range stored offset:** librdkafka logs a `%4|OFFSET ... offset reset` warning when this happens. It's informational — the consumer self-recovers to the position implied by `auto_offset_reset`. The warning persists across restarts until a successful read commits a new valid offset (or until you manually reset the group offsets at the broker).
+ - **`end_after`** sets a wall-clock read deadline distinct from `retry_limit` (which is idle-based). Use `end_after` when you want a guaranteed stop time even on a busy topic. Worst-case shutdown latency is one `timeout` window because in-flight `ReadMessage` polls cannot be canceled mid-flight.
  - **Group commits** use Kafka auto-commit every 5000ms. Auto offset store is disabled, so offsets are stored only after a message is sent downstream.
  - **Read isolation** is set to `read_committed` for both standalone and group consumers — this is the consumer-side complement to `idempotent: true` on the producer and ensures consumers never read uncommitted or aborted messages.
  - The init broker probe always uses the 15s default timeout regardless of the configured `timeout` to allow for SCRAM+TLS handshake round trips.
