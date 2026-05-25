@@ -35,23 +35,23 @@ type schemaRegistryConfig struct {
 
 type kafka struct {
 	task.ServerBase    `yaml:",inline" json:",inline"`
-	BootstrapServer    string               `yaml:"bootstrap_server" json:"bootstrap_server"`                             // "host:port"
-	Topic              string               `yaml:"topic" json:"topic"`                                                   // topic to read from or write to
-	ServerAuthType     string               `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"`         // "none", "tls"
-	Cert               string               `yaml:"cert,omitempty" json:"cert,omitempty"`                                 // used for Server TLS authentication
-	CertPath           string               `yaml:"cert_path,omitempty" json:"cert_path,omitempty"`                       // used for Server TLS authentication
-	UserAuthType       string               `yaml:"user_auth_type" json:"user_auth_type"`                                 // "none", "sasl", "scram"
-	Username           string               `yaml:"username,omitempty" json:"username,omitempty"`                         // used for user SASL/Scram authentication
-	Password           string               `yaml:"password,omitempty" json:"password,omitempty"`                         // used for user SASL/Scram authentication
-	Timeout            duration.Duration    `yaml:"timeout,omitempty" json:"timeout,omitempty"`                           // connection, read, write, commit timeout
-	BatchFlushInterval duration.Duration    `yaml:"batch_flush_interval,omitempty" json:"batch_flush_interval,omitempty"` // interval to flush incomplete batches
-	GroupID            string               `yaml:"group_id,omitempty" json:"group_id,omitempty"`                         // the consumer group id (optional)
+	BootstrapServer    string               `yaml:"bootstrap_server" json:"bootstrap_server"`                                                                  // "host:port"
+	Topic              string               `yaml:"topic" json:"topic"`                                                                                        // topic to read from or write to
+	ServerAuthType     string               `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"`                                              // "none", "tls"
+	Cert               string               `yaml:"cert,omitempty" json:"cert,omitempty"`                                                                      // used for Server TLS authentication
+	CertPath           string               `yaml:"cert_path,omitempty" json:"cert_path,omitempty"`                                                            // used for Server TLS authentication
+	UserAuthType       string               `yaml:"user_auth_type" json:"user_auth_type"`                                                                      // "none", "sasl", "scram"
+	Username           string               `yaml:"username,omitempty" json:"username,omitempty"`                                                              // used for user SASL/Scram authentication
+	Password           string               `yaml:"password,omitempty" json:"password,omitempty"`                                                              // used for user SASL/Scram authentication
+	Timeout            duration.Duration    `yaml:"timeout,omitempty" json:"timeout,omitempty"`                                                                // connection, read, write, commit timeout
+	BatchFlushInterval duration.Duration    `yaml:"batch_flush_interval,omitempty" json:"batch_flush_interval,omitempty"`                                      // interval to flush incomplete batches
+	GroupID            string               `yaml:"group_id,omitempty" json:"group_id,omitempty"`                                                              // the consumer group id (optional)
 	AutoOffsetReset    string               `yaml:"auto_offset_reset,omitempty" json:"auto_offset_reset,omitempty" validate:"omitempty,oneof=earliest latest"` // group-mode reset policy when stored offset is out of range; "earliest" (default) or "latest"
-	BatchSize          int                  `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`                     // max messages per producer batch (maps to batch.num.messages); defaults to 100
-	RetryLimit         *int                 `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`                   // number of retries for read errors
-	Idempotent         bool                 `yaml:"idempotent,omitempty" json:"idempotent,omitempty"`                     // enable idempotent producer
-	Format             string               `yaml:"format,omitempty" json:"format,omitempty"`                             // message format: "json" (default) or "avro"
-	SchemaRegistry     schemaRegistryConfig `yaml:",inline" json:",inline"`                                                // Schema Registry connection — required when format is "avro"
+	BatchSize          int                  `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`                                                          // max messages per producer batch (maps to batch.num.messages); defaults to 100
+	RetryLimit         *int                 `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`                                                        // number of retries for read errors
+	Idempotent         bool                 `yaml:"idempotent,omitempty" json:"idempotent,omitempty"`                                                          // enable idempotent producer
+	Format             string               `yaml:"format,omitempty" json:"format,omitempty"`                                                                  // message format: "json" (default) or "avro"
+	SchemaRegistry     schemaRegistryConfig `yaml:",inline" json:",inline"`                                                                                    // Schema Registry connection — required when format is "avro"
 }
 
 func New() (task.Task, error) {
@@ -179,7 +179,7 @@ func (k *kafka) write(input <-chan *record.Record) error {
 	// Always flush so enqueued messages get delivery reports and the goroutine exits cleanly.
 	timeout := time.Duration(k.Timeout)
 	remaining := p.Flush(int(timeout.Milliseconds()))
-	
+
 	// Close the producer BEFORE closing deliveryCh:
 	p.Close()
 	close(deliveryCh)
