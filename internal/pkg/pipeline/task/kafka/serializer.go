@@ -162,9 +162,9 @@ func tagUnions(schema avro.Schema, value any) (any, error) {
 	}
 	switch s := schema.(type) {
 	case *avro.UnionSchema:
-		branch := pickNonNullBranch(s)
-		if branch == nil {
-			return nil, fmt.Errorf("union with multiple non-null branches is not supported; tag values explicitly in JSON")
+		branch, err := pickNonNullBranch(s)
+		if err != nil {
+			return nil, err
 		}
 		if m, ok := value.(map[string]any); ok && len(m) == 1 {
 			tag := branchTagName(branch)
@@ -306,21 +306,24 @@ func floatToInt32(f float64) (int32, bool) {
 	return int32(f), true
 }
 
-// pickNonNullBranch returns the single non-null branch of a [null, T] union,
-// or nil if the union shape isn't nullable-with-one-branch.
-func pickNonNullBranch(u *avro.UnionSchema) avro.Schema {
+// pickNonNullBranch returns the single non-null branch of a [null, T] union.
+// Returns an error if the union has no non-null branch or more than one,
+// since neither shape can be tagged from the value alone.
+func pickNonNullBranch(u *avro.UnionSchema) (avro.Schema, error) {
 	var nonNull avro.Schema
 	for _, t := range u.Types() {
 		if t.Type() == avro.Null {
 			continue
 		}
 		if nonNull != nil {
-			// More than one non-null branch — can't disambiguate without inspecting the value type.
-			return nil
+			return nil, fmt.Errorf("union with multiple non-null branches is not supported; tag values explicitly in JSON")
 		}
 		nonNull = t
 	}
-	return nonNull
+	if nonNull == nil {
+		return nil, fmt.Errorf("union has no non-null branch")
+	}
+	return nonNull, nil
 }
 
 // branchTagName returns the Avro JSON tag for a union branch.
