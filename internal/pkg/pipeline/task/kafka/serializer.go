@@ -34,6 +34,8 @@ type codecFormat struct {
 type jsonCodec struct{}
 
 // avroCodec encodes/decodes messages using Confluent Schema Registry Avro.
+// One codec instance is bound to one topic via its cached schema; do not reuse
+// across topics (the kafka task constructs one codec per Topic).
 type avroCodec struct {
 	ser      *avrov2.Serializer
 	deser    *avrov2.Deserializer
@@ -117,9 +119,9 @@ func (a *avroCodec) loadSchema(topic string) (avro.Schema, error) {
 	return a.schema, nil
 }
 
-// serialize marshals data as JSON, rewrites untagged unions to Avro JSON-tagged form,
-// then encodes to Avro using the latest registered schema.
-// Note: json.Unmarshal converts all numbers to float64; Avro int/long fields may reject these — convert before sending.
+// serialize parses data as JSON, walks the cached schema to tag unions and
+// coerce JSON numbers into the Go types hamba/avro expects, then Avro-encodes
+// the result. The input map is mutated in place during the walk.
 func (a *avroCodec) serialize(topic string, data []byte) ([]byte, error) {
 	var msg map[string]interface{}
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -130,7 +132,11 @@ func (a *avroCodec) serialize(topic string, data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	tagged, ok := tagUnions(schema, msg).(map[string]interface{})
+	prepared, err := tagUnions(schema, msg)
+	if err != nil {
+		return nil, err
+	}
+	tagged, ok := prepared.(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("internal: tagged root is not a record map")
 	}
@@ -143,59 +149,85 @@ func (a *avroCodec) serialize(topic string, data []byte) ([]byte, error) {
 // since map[string]any can match multiple union branches.
 // It also coerces float64 (json.Unmarshal's default for all numbers) into
 // int64/int32 for Avro long/int fields, which hamba refuses to accept as float64.
-func tagUnions(schema avro.Schema, value any) any {
+//
+// Only [null, T] nullable unions are supported. Unions with multiple non-null
+// branches return an error because their tag cannot be inferred from the value
+// alone — the caller should produce JSON already in tagged form, or the schema
+// should be simplified.
+//
+// The walk mutates the input map/slice in place for records, maps, and arrays.
+func tagUnions(schema avro.Schema, value any) (any, error) {
 	if value == nil {
-		return nil
+		return nil, nil
 	}
 	switch s := schema.(type) {
 	case *avro.UnionSchema:
 		branch := pickNonNullBranch(s)
 		if branch == nil {
-			return value
+			return nil, fmt.Errorf("union with multiple non-null branches is not supported; tag values explicitly in JSON")
 		}
 		if m, ok := value.(map[string]any); ok && len(m) == 1 {
 			tag := branchTagName(branch)
 			if inner, present := m[tag]; present {
-				return map[string]any{tag: tagUnions(branch, inner)}
+				tagged, err := tagUnions(branch, inner)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{tag: tagged}, nil
 			}
 		}
-		tagged := tagUnions(branch, value)
-		return map[string]any{branchTagName(branch): tagged}
+		tagged, err := tagUnions(branch, value)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{branchTagName(branch): tagged}, nil
 	case *avro.RecordSchema:
 		m, ok := value.(map[string]any)
 		if !ok {
-			return value
+			return value, nil
 		}
 		for _, f := range s.Fields() {
 			if v, present := m[f.Name()]; present {
-				m[f.Name()] = tagUnions(f.Type(), v)
+				tagged, err := tagUnions(f.Type(), v)
+				if err != nil {
+					return nil, fmt.Errorf("field %q: %w", f.Name(), err)
+				}
+				m[f.Name()] = tagged
 			}
 		}
-		return m
+		return m, nil
 	case *avro.ArraySchema:
 		arr, ok := value.([]any)
 		if !ok {
-			return value
+			return value, nil
 		}
 		for i, v := range arr {
-			arr[i] = tagUnions(s.Items(), v)
+			tagged, err := tagUnions(s.Items(), v)
+			if err != nil {
+				return nil, fmt.Errorf("index %d: %w", i, err)
+			}
+			arr[i] = tagged
 		}
-		return arr
+		return arr, nil
 	case *avro.MapSchema:
 		m, ok := value.(map[string]any)
 		if !ok {
-			return value
+			return value, nil
 		}
 		for k, v := range m {
-			m[k] = tagUnions(s.Values(), v)
+			tagged, err := tagUnions(s.Values(), v)
+			if err != nil {
+				return nil, fmt.Errorf("key %q: %w", k, err)
+			}
+			m[k] = tagged
 		}
-		return m
+		return m, nil
 	case *avro.RefSchema:
 		return tagUnions(s.Schema(), value)
 	case *avro.PrimitiveSchema:
-		return coerceNumber(s, value)
+		return coerceNumber(s, value), nil
 	}
-	return value
+	return value, nil
 }
 
 // coerceNumber converts float64 (from json.Unmarshal) into the Go value type
@@ -247,8 +279,11 @@ func coerceNumber(s *avro.PrimitiveSchema, value any) any {
 }
 
 // floatToInt64 returns f as int64 only if f is a finite integer representable
-// in int64. float64 has 53 bits of mantissa so values beyond ±2^53 cannot be
-// distinguished from neighbours and are rejected.
+// without precision loss. float64 has 53 bits of mantissa so values beyond
+// ±2^53 cannot be distinguished from neighbours and are rejected — this is
+// tighter than int64's full range. Pipelines that need full-range longs (e.g.
+// epoch-nanosecond IDs) must decode JSON with json.Number and pass an int64
+// directly rather than rely on this coercion.
 func floatToInt64(f float64) (int64, bool) {
 	if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) {
 		return 0, false
