@@ -3,6 +3,7 @@ package kafka
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -29,6 +30,19 @@ type codecFormat struct {
 	newCodec func(schemaCfg schemaRegistryConfig) (messageCodec, error)
 }
 
+// jsonCodec passes raw bytes through unchanged (default format).
+type jsonCodec struct{}
+
+// avroCodec encodes/decodes messages using Confluent Schema Registry Avro.
+type avroCodec struct {
+	ser      *avrov2.Serializer
+	deser    *avrov2.Deserializer
+	srClient schemaregistry.Client
+
+	schemaMu sync.Mutex
+	schema   avro.Schema
+}
+
 var formatHandlers = map[string]codecFormat{
 	FormatJSON: {
 		newCodec: func(_ schemaRegistryConfig) (messageCodec, error) {
@@ -45,6 +59,9 @@ var formatHandlers = map[string]codecFormat{
 	},
 }
 
+func (jsonCodec) serialize(_ string, data []byte) ([]byte, error)   { return data, nil }
+func (jsonCodec) deserialize(_ string, data []byte) ([]byte, error) { return data, nil }
+
 // newCodecForFormat returns the codec for the given format string.
 // An empty format defaults to FormatJSON (backward compatible).
 func newCodecForFormat(format string, schemaCfg schemaRegistryConfig) (messageCodec, error) {
@@ -56,23 +73,6 @@ func newCodecForFormat(format string, schemaCfg schemaRegistryConfig) (messageCo
 		return nil, fmt.Errorf("unsupported format %q — supported values: %s, %s", format, FormatJSON, FormatAvro)
 	}
 	return h.newCodec(schemaCfg)
-}
-
-// jsonCodec passes raw bytes through unchanged (default format).
-type jsonCodec struct{}
-
-func (jsonCodec) serialize(_ string, data []byte) ([]byte, error)   { return data, nil }
-func (jsonCodec) deserialize(_ string, data []byte) ([]byte, error) { return data, nil }
-
-// avroCodec encodes/decodes messages using Confluent Schema Registry Avro.
-type avroCodec struct {
-	ser      *avrov2.Serializer
-	deser    *avrov2.Deserializer
-	srClient schemaregistry.Client
-
-	schemaOnce sync.Once
-	schema     avro.Schema
-	schemaErr  error
 }
 
 func newAvroCodec(cfg schemaRegistryConfig) (*avroCodec, error) {
@@ -97,22 +97,24 @@ func newAvroCodec(cfg schemaRegistryConfig) (*avroCodec, error) {
 	return &avroCodec{ser: ser, deser: deser, srClient: srClient}, nil
 }
 
-// loadSchema fetches and parses the latest value schema for the topic, cached for the codec's lifetime.
+// loadSchema fetches and parses the latest value schema for the topic, cached on success.
+// Errors are not cached so transient Schema Registry failures can be retried.
 func (a *avroCodec) loadSchema(topic string) (avro.Schema, error) {
-	a.schemaOnce.Do(func() {
-		meta, err := a.srClient.GetLatestSchemaMetadata(topic + "-value")
-		if err != nil {
-			a.schemaErr = fmt.Errorf("fetch schema for %s-value: %w", topic, err)
-			return
-		}
-		schema, err := avro.Parse(meta.Schema)
-		if err != nil {
-			a.schemaErr = fmt.Errorf("parse schema for %s-value: %w", topic, err)
-			return
-		}
-		a.schema = schema
-	})
-	return a.schema, a.schemaErr
+	a.schemaMu.Lock()
+	defer a.schemaMu.Unlock()
+	if a.schema != nil {
+		return a.schema, nil
+	}
+	meta, err := a.srClient.GetLatestSchemaMetadata(topic + "-value")
+	if err != nil {
+		return nil, fmt.Errorf("fetch schema for %s-value: %w", topic, err)
+	}
+	schema, err := avro.Parse(meta.Schema)
+	if err != nil {
+		return nil, fmt.Errorf("parse schema for %s-value: %w", topic, err)
+	}
+	a.schema = schema
+	return a.schema, nil
 }
 
 // serialize marshals data as JSON, rewrites untagged unions to Avro JSON-tagged form,
@@ -150,6 +152,12 @@ func tagUnions(schema avro.Schema, value any) any {
 		branch := pickNonNullBranch(s)
 		if branch == nil {
 			return value
+		}
+		if m, ok := value.(map[string]any); ok && len(m) == 1 {
+			tag := branchTagName(branch)
+			if inner, present := m[tag]; present {
+				return map[string]any{tag: tagUnions(branch, inner)}
+			}
 		}
 		tagged := tagUnions(branch, value)
 		return map[string]any{branchTagName(branch): tagged}
@@ -209,25 +217,58 @@ func coerceNumber(s *avro.PrimitiveSchema, value any) any {
 	}
 	switch s.Type() {
 	case avro.Long:
+		i, ok := floatToInt64(f)
+		if !ok {
+			return value
+		}
 		switch logical {
 		case "timestamp-millis", "local-timestamp-millis":
-			return time.UnixMilli(int64(f)).UTC()
+			return time.UnixMilli(i).UTC()
 		case "timestamp-micros", "local-timestamp-micros":
-			return time.UnixMicro(int64(f)).UTC()
+			return time.UnixMicro(i).UTC()
 		case "time-micros":
-			return time.Duration(int64(f)) * time.Microsecond
+			return time.Duration(i) * time.Microsecond
 		}
-		return int64(f)
+		return i
 	case avro.Int:
+		i, ok := floatToInt32(f)
+		if !ok {
+			return value
+		}
 		switch logical {
 		case "date":
-			return time.Unix(int64(f)*86400, 0).UTC()
+			return time.Unix(int64(i)*86400, 0).UTC()
 		case "time-millis":
-			return time.Duration(int64(f)) * time.Millisecond
+			return time.Duration(i) * time.Millisecond
 		}
-		return int32(f)
+		return i
 	}
 	return value
+}
+
+// floatToInt64 returns f as int64 only if f is a finite integer representable
+// in int64. float64 has 53 bits of mantissa so values beyond ±2^53 cannot be
+// distinguished from neighbours and are rejected.
+func floatToInt64(f float64) (int64, bool) {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) {
+		return 0, false
+	}
+	const maxSafe = 1 << 53
+	if f > maxSafe || f < -maxSafe {
+		return 0, false
+	}
+	return int64(f), true
+}
+
+// floatToInt32 returns f as int32 only if f is a finite integer in int32 range.
+func floatToInt32(f float64) (int32, bool) {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) {
+		return 0, false
+	}
+	if f > math.MaxInt32 || f < math.MinInt32 {
+		return 0, false
+	}
+	return int32(f), true
 }
 
 // pickNonNullBranch returns the single non-null branch of a [null, T] union,
