@@ -31,7 +31,7 @@ There are two read modes, controlled by whether `group_id` is set:
 | `batch_flush_interval` | duration string | `2s` | Producer linger interval (`linger.ms`) for batching queued writes |
 | `retry_limit` | int | `5` | Read retry threshold; reading stops when consecutive retryable errors or timeouts exceed this value |
 | `end_after` | duration string | - | Wall-clock deadline for read mode. When set, the reader stops cleanly after this duration regardless of message traffic. Worst-case overshoot is one `timeout` window. |
-| `max_records` | int | `0` (unlimited) | Read-mode cap on records forwarded downstream. The reader stops cleanly once this many messages have been sent. In group mode, offsets up to the last forwarded record are committed on shutdown. |
+| `max_records` | int | `0` (unlimited) | Read-mode cap on records forwarded downstream. The reader stops cleanly once this many messages have been sent. In group mode, offsets up to the last forwarded record are committed on shutdown. Must be `>= 0`; negative values are rejected at validation. |
 | `group_id` | string | - | Consumer group id. If omitted, standalone mode is used (reads from beginning, no offset commits). |
 | `auto_offset_reset` | string | `latest` | Group-mode reset policy when no committed offset exists or the stored offset is out of range. `latest` skips to the tail; `earliest` reads from the beginning of the available log. Ignored in standalone mode. |
 | `server_auth_type` | string | `none` | `none` or `tls` — server certificate verification mode |

@@ -48,7 +48,7 @@ type kafka struct {
 	GroupID            string               `yaml:"group_id,omitempty" json:"group_id,omitempty"`                                                              // the consumer group id (optional)
 	AutoOffsetReset    string               `yaml:"auto_offset_reset,omitempty" json:"auto_offset_reset,omitempty" validate:"omitempty,oneof=earliest latest"` // group-mode reset policy when stored offset is out of range; "earliest" (default) or "latest"
 	BatchSize          int                  `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`                                                          // max messages per producer batch (maps to batch.num.messages); defaults to 100
-	MaxRecords         int                  `yaml:"max_records,omitempty" json:"max_records,omitempty"`                                                        // stop reading after this many records (0 = unlimited)
+	MaxRecords         int                  `yaml:"max_records,omitempty" json:"max_records,omitempty" validate:"omitempty,gte=0"`                             // stop reading after this many records (0 = unlimited); negative values are rejected at validation
 	RetryLimit         *int                 `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`                                                        // number of retries for read errors
 	Idempotent         bool                 `yaml:"idempotent,omitempty" json:"idempotent,omitempty"`                                                          // enable idempotent producer
 	Format             string               `yaml:"format,omitempty" json:"format,omitempty"`                                                                  // message format: "json" (default) or "avro"
