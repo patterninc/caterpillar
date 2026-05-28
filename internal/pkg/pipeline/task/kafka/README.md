@@ -6,7 +6,7 @@ The `kafka` task reads from or writes to Apache Kafka topics.
 
 The Kafka task operates in two modes depending on whether an input channel is provided:
 - **Write mode** (with input channel): receives records from the input channel and enqueues them to the Kafka topic with the Confluent producer. `batch_flush_interval` maps to the producer's `linger.ms`, and the task flushes pending deliveries before exiting.
-- **Read mode** (no input channel): polls messages from the Kafka topic and sends them to the output channel. The reader's polling is controlled by the configured `timeout` and `retry_limit` behavior (see below). Optionally, `end_after` sets a wall-clock deadline that stops the reader regardless of traffic.
+- **Read mode** (no input channel): polls messages from the Kafka topic and sends them to the output channel. The reader's polling is controlled by the configured `timeout` and `retry_limit` behavior (see below). Optionally, `end_after` sets a wall-clock deadline that stops the reader regardless of traffic, and `max_records` stops the reader after a fixed number of messages have been forwarded downstream.
 
 The task automatically determines its mode based on the presence of input/output channels.
 
@@ -31,6 +31,7 @@ There are two read modes, controlled by whether `group_id` is set:
 | `batch_flush_interval` | duration string | `2s` | Producer linger interval (`linger.ms`) for batching queued writes |
 | `retry_limit` | int | `5` | Read retry threshold; reading stops when consecutive retryable errors or timeouts exceed this value |
 | `end_after` | duration string | - | Wall-clock deadline for read mode. When set, the reader stops cleanly after this duration regardless of message traffic. Worst-case overshoot is one `timeout` window. |
+| `max_records` | int | `0` (unlimited) | Read-mode cap on records forwarded downstream. The reader stops cleanly once this many messages have been sent. In group mode, offsets up to the last forwarded record are committed on shutdown. Must be `>= 0`; negative values are rejected at validation. |
 | `group_id` | string | - | Consumer group id. If omitted, standalone mode is used (reads from beginning, no offset commits). |
 | `auto_offset_reset` | string | `latest` | Group-mode reset policy when no committed offset exists or the stored offset is out of range. `latest` skips to the tail; `earliest` reads from the beginning of the available log. Ignored in standalone mode. |
 | `server_auth_type` | string | `none` | `none` or `tls` — server certificate verification mode |
@@ -175,6 +176,20 @@ tasks:
     timeout: 10s
 ```
 
+### Stop after a fixed number of records
+```yaml
+tasks:
+  - name: read_first_100
+    type: kafka
+    bootstrap_server: kafka.local:9092
+    topic: input-topic
+    group_id: my-consumer-group
+    max_records: 100
+    timeout: 5s
+```
+
+> Combine `max_records` with `end_after` to stop on whichever condition is hit first (e.g. "up to 100 records or 30s, whichever comes first").
+
 ### Group consumer reading from the beginning on first run
 ```yaml
 tasks:
@@ -191,6 +206,7 @@ tasks:
  - **Group consumer mode** resumes from committed offsets. `auto_offset_reset` fires only if the group has no prior committed offsets or the stored offset is out of range (e.g., aged out by retention). To re-read from the beginning, reset group offsets via `kafka-consumer-groups.sh --reset-offsets --to-earliest`.
  - **Out-of-range stored offset:** librdkafka logs a `%4|OFFSET ... offset reset` warning when this happens. It's informational — the consumer self-recovers to the position implied by `auto_offset_reset`. The warning persists across restarts until a successful read commits a new valid offset (or until you manually reset the group offsets at the broker).
  - **`end_after`** sets a wall-clock read deadline distinct from `retry_limit` (which is idle-based). Use `end_after` when you want a guaranteed stop time even on a busy topic. Worst-case shutdown latency is one `timeout` window because in-flight `ReadMessage` polls cannot be canceled mid-flight.
+ - **`max_records`** is count-based and independent of `end_after`/`retry_limit`. The counter increments after each record is forwarded downstream, so the cap is exact for delivered records. If the topic has fewer than `max_records` available, the reader keeps polling until `retry_limit` or `end_after` fires.
  - **Group commits** use Kafka auto-commit every 5000ms. Auto offset store is disabled, so offsets are stored only after a message is sent downstream.
  - **Read isolation** is set to `read_committed` for both standalone and group consumers — this is the consumer-side complement to `idempotent: true` on the producer and ensures consumers never read uncommitted or aborted messages.
  - The init broker probe always uses the 15s default timeout regardless of the configured `timeout` to allow for SCRAM+TLS handshake round trips.
