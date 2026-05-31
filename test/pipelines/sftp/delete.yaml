@@ -7,7 +7,7 @@ tasks:
     port: 22
     username: '{{ secret "/sftp/username" }}'
     password: '{{ secret "/sftp/password" }}'
-    # host_key verifies the server's identity. To skip this check in local or
-    # dev use, remove host_key and set `insecure_skip_host_key_check: true`.
+    # host_key verifies the server's identity (prevents man-in-the-middle).
+    # Get the value once with: ssh-keyscan -t ed25519 -p <port> <host>
     host_key: '{{ secret "/sftp/host_key" }}'
     remote_path: /upload/archive/birds.txt

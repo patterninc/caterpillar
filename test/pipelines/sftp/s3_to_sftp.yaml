@@ -17,8 +17,8 @@ tasks:
     # field that reads from SSM with the secret template (see the README).
     private_key: |
       {{ indent 6 (secret "/data/sftp/clientX/private_key") }}
-    # host_key verifies the server's identity. To skip this check in local or
-    # dev use, remove host_key and set `insecure_skip_host_key_check: true`.
+    # host_key verifies the server's identity (prevents man-in-the-middle).
+    # Get the value once with: ssh-keyscan -t ed25519 -p <port> <host>
     host_key: '{{ secret "/data/sftp/clientX/host_key" }}'
     remote_path: /incoming/
     timeout: 30s

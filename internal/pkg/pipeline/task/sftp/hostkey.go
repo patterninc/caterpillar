@@ -11,12 +11,12 @@ import (
 //
 // Verifying the host key prevents man-in-the-middle attacks: without it, an
 // attacker who can intercept the connection could impersonate the server and
-// capture the files (and credentials) we send. We therefore fail closed — if
-// the caller gives us no way to verify the server, we refuse to connect unless
-// they have explicitly opted out with insecure_skip_host_key_check.
+// capture the files (and credentials) we send. We therefore require a way to
+// verify the server and fail closed — if neither host_key nor known_hosts_path
+// is set, we refuse to connect.
 //
-// Precedence: an inline host_key wins, then a known_hosts file, then the
-// explicit insecure opt-out, otherwise an error.
+// Precedence: an inline host_key wins, then a known_hosts file, otherwise an
+// error.
 func (s *sftp) buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 
 	switch {
@@ -37,12 +37,8 @@ func (s *sftp) buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 		}
 		return callback, nil
 
-	case s.InsecureSkipHostKeyCheck:
-		fmt.Printf("WARN: sftp task %q: host key verification is DISABLED (insecure_skip_host_key_check); the connection is vulnerable to man-in-the-middle attacks\n", s.Name)
-		return ssh.InsecureIgnoreHostKey(), nil
-
 	default:
-		return nil, fmt.Errorf(`host key verification required: set host_key or known_hosts_path, or explicitly set insecure_skip_host_key_check: true to disable it`)
+		return nil, fmt.Errorf(`host key verification required: set host_key or known_hosts_path`)
 
 	}
 

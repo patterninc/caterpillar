@@ -55,10 +55,9 @@ type sftp struct {
 	PrivateKey string `yaml:"private_key,omitempty" json:"private_key,omitempty"`
 	Passphrase string `yaml:"passphrase,omitempty" json:"passphrase,omitempty"`
 
-	// Host key verification (secure by default — see hostkey.go).
-	HostKey                  string `yaml:"host_key,omitempty" json:"host_key,omitempty"`
-	KnownHostsPath           string `yaml:"known_hosts_path,omitempty" json:"known_hosts_path,omitempty"`
-	InsecureSkipHostKeyCheck bool   `yaml:"insecure_skip_host_key_check,omitempty" json:"insecure_skip_host_key_check,omitempty"`
+	// Host key verification (required — see hostkey.go).
+	HostKey        string `yaml:"host_key,omitempty" json:"host_key,omitempty"`
+	KnownHostsPath string `yaml:"known_hosts_path,omitempty" json:"known_hosts_path,omitempty"`
 
 	// Paths. config.String supports {{ macro }}/{{ context }} templating, so
 	// they can be evaluated per record.

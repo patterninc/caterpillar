@@ -117,20 +117,18 @@ func TestBuildHostKeyCallback(t *testing.T) {
 	_, authorizedKey := testKeyPair(t)
 
 	tests := []struct {
-		name     string
-		hostKey  string
-		insecure bool
-		wantErr  bool
+		name    string
+		hostKey string
+		wantErr bool
 	}{
 		{name: "valid host key", hostKey: authorizedKey, wantErr: false},
-		{name: "insecure opt-out", insecure: true, wantErr: false},
 		{name: "fail closed when nothing configured", wantErr: true},
 		{name: "invalid host key", hostKey: "garbage", wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &sftp{HostKey: tt.hostKey, InsecureSkipHostKeyCheck: tt.insecure}
+			s := &sftp{HostKey: tt.hostKey}
 			cb, err := s.buildHostKeyCallback()
 			if tt.wantErr {
 				assert.Error(t, err)

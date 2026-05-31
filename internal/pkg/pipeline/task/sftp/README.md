@@ -53,7 +53,7 @@ By default, the task verifies the server's identity to prevent man-in-the-middle
 - `host_key`: a single authorized-key line, for example `ssh-ed25519 AAAA...` (the key part of a `known_hosts` entry).
 - `known_hosts_path`: the path to a `known_hosts` file.
 
-If you set neither, the task refuses to connect. To skip the check, set `insecure_skip_host_key_check: true`. This turns off verification and prints a warning. Use it only for local or dev testing.
+If you set neither, the task refuses to connect (it fails closed). You can obtain a server's host key with `ssh-keyscan -t ed25519 -p <port> <host>`.
 
 ## Configuration Fields
 
@@ -70,7 +70,6 @@ If you set neither, the task refuses to connect. To skip the check, set `insecur
 | `passphrase` | string | - | Passphrase for an encrypted `private_key` |
 | `host_key` | string | - | Authorized-key line used to verify the server |
 | `known_hosts_path` | string | - | Path to a `known_hosts` file |
-| `insecure_skip_host_key_check` | bool | `false` | Turn off host-key verification (insecure; dev only) |
 | `remote_path` | string | - | Remote file or directory (supports templating). On upload, a trailing `/` or an existing directory is treated as a directory. |
 | `destination_path` | string | - | Target path for `move` (supports templating) |
 | `timeout` | duration | `30s` | SSH connection timeout (for example `15s`, `1m`) |
