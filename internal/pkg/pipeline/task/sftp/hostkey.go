@@ -17,7 +17,13 @@ import (
 //
 // Precedence: an inline host_key wins, then a known_hosts file, otherwise an
 // error.
-func (s *sftp) buildHostKeyCallback() (ssh.HostKeyCallback, error) {
+//
+// It also returns the host-key algorithms the SSH client should negotiate. For
+// a pinned host_key we restrict negotiation to that key's algorithm; otherwise
+// the server may present a different host-key type than the one we pinned
+// (servers usually offer rsa/ecdsa/ed25519), causing a spurious "host key
+// mismatch". A nil slice means "use the client default".
+func (s *sftp) buildHostKeyCallback() (ssh.HostKeyCallback, []string, error) {
 
 	switch {
 
@@ -26,19 +32,19 @@ func (s *sftp) buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 		//   "ssh-ed25519 AAAAC3Nza..." (the key portion of a known_hosts entry).
 		key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(s.HostKey))
 		if err != nil {
-			return nil, fmt.Errorf(`parsing host_key: %w`, err)
+			return nil, nil, fmt.Errorf(`parsing host_key: %w`, err)
 		}
-		return ssh.FixedHostKey(key), nil
+		return ssh.FixedHostKey(key), []string{key.Type()}, nil
 
 	case s.KnownHostsPath != ``:
 		callback, err := knownhosts.New(s.KnownHostsPath)
 		if err != nil {
-			return nil, fmt.Errorf(`loading known_hosts file %q: %w`, s.KnownHostsPath, err)
+			return nil, nil, fmt.Errorf(`loading known_hosts file %q: %w`, s.KnownHostsPath, err)
 		}
-		return callback, nil
+		return callback, nil, nil
 
 	default:
-		return nil, fmt.Errorf(`host key verification required: set host_key or known_hosts_path`)
+		return nil, nil, fmt.Errorf(`host key verification required: set host_key or known_hosts_path`)
 
 	}
 

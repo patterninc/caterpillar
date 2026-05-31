@@ -129,13 +129,15 @@ func TestBuildHostKeyCallback(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &sftp{HostKey: tt.hostKey}
-			cb, err := s.buildHostKeyCallback()
+			cb, algos, err := s.buildHostKeyCallback()
 			if tt.wantErr {
 				assert.Error(t, err)
 				assert.Nil(t, cb)
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, cb)
+				// A pinned host_key must constrain negotiation to its algorithm.
+				assert.Equal(t, []string{"ssh-ed25519"}, algos)
 			}
 		})
 	}

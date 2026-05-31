@@ -70,8 +70,9 @@ type sftp struct {
 	RetryDelay duration.Duration `yaml:"retry_delay,omitempty" json:"retry_delay,omitempty"`
 
 	// Prepared in Init, used in Run.
-	authMethod ssh.AuthMethod
-	hostKeyCB  ssh.HostKeyCallback
+	authMethod   ssh.AuthMethod
+	hostKeyCB    ssh.HostKeyCallback
+	hostKeyAlgos []string
 }
 
 func New() (task.Task, error) {
@@ -95,11 +96,12 @@ func (s *sftp) Init() error {
 	}
 	s.authMethod = authMethod
 
-	hostKeyCB, err := s.buildHostKeyCallback()
+	hostKeyCB, hostKeyAlgos, err := s.buildHostKeyCallback()
 	if err != nil {
 		return err
 	}
 	s.hostKeyCB = hostKeyCB
+	s.hostKeyAlgos = hostKeyAlgos
 
 	return nil
 
@@ -169,7 +171,12 @@ func (s *sftp) connect() (*ssh.Client, *pkgsftp.Client, error) {
 		User:            s.Username,
 		Auth:            []ssh.AuthMethod{s.authMethod},
 		HostKeyCallback: s.hostKeyCB,
-		Timeout:         time.Duration(s.Timeout),
+		// Constrain host-key negotiation to the pinned key's algorithm. Without
+		// this, the server may present a different host-key type than the one we
+		// pinned (servers usually offer rsa/ecdsa/ed25519), producing a spurious
+		// "host key mismatch". Nil is fine for known_hosts / default negotiation.
+		HostKeyAlgorithms: s.hostKeyAlgos,
+		Timeout:           time.Duration(s.Timeout),
 	}
 
 	var (
