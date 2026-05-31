@@ -1,0 +1,16 @@
+# List a remote directory; echo each entry as JSON.
+tasks:
+  - name: list_remote
+    type: sftp
+    operation: list
+    host: '{{ secret "/sftp/host" }}'
+    port: 22
+    username: '{{ secret "/sftp/username" }}'
+    password: '{{ secret "/sftp/password" }}'
+    # host_key verifies the server's identity. To skip this check in local or
+    # dev use, remove host_key and set `insecure_skip_host_key_check: true`.
+    host_key: '{{ secret "/sftp/host_key" }}'
+    remote_path: /upload
+  - name: echo
+    type: echo
+    only_data: true

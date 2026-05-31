@@ -1,0 +1,14 @@
+# Rename/move a file on the SFTP server.
+tasks:
+  - name: move_remote_file
+    type: sftp
+    operation: move
+    host: '{{ secret "/sftp/host" }}'
+    port: 22
+    username: '{{ secret "/sftp/username" }}'
+    password: '{{ secret "/sftp/password" }}'
+    # host_key verifies the server's identity. To skip this check in local or
+    # dev use, remove host_key and set `insecure_skip_host_key_check: true`.
+    host_key: '{{ secret "/sftp/host_key" }}'
+    remote_path: /upload/birds.txt
+    destination_path: /upload/archive/birds.txt

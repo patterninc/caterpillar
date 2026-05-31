@@ -1,0 +1,19 @@
+# Download file(s) from an SFTP server to local disk.
+# The file task writes to `path` exactly as given. The sftp download stores
+# each file's name in CATERPILLAR_FILE_NAME_WRITE, so we add it to the path
+# to keep the original file names.
+tasks:
+  - name: download_from_sftp
+    type: sftp
+    operation: download
+    host: '{{ secret "/sftp/host" }}'
+    port: 22
+    username: '{{ secret "/sftp/username" }}'
+    password: '{{ secret "/sftp/password" }}'
+    # host_key verifies the server's identity. To skip this check in local or
+    # dev use, remove host_key and set `insecure_skip_host_key_check: true`.
+    host_key: '{{ secret "/sftp/host_key" }}'
+    remote_path: /upload/*.txt
+  - name: write_local
+    type: file
+    path: /tmp/sftp-download/{{ context "CATERPILLAR_FILE_NAME_WRITE" }}
