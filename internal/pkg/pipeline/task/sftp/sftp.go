@@ -61,7 +61,9 @@ type sftp struct {
 
 	// Paths. config.String supports {{ macro }}/{{ context }} templating, so
 	// they can be evaluated per record.
-	RemotePath      config.String `yaml:"remote_path,omitempty" json:"remote_path,omitempty"`
+	// RemotePath is required by every operation (target, source, or directory).
+	// DestinationPath is required only by move and is validated in moveOne.
+	RemotePath      config.String `yaml:"remote_path,omitempty" json:"remote_path,omitempty" validate:"required"`
 	DestinationPath config.String `yaml:"destination_path,omitempty" json:"destination_path,omitempty"`
 
 	// Reliability.

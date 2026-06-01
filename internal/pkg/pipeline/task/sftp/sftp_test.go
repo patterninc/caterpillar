@@ -191,17 +191,18 @@ func TestContainsGlob(t *testing.T) {
 func TestStructValidation(t *testing.T) {
 	validate := validator.New()
 
-	valid := &sftp{Operation: opUpload, Host: "sftp.example.com", Username: "user"}
+	valid := &sftp{Operation: opUpload, Host: "sftp.example.com", Username: "user", RemotePath: "/incoming/"}
 	assert.NoError(t, validate.Struct(valid))
 
 	tests := []struct {
 		name string
 		task *sftp
 	}{
-		{name: "missing operation", task: &sftp{Host: "h", Username: "u"}},
-		{name: "unknown operation", task: &sftp{Operation: "frobnicate", Host: "h", Username: "u"}},
-		{name: "missing host", task: &sftp{Operation: opUpload, Username: "u"}},
-		{name: "missing username", task: &sftp{Operation: opUpload, Host: "h"}},
+		{name: "missing operation", task: &sftp{Host: "h", Username: "u", RemotePath: "/x"}},
+		{name: "unknown operation", task: &sftp{Operation: "frobnicate", Host: "h", Username: "u", RemotePath: "/x"}},
+		{name: "missing host", task: &sftp{Operation: opUpload, Username: "u", RemotePath: "/x"}},
+		{name: "missing username", task: &sftp{Operation: opUpload, Host: "h", RemotePath: "/x"}},
+		{name: "missing remote_path", task: &sftp{Operation: opUpload, Host: "h", Username: "u"}},
 	}
 
 	for _, tt := range tests {
