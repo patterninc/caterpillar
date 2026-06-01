@@ -212,6 +212,27 @@ func TestStructValidation(t *testing.T) {
 	}
 }
 
+// TestOperationPathValidation covers the operation-specific path checks that
+// run before any network call (so a nil client/record is safe here): move
+// requires destination_path, and delete requires remote_path.
+func TestOperationPathValidation(t *testing.T) {
+
+	t.Run("move requires destination_path", func(t *testing.T) {
+		s := &sftp{Operation: opMove, RemotePath: "/src/file.txt"} // DestinationPath empty
+		err := s.moveOne(nil, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "destination_path")
+	})
+
+	t.Run("delete requires remote_path", func(t *testing.T) {
+		s := &sftp{Operation: opDelete} // RemotePath empty
+		err := s.removeOne(nil, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "remote_path")
+	})
+
+}
+
 // Ensure duration defaults convert as expected (guards against accidental unit
 // changes in the constants).
 func TestDefaultDurations(t *testing.T) {
