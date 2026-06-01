@@ -23,6 +23,11 @@ import (
 // sets), so `file (read s3://...) -> sftp (upload)` composes with no glue.
 func (s *sftp) upload(client *pkgsftp.Client, input <-chan *record.Record, output chan<- *record.Record) error {
 
+	// Cache isDirLike per remote_path so a static (or repeated) destination is
+	// stat-ed once per run rather than once per record. Kept local to this call
+	// (not on the task struct) so concurrent workers don't share/contend on it.
+	dirCache := make(map[string]bool)
+
 	for {
 		rc, ok := s.GetRecord(input)
 		if !ok {
@@ -35,7 +40,7 @@ func (s *sftp) upload(client *pkgsftp.Client, input <-chan *record.Record, outpu
 		}
 
 		remoteFile := remotePath
-		if filename, found := rc.GetContextValue(string(task.CtxKeyFileNameWrite)); found && filename != `` && s.isDirLike(client, remotePath) {
+		if filename, found := rc.GetContextValue(string(task.CtxKeyFileNameWrite)); found && filename != `` && s.isDirLikeCached(client, remotePath, dirCache) {
 			remoteFile = path.Join(remotePath, filename)
 		}
 
@@ -299,6 +304,17 @@ func (s *sftp) perRecordAction(client *pkgsftp.Client, input <-chan *record.Reco
 
 	return action(client, nil)
 
+}
+
+// isDirLikeCached wraps isDirLike with a per-run cache keyed on remotePath, so
+// the same destination is stat-ed at most once instead of once per record.
+func (s *sftp) isDirLikeCached(client *pkgsftp.Client, remotePath string, cache map[string]bool) bool {
+	if v, ok := cache[remotePath]; ok {
+		return v
+	}
+	v := s.isDirLike(client, remotePath)
+	cache[remotePath] = v
+	return v
 }
 
 // isDirLike reports whether remotePath should be treated as a directory to
