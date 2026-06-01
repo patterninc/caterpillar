@@ -66,10 +66,18 @@ func (s *sftp) uploadOne(client *pkgsftp.Client, remoteFile string, data []byte)
 		if err != nil {
 			return fmt.Errorf(`creating remote file %q: %w`, remoteFile, err)
 		}
-		defer f.Close()
 
 		if _, err := io.Copy(f, bytes.NewReader(data)); err != nil {
+			f.Close() // best effort; the copy error is the underlying failure
 			return fmt.Errorf(`writing remote file %q: %w`, remoteFile, err)
+		}
+
+		// Check the Close error explicitly: for SFTP writes the final flush/
+		// commit happens here and may be the only place a late failure (e.g.
+		// server out of space) surfaces. Deferring and ignoring it could report
+		// success for an incomplete upload.
+		if err := f.Close(); err != nil {
+			return fmt.Errorf(`closing remote file %q: %w`, remoteFile, err)
 		}
 
 		return nil
