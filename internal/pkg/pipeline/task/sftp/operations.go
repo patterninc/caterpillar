@@ -2,13 +2,10 @@ package sftp
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"path"
 	"strings"
-	"time"
 
 	pkgsftp "github.com/pkg/sftp"
 
@@ -17,15 +14,15 @@ import (
 	"github.com/patterninc/caterpillar/internal/pkg/textutil"
 )
 
-// upload (sink): write each incoming record's data to the SFTP server. The
-// destination is RemotePath; when RemotePath is a directory we append the
-// upstream filename carried in the record context (the same key the file task
-// sets), so `file (read s3://...) -> sftp (upload)` composes with no glue.
-func (s *sftp) upload(client *pkgsftp.Client, input <-chan *record.Record, output chan<- *record.Record) error {
+// upload (sink): write each incoming record's data to the server. When
+// remote_path is a directory, the upstream filename (carried in the record
+// context by the source task) is appended, so `file -> sftp` composes with no
+// glue.
+func (s *sftp) upload(client *pkgsftp.Client, input <-chan *record.Record) error {
 
 	// Cache isDirLike per remote_path so a static (or repeated) destination is
-	// stat-ed once per run rather than once per record. Kept local to this call
-	// (not on the task struct) so concurrent workers don't share/contend on it.
+	// stat-ed once per run rather than once per record. Local to this call so
+	// concurrent workers don't share it.
 	dirCache := make(map[string]bool)
 
 	for {
@@ -46,10 +43,6 @@ func (s *sftp) upload(client *pkgsftp.Client, input <-chan *record.Record, outpu
 
 		if err := s.uploadOne(client, remoteFile, rc.Data); err != nil {
 			return err
-		}
-
-		if output != nil {
-			s.SendRecord(rc, output)
 		}
 	}
 
@@ -79,8 +72,8 @@ func (s *sftp) uploadOne(client *pkgsftp.Client, remoteFile string, data []byte)
 
 		// Check the Close error explicitly: for SFTP writes the final flush/
 		// commit happens here and may be the only place a late failure (e.g.
-		// server out of space) surfaces. Deferring and ignoring it could report
-		// success for an incomplete upload.
+		// server out of space) surfaces. Ignoring it could report success for
+		// an incomplete upload.
 		if err := f.Close(); err != nil {
 			return fmt.Errorf(`closing remote file %q: %w`, remoteFile, err)
 		}
@@ -91,9 +84,9 @@ func (s *sftp) uploadOne(client *pkgsftp.Client, remoteFile string, data []byte)
 
 }
 
-// download (source): read file(s) from RemotePath and emit one record per file.
-// RemotePath may be a single file, a glob, or a directory. The basename is
-// stored in the record context so a downstream file task can name the object
+// download (source): read file(s) from remote_path and emit one record per
+// file. remote_path may be a single file, a glob, or a directory. The basename
+// is stored in the record context so a downstream file task can name the object
 // it writes (mirrors file.readFile).
 func (s *sftp) download(client *pkgsftp.Client, output chan<- *record.Record) error {
 
@@ -171,138 +164,6 @@ func (s *sftp) downloadOne(client *pkgsftp.Client, remoteFile string) ([]byte, e
 	})
 
 	return data, err
-
-}
-
-// dirEntry is the JSON shape emitted by the list operation, one per record, so
-// downstream jq/file tasks can act on directory contents.
-type dirEntry struct {
-	Name    string `json:"name"`
-	Size    int64  `json:"size"`
-	ModTime string `json:"mod_time"`
-	IsDir   bool   `json:"is_dir"`
-}
-
-// list (source): emit one record per entry in the RemotePath directory.
-func (s *sftp) list(client *pkgsftp.Client, output chan<- *record.Record) error {
-
-	remotePath, err := s.RemotePath.Get(nil)
-	if err != nil {
-		return err
-	}
-
-	var entries []os.FileInfo
-	err = s.retry(fmt.Sprintf(`list %s`, remotePath), func() error {
-		e, err := client.ReadDir(remotePath)
-		if err != nil {
-			return fmt.Errorf(`reading remote dir %q: %w`, remotePath, err)
-		}
-		entries = e
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	for _, e := range entries {
-		data, err := json.Marshal(dirEntry{
-			Name:    e.Name(),
-			Size:    e.Size(),
-			ModTime: e.ModTime().UTC().Format(time.RFC3339),
-			IsDir:   e.IsDir(),
-		})
-		if err != nil {
-			return fmt.Errorf(`marshaling dir entry %q: %w`, e.Name(), err)
-		}
-		s.SendData(ctx, data, output)
-	}
-
-	return nil
-
-}
-
-// move/rename: rename RemotePath to DestinationPath. With an input it runs once
-// per record (paths may be templated against the record); otherwise it is a
-// single config-driven action.
-func (s *sftp) move(client *pkgsftp.Client, input <-chan *record.Record, output chan<- *record.Record) error {
-	return s.perRecordAction(client, input, output, s.moveOne)
-}
-
-func (s *sftp) moveOne(client *pkgsftp.Client, rc *record.Record) error {
-
-	src, err := s.RemotePath.Get(rc)
-	if err != nil {
-		return err
-	}
-	dst, err := s.DestinationPath.Get(rc)
-	if err != nil {
-		return err
-	}
-	if src == `` || dst == `` {
-		return fmt.Errorf(`operation %q requires both remote_path (source) and destination_path`, opMove)
-	}
-
-	return s.retry(fmt.Sprintf(`move %s -> %s`, src, dst), func() error {
-		if dir := path.Dir(dst); dir != `` && dir != `.` {
-			if err := client.MkdirAll(dir); err != nil {
-				return fmt.Errorf(`creating remote dir %q: %w`, dir, err)
-			}
-		}
-		if err := client.Rename(src, dst); err != nil {
-			return fmt.Errorf(`renaming %q to %q: %w`, src, dst, err)
-		}
-		return nil
-	})
-
-}
-
-// remove (delete): delete RemotePath. Like move, it runs per record when given
-// an input, otherwise once from config.
-func (s *sftp) remove(client *pkgsftp.Client, input <-chan *record.Record, output chan<- *record.Record) error {
-	return s.perRecordAction(client, input, output, s.removeOne)
-}
-
-func (s *sftp) removeOne(client *pkgsftp.Client, rc *record.Record) error {
-
-	target, err := s.RemotePath.Get(rc)
-	if err != nil {
-		return err
-	}
-	if target == `` {
-		return fmt.Errorf(`operation %q requires remote_path`, opDelete)
-	}
-
-	return s.retry(fmt.Sprintf(`delete %s`, target), func() error {
-		if err := client.Remove(target); err != nil {
-			return fmt.Errorf(`deleting %q: %w`, target, err)
-		}
-		return nil
-	})
-
-}
-
-// perRecordAction is shared by move and delete: when an input channel is
-// present it applies action to each record (and passes the record through if
-// an output is set); otherwise it performs the action once from static config.
-func (s *sftp) perRecordAction(client *pkgsftp.Client, input <-chan *record.Record, output chan<- *record.Record, action func(*pkgsftp.Client, *record.Record) error) error {
-
-	if input != nil {
-		for {
-			rc, ok := s.GetRecord(input)
-			if !ok {
-				break
-			}
-			if err := action(client, rc); err != nil {
-				return err
-			}
-			if output != nil {
-				s.SendRecord(rc, output)
-			}
-		}
-		return nil
-	}
-
-	return action(client, nil)
 
 }
 

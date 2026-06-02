@@ -9,6 +9,7 @@ import (
 
 	pkgsftp "github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 
 	"github.com/patterninc/caterpillar/internal/pkg/config"
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
@@ -24,12 +25,6 @@ const (
 	defaultTimeout    = duration.Duration(30 * time.Second)
 	defaultMaxRetries = 3
 	defaultRetryDelay = duration.Duration(1 * time.Second)
-
-	opUpload   = `upload`
-	opDownload = `download`
-	opList     = `list`
-	opMove     = `move`
-	opDelete   = `delete`
 )
 
 // ctx is a package-level background context used when creating source records,
@@ -38,11 +33,6 @@ var ctx = context.Background()
 
 type sftp struct {
 	task.Base `yaml:",inline" json:",inline"`
-
-	// Operation selects the behaviour. upload is a sink (consumes records),
-	// download and list are sources (emit records), move and delete are
-	// one-shot actions that may optionally pass records through.
-	Operation string `yaml:"operation" json:"operation" validate:"required,oneof=upload download list move delete"`
 
 	// Connection.
 	Host     string `yaml:"host" json:"host" validate:"required"`
@@ -55,16 +45,13 @@ type sftp struct {
 	PrivateKey string `yaml:"private_key,omitempty" json:"private_key,omitempty"`
 	Passphrase string `yaml:"passphrase,omitempty" json:"passphrase,omitempty"`
 
-	// Host key verification (required — see hostkey.go).
+	// Host key verification (required — see buildHostKeyCallback).
 	HostKey        string `yaml:"host_key,omitempty" json:"host_key,omitempty"`
 	KnownHostsPath string `yaml:"known_hosts_path,omitempty" json:"known_hosts_path,omitempty"`
 
-	// Paths. config.String supports {{ macro }}/{{ context }} templating, so
-	// they can be evaluated per record.
-	// RemotePath is required by every operation (target, source, or directory).
-	// DestinationPath is required only by move and is validated in moveOne.
-	RemotePath      config.String `yaml:"remote_path,omitempty" json:"remote_path,omitempty" validate:"required"`
-	DestinationPath config.String `yaml:"destination_path,omitempty" json:"destination_path,omitempty"`
+	// RemotePath is the remote file/directory to download from (source mode) or
+	// upload to (sink mode). config.String supports per-record templating.
+	RemotePath config.String `yaml:"remote_path,omitempty" json:"remote_path,omitempty" validate:"required"`
 
 	// Reliability.
 	Timeout    duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
@@ -87,9 +74,9 @@ func New() (task.Task, error) {
 }
 
 // Init validates the credentials and host-key settings and prepares the SSH
-// auth method and host-key callback. It deliberately does NOT open a network
-// connection: Init runs for every task at config-load time, and an SSH session
-// held open from then until Run could time out. We dial in Run instead.
+// auth method and host-key callback. It does not open a connection (that
+// happens in Run): Init runs for every task at config-load time, and a session
+// held open from then until Run could time out.
 func (s *sftp) Init() error {
 
 	authMethod, err := s.buildAuthMethod()
@@ -109,10 +96,13 @@ func (s *sftp) Init() error {
 
 }
 
+// Run infers its role from the channels, exactly like the file task: with no
+// input it is a source (download from the server); with an input it is a sink
+// (upload to the server). It is never both.
 func (s *sftp) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	if err := s.validateChannels(input, output); err != nil {
-		return err
+	if input != nil && output != nil {
+		return task.ErrPresentInputOutput
 	}
 
 	sshClient, sftpClient, err := s.connect()
@@ -123,42 +113,11 @@ func (s *sftp) Run(input <-chan *record.Record, output chan<- *record.Record) er
 	defer sshClient.Close()
 	defer sftpClient.Close()
 
-	switch s.Operation {
-	case opUpload:
-		return s.upload(sftpClient, input, output)
-	case opDownload:
+	if input == nil {
 		return s.download(sftpClient, output)
-	case opList:
-		return s.list(sftpClient, output)
-	case opMove:
-		return s.move(sftpClient, input, output)
-	case opDelete:
-		return s.remove(sftpClient, input, output)
-	default:
-		return fmt.Errorf(`unsupported operation: %s`, s.Operation)
 	}
 
-}
-
-// validateChannels enforces each operation's pipeline role so a misplaced task
-// fails fast with a clear message instead of silently doing nothing.
-func (s *sftp) validateChannels(input <-chan *record.Record, output chan<- *record.Record) error {
-
-	switch s.Operation {
-	case opUpload:
-		if input == nil {
-			return fmt.Errorf(`operation %q is a sink and requires an input: place it after a task that emits files (e.g. a file task reading s3://)`, opUpload)
-		}
-	case opDownload, opList:
-		if input != nil {
-			return fmt.Errorf(`operation %q is a source and must not have an input`, s.Operation)
-		}
-		if output == nil {
-			return fmt.Errorf(`operation %q is a source and requires an output: place a task after it`, s.Operation)
-		}
-	}
-
-	return nil
+	return s.upload(sftpClient, input)
 
 }
 
@@ -173,10 +132,9 @@ func (s *sftp) connect() (*ssh.Client, *pkgsftp.Client, error) {
 		User:            s.Username,
 		Auth:            []ssh.AuthMethod{s.authMethod},
 		HostKeyCallback: s.hostKeyCB,
-		// Constrain host-key negotiation to the pinned key's algorithm. Without
-		// this, the server may present a different host-key type than the one we
-		// pinned (servers usually offer rsa/ecdsa/ed25519), producing a spurious
-		// "host key mismatch". Nil is fine for known_hosts / default negotiation.
+		// Constrain host-key negotiation to the pinned key's algorithm, so the
+		// server presents the same key type we pinned rather than a different
+		// one (which would be a spurious mismatch). nil = client default.
 		HostKeyAlgorithms: s.hostKeyAlgos,
 		Timeout:           time.Duration(s.Timeout),
 	}
@@ -205,4 +163,105 @@ func (s *sftp) connect() (*ssh.Client, *pkgsftp.Client, error) {
 
 	return sshClient, sftpClient, nil
 
+}
+
+// buildAuthMethod turns the configured credentials into an ssh.AuthMethod.
+// Exactly one of PrivateKey or Password must be set. The credentials originate
+// from SSM via {{ secret }}; never include them in an error or log line.
+func (s *sftp) buildAuthMethod() (ssh.AuthMethod, error) {
+
+	switch {
+
+	case s.PrivateKey != `` && s.Password != ``:
+		return nil, fmt.Errorf(`set only one of password or private_key, not both`)
+
+	case s.PrivateKey != ``:
+		var (
+			signer ssh.Signer
+			err    error
+		)
+		if s.Passphrase != `` {
+			signer, err = ssh.ParsePrivateKeyWithPassphrase([]byte(s.PrivateKey), []byte(s.Passphrase))
+		} else {
+			signer, err = ssh.ParsePrivateKey([]byte(s.PrivateKey))
+		}
+		if err != nil {
+			return nil, fmt.Errorf(`parsing private_key: %w`, err)
+		}
+		return ssh.PublicKeys(signer), nil
+
+	case s.Password != ``:
+		return ssh.Password(s.Password), nil
+
+	default:
+		return nil, fmt.Errorf(`no authentication method configured: set either password or private_key`)
+
+	}
+
+}
+
+// buildHostKeyCallback decides how we verify the server's identity, failing
+// closed when neither host_key nor known_hosts_path is set. It also returns the
+// host-key algorithms the client should negotiate: for a pinned host_key we
+// restrict to that key's algorithm, otherwise the server may present a
+// different host-key type than the one we pinned and cause a spurious
+// mismatch. A nil slice means "use the client default".
+func (s *sftp) buildHostKeyCallback() (ssh.HostKeyCallback, []string, error) {
+
+	switch {
+
+	case s.HostKey != ``:
+		// HostKey is a single authorized-key line, e.g.
+		//   "ssh-ed25519 AAAAC3Nza..." (the key portion of a known_hosts entry).
+		key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(s.HostKey))
+		if err != nil {
+			return nil, nil, fmt.Errorf(`parsing host_key: %w`, err)
+		}
+		return ssh.FixedHostKey(key), []string{key.Type()}, nil
+
+	case s.KnownHostsPath != ``:
+		callback, err := knownhosts.New(s.KnownHostsPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf(`loading known_hosts file %q: %w`, s.KnownHostsPath, err)
+		}
+		return callback, nil, nil
+
+	default:
+		return nil, nil, fmt.Errorf(`host key verification required: set host_key or known_hosts_path`)
+
+	}
+
+}
+
+// withRetry runs fn up to attempts times, sleeping delay between tries. It
+// returns nil on the first success, or the last error if every attempt fails.
+// On each retried failure it logs a warning (matching the codebase's fmt-based
+// logging) so a flaky connection is visible even when it eventually succeeds.
+func withRetry(label string, attempts int, delay time.Duration, fn func() error) error {
+
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	var err error
+	for i := 0; i < attempts; i++ {
+		if err = fn(); err == nil {
+			return nil
+		}
+		// Don't log or sleep after the final attempt.
+		if i < attempts-1 {
+			fmt.Printf("WARN: %s: attempt %d/%d failed: %v; retrying in %s\n", label, i+1, attempts, err, delay)
+			time.Sleep(delay)
+		}
+	}
+
+	return err
+
+}
+
+// retry wraps withRetry with the task's configured attempt count and delay, and
+// a label built from the task name and the action (for example "connect" or
+// "upload /incoming/file.csv").
+func (s *sftp) retry(action string, fn func() error) error {
+	return withRetry(fmt.Sprintf(`sftp task %q: %s`, s.Name, action), s.MaxRetries, time.Duration(s.RetryDelay), fn)
 }

@@ -1,6 +1,7 @@
 # Copy files from S3 to a client's SFTP server.
-# Credentials are read from SSM with the secret template. The server is
-# verified with host_key.
+# The file task reads from S3 (source); the sftp task has an input, so it acts
+# as a sink and uploads. Credentials are read from SSM with the secret
+# template. The server is verified with host_key.
 tasks:
   - name: read_from_s3
     type: file
@@ -8,7 +9,6 @@ tasks:
     region: us-west-2
   - name: upload_to_client_sftp
     type: sftp
-    operation: upload
     host: sftp.clientX.example.com
     port: 22
     username: '{{ secret "/data/sftp/clientX/username" }}'
@@ -17,8 +17,6 @@ tasks:
     # field that reads from SSM with the secret template (see the README).
     private_key: |
       {{ indent 6 (secret "/data/sftp/clientX/private_key") }}
-    # host_key verifies the server's identity (prevents man-in-the-middle).
-    # Get the value once with: ssh-keyscan -t ed25519 -p <port> <host>
     host_key: '{{ secret "/data/sftp/clientX/host_key" }}'
     remote_path: /incoming/
     timeout: 30s
