@@ -1,0 +1,18 @@
+# Download file(s) from an SFTP server to local disk.
+# The sftp task has no upstream (no input), so it acts as a source -> download.
+# The file task writes to `path` exactly as given, so we add the source file
+# name (stored by the download in CATERPILLAR_FILE_NAME_WRITE) to keep names.
+tasks:
+  - name: download_from_sftp
+    type: sftp
+    host: '{{ secret "/sftp/host" }}'
+    port: 22
+    username: '{{ secret "/sftp/username" }}'
+    password: '{{ secret "/sftp/password" }}'
+    # host_key verifies the server's identity (prevents man-in-the-middle).
+    # Get the value once with: ssh-keyscan -t ed25519 -p <port> <host>
+    host_key: '{{ secret "/sftp/host_key" }}'
+    remote_path: /upload/*.txt
+  - name: write_local
+    type: file
+    path: /tmp/sftp-download/{{ context "CATERPILLAR_FILE_NAME_WRITE" }}
