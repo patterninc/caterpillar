@@ -9,7 +9,7 @@ The `sftp` task handles SFTP only. It does not talk to S3 directly. Instead, it 
 - **Upload (S3 → SFTP)**: the `file` task reads from `s3://…` and the `sftp` task writes the files to the server.
 - **Download (SFTP → S3)**: the `sftp` task reads files from the server and the `file` task writes them to `s3://…`.
 
-This reuses Caterpillar's existing S3 code. The file name passes from one task to the next through a record context value, so `file` and `sftp` work together without extra configuration.
+This reuses Caterpillar's existing S3 code. On download, each file's name is stored in a record context value; on upload you reference it in `path` (`{{ context "CATERPILLAR_FILE_NAME_WRITE" }}`) to keep the original names.
 
 ## Behavior
 
@@ -17,10 +17,12 @@ Like the `file` task, the role is **inferred from the channels**:
 
 | The task has… | Role | What it does |
 |---------------|------|--------------|
-| **no input** (it is the first task) | **source — download** | Reads file(s) at `remote_path` (a single file, a glob, or a directory) and emits one record per file. The base name is stored in the record context (`CATERPILLAR_FILE_NAME_WRITE`) so a downstream task can name what it writes. |
-| **an input** | **sink — upload** | Writes each incoming record's data to the server. If `remote_path` is a directory (trailing `/` or an existing directory), the source file name is appended. |
+| **no input** (it is the first task) | **source — download** | Reads file(s) at `path` (a single file, a glob, or a directory) and emits one record per file. The base name is stored in the record context (`CATERPILLAR_FILE_NAME_WRITE`) so a downstream task can name what it writes. |
+| **an input** | **sink — upload** | Writes each incoming record's data to `path`, used as-is per record. To name files from the source, template `path` — e.g. `{{ context "CATERPILLAR_FILE_NAME_WRITE" }}`. |
 
 It cannot be both: configuring the task with both an input and an output is an error.
+
+For non-file sources that don't set a file name (Kafka, HTTP, …), template `path` yourself — with a macro like `{{ macro "uuid" }}`, a value extracted from the record via a `context:` jq map, or `{{ context "CATERPILLAR_ARCHIVE_FILE_NAME_WRITE" }}` for an archive-unpack source.
 
 ## Authentication
 
@@ -66,7 +68,7 @@ If you set neither, the task refuses to connect (it fails closed). You can obtai
 | `passphrase` | string | - | Passphrase for an encrypted `private_key` |
 | `host_key` | string | - | Authorized-key line used to verify the server |
 | `known_hosts_path` | string | - | Path to a `known_hosts` file |
-| `remote_path` | string | - | Remote file or directory (required; supports templating). On upload, a trailing `/` or an existing directory is treated as a directory. |
+| `path` | string | - | Remote file or directory (required; supports per-record templating). Used as-is — template a context value such as `{{ context "CATERPILLAR_FILE_NAME_WRITE" }}` to name uploaded files from the source. |
 | `timeout` | duration | `30s` | SSH connection timeout (for example `15s`, `1m`) |
 | `max_retries` | int | `3` | Attempts per connect or transfer operation |
 | `retry_delay` | duration | `1s` | Delay between retries |
@@ -90,7 +92,7 @@ tasks:
     private_key: |
       {{ indent 6 (secret "/data/sftp/clientX/private_key") }}
     host_key: '{{ secret "/data/sftp/clientX/host_key" }}'
-    remote_path: /incoming/
+    path: '/incoming/{{ context "CATERPILLAR_FILE_NAME_WRITE" }}'
 ```
 
 ### Download files from an SFTP server to S3
@@ -103,7 +105,7 @@ tasks:
     username: '{{ secret "/data/sftp/clientX/username" }}'
     password: '{{ secret "/data/sftp/clientX/password" }}'
     known_hosts_path: /etc/ssh/known_hosts
-    remote_path: /outgoing/*.csv
+    path: /outgoing/*.csv
   - name: write_to_s3
     type: file
     # The file task writes to `path` exactly as given. The sftp download stores

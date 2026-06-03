@@ -182,6 +182,7 @@ func (f *file) writeFile(input <-chan *record.Record) error {
 
 		var fs file
 
+		
 		fs = *f
 		filePath, found := rc.GetContextValue(string(task.CtxKeyArchiveFileNameWrite))
 		if found {

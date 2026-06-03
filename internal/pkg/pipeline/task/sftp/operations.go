@@ -14,16 +14,11 @@ import (
 	"github.com/patterninc/caterpillar/internal/pkg/textutil"
 )
 
-// upload (sink): write each incoming record's data to the server. When
-// remote_path is a directory, the upstream filename (carried in the record
-// context by the source task) is appended, so `file -> sftp` composes with no
-// glue.
+// upload (sink): write each incoming record's data to Path, used as-is per
+// record. To name files from the source, template Path with a context value —
+// e.g. {{ context "CATERPILLAR_FILE_NAME_WRITE" }} for a file source, or
+// {{ context "CATERPILLAR_ARCHIVE_FILE_NAME_WRITE" }} for an archive source.
 func (s *sftp) upload(client *pkgsftp.Client, input <-chan *record.Record) error {
-
-	// Cache isDirLike per remote_path so a static (or repeated) destination is
-	// stat-ed once per run rather than once per record. Local to this call so
-	// concurrent workers don't share it.
-	dirCache := make(map[string]bool)
 
 	for {
 		rc, ok := s.GetRecord(input)
@@ -31,14 +26,9 @@ func (s *sftp) upload(client *pkgsftp.Client, input <-chan *record.Record) error
 			break
 		}
 
-		remotePath, err := s.RemotePath.Get(rc)
+		remoteFile, err := s.Path.Get(rc)
 		if err != nil {
 			return err
-		}
-
-		remoteFile := remotePath
-		if filename, found := rc.GetContextValue(string(task.CtxKeyFileNameWrite)); found && filename != `` && s.isDirLikeCached(client, remotePath, dirCache) {
-			remoteFile = path.Join(remotePath, filename)
 		}
 
 		if err := s.uploadOne(client, remoteFile, rc.Data); err != nil {
@@ -66,14 +56,12 @@ func (s *sftp) uploadOne(client *pkgsftp.Client, remoteFile string, data []byte)
 		}
 
 		if _, err := io.Copy(f, bytes.NewReader(data)); err != nil {
-			f.Close() // best effort; the copy error is the underlying failure
+			f.Close()
 			return fmt.Errorf(`writing remote file %q: %w`, remoteFile, err)
 		}
 
-		// Check the Close error explicitly: for SFTP writes the final flush/
-		// commit happens here and may be the only place a late failure (e.g.
-		// server out of space) surfaces. Ignoring it could report success for
-		// an incomplete upload.
+		// Check Close: for SFTP writes the final flush happens here and may be the
+		// only place a late failure (e.g. server out of space) surfaces.
 		if err := f.Close(); err != nil {
 			return fmt.Errorf(`closing remote file %q: %w`, remoteFile, err)
 		}
@@ -84,13 +72,12 @@ func (s *sftp) uploadOne(client *pkgsftp.Client, remoteFile string, data []byte)
 
 }
 
-// download (source): read file(s) from remote_path and emit one record per
-// file. remote_path may be a single file, a glob, or a directory. The basename
-// is stored in the record context so a downstream file task can name the object
-// it writes (mirrors file.readFile).
+// download (source): read file(s) at Path (a file, glob, or directory) and emit
+// one record per file. The base name is stored in the record context so a
+// downstream task can name what it writes (mirrors file.readFile).
 func (s *sftp) download(client *pkgsftp.Client, output chan<- *record.Record) error {
 
-	remotePath, err := s.RemotePath.Get(nil)
+	remotePath, err := s.Path.Get(nil)
 	if err != nil {
 		return err
 	}
@@ -164,32 +151,6 @@ func (s *sftp) downloadOne(client *pkgsftp.Client, remoteFile string) ([]byte, e
 	})
 
 	return data, err
-
-}
-
-// isDirLikeCached wraps isDirLike with a per-run cache keyed on remotePath, so
-// the same destination is stat-ed at most once instead of once per record.
-func (s *sftp) isDirLikeCached(client *pkgsftp.Client, remotePath string, cache map[string]bool) bool {
-	if v, ok := cache[remotePath]; ok {
-		return v
-	}
-	v := s.isDirLike(client, remotePath)
-	cache[remotePath] = v
-	return v
-}
-
-// isDirLike reports whether remotePath should be treated as a directory to
-// place an uploaded file into: either it ends with "/" or it already exists as
-// a directory on the server.
-func (s *sftp) isDirLike(client *pkgsftp.Client, remotePath string) bool {
-
-	if strings.HasSuffix(remotePath, `/`) {
-		return true
-	}
-	if info, err := client.Stat(remotePath); err == nil && info.IsDir() {
-		return true
-	}
-	return false
 
 }
 
