@@ -239,7 +239,7 @@ Caterpillar supports the following tasks, each of which can serve different role
 - **`kafka`** - [Read from or write to Kafka topics (acts as source or sink)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/kafka/README.md)
 - **`replace`** - [Perform regex-based text replacement and transformation](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/replace/README.md)
 - **`sample`** - [Sample data using various strategies (random, head, tail, nth, percent)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/sample/README.md)
-- **`sftp`** - [Transfer files to and from SFTP servers (upload, download, list, move, delete)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/sftp/README.md)
+- **`sftp`** - [Transfer files to and from SFTP servers (upload, download)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/sftp/README.md)
 - **`split`** - [Split data by specified delimiters](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/split/README.md)
 - **`sqs`** - [Read from or write to AWS SQS queues (acts as source or sink)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/sqs/README.md)
 - **`xpath`** - [Extract data from XML/HTML using XPath expressions](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/xpath/README.md)
