@@ -17,7 +17,7 @@ Like the `file` task, the role is **inferred from the channels**:
 
 | The task has… | Role | What it does |
 |---------------|------|--------------|
-| **no input** (it is the first task) | **source — download** | Reads file(s) at `path` (a single file, a glob, or a directory) and emits one record per file. The base name is stored in the record context (`CATERPILLAR_FILE_NAME_WRITE`) so a downstream task can name what it writes. |
+| **no input** (it is the first task) | **source — download** | Reads file(s) at `path` (a single file or a glob; doublestar `**` and `{a,b}` are supported, like the file task) and emits one record per file. The base name is stored in the record context (`CATERPILLAR_FILE_NAME_WRITE`) so a downstream task can name what it writes. |
 | **an input** | **sink — upload** | Writes each incoming record's data to `path`, used as-is per record. To name files from the source, template `path` — e.g. `{{ context "CATERPILLAR_FILE_NAME_WRITE" }}`. |
 
 It cannot be both: configuring the task with both an input and an output is an error.
@@ -68,7 +68,7 @@ If you set neither, the task refuses to connect (it fails closed). You can obtai
 | `passphrase` | string | - | Passphrase for an encrypted `private_key` |
 | `host_key` | string | - | Authorized-key line used to verify the server |
 | `known_hosts_path` | string | - | Path to a `known_hosts` file |
-| `path` | string | - | Remote file or directory (required; supports per-record templating). Used as-is — template a context value such as `{{ context "CATERPILLAR_FILE_NAME_WRITE" }}` to name uploaded files from the source. |
+| `path` | string | - | Remote file path (required; supports per-record templating). On download it may be a glob (`**`/`{a,b}` supported); a bare directory is not expanded. Used as-is — template a context value such as `{{ context "CATERPILLAR_FILE_NAME_WRITE" }}` to name uploaded files from the source. |
 | `timeout` | duration | `30s` | SSH connection timeout (for example `15s`, `1m`) |
 | `max_retries` | int | `3` | Attempts per connect or transfer operation |
 | `retry_delay` | duration | `1s` | Delay between retries |

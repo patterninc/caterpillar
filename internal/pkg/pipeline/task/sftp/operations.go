@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/bmatcuk/doublestar"
 	pkgsftp "github.com/pkg/sftp"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
@@ -72,7 +73,7 @@ func (s *sftp) uploadOne(client *pkgsftp.Client, remoteFile string, data []byte)
 
 }
 
-// download (source): read file(s) at Path (a file, glob, or directory) and emit
+// download (source): read file(s) at Path (a single file or a glob) and emit
 // one record per file. The base name is stored in the record context so a
 // downstream task can name what it writes (mirrors file.readFile).
 func (s *sftp) download(client *pkgsftp.Client, output chan<- *record.Record) error {
@@ -102,32 +103,35 @@ func (s *sftp) download(client *pkgsftp.Client, output chan<- *record.Record) er
 
 }
 
+// resolveDownloadPaths turns Path into the list of files to download. A plain
+// path is a single file; a glob is matched with doublestar (so ** and {a,b}
+// work, like the file task) by walking the static base directory and matching
+// each file against the pattern. A bare directory is not expanded — glob it.
 func (s *sftp) resolveDownloadPaths(client *pkgsftp.Client, remotePath string) ([]string, error) {
 
-	if containsGlob(remotePath) {
-		matches, err := client.Glob(remotePath)
-		if err != nil {
-			return nil, fmt.Errorf(`globbing %q: %w`, remotePath, err)
-		}
-		return matches, nil
+	if !containsGlob(remotePath) {
+		return []string{remotePath}, nil
 	}
 
-	// A directory expands to the (non-directory) files directly inside it.
-	if info, err := client.Stat(remotePath); err == nil && info.IsDir() {
-		entries, err := client.ReadDir(remotePath)
+	var matches []string
+	walker := client.Walk(globBase(remotePath))
+	for walker.Step() {
+		if err := walker.Err(); err != nil {
+			return nil, fmt.Errorf(`walking %q: %w`, remotePath, err)
+		}
+		if walker.Stat().IsDir() {
+			continue
+		}
+		ok, err := doublestar.Match(remotePath, walker.Path())
 		if err != nil {
-			return nil, fmt.Errorf(`reading remote dir %q: %w`, remotePath, err)
+			return nil, fmt.Errorf(`bad glob %q: %w`, remotePath, err)
 		}
-		paths := make([]string, 0, len(entries))
-		for _, e := range entries {
-			if !e.IsDir() {
-				paths = append(paths, path.Join(remotePath, e.Name()))
-			}
+		if ok {
+			matches = append(matches, walker.Path())
 		}
-		return paths, nil
 	}
 
-	return []string{remotePath}, nil
+	return matches, nil
 
 }
 
@@ -154,6 +158,25 @@ func (s *sftp) downloadOne(client *pkgsftp.Client, remoteFile string) ([]byte, e
 
 }
 
+// containsGlob reports whether p has any glob metacharacter.
 func containsGlob(p string) bool {
-	return strings.ContainsAny(p, `*?[`)
+	return strings.ContainsAny(p, `*?[{`)
+}
+
+// globBase returns the longest leading directory of pattern with no glob
+// metacharacter — the point from which to start walking.
+func globBase(pattern string) string {
+	i := strings.IndexAny(pattern, `*?[{`)
+	if i < 0 {
+		return pattern
+	}
+	dir := pattern[:i]
+	switch j := strings.LastIndex(dir, `/`); {
+	case j < 0:
+		return `.`
+	case j == 0:
+		return `/`
+	default:
+		return dir[:j]
+	}
 }
