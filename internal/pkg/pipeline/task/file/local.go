@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"fmt"
 	"github.com/bmatcuk/doublestar"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 )
@@ -42,8 +43,16 @@ func (r *localReader) parse(glob string) ([]string, error) {
 		return nil, err
 	}
 
+	if len(paths) == 0 && !containsGlob(glob) {
+		return nil, fmt.Errorf("file does not exist: %s", glob)
+	}
+
 	return paths, nil
 
+}
+
+func containsGlob(glob string) bool {
+	return strings.ContainsAny(glob, `*?[{`)
 }
 
 func writeLocalFile(f *file, rec *record.Record, reader io.Reader) error {
