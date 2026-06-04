@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strings"
 	"unicode/utf16"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -71,6 +72,10 @@ func (r *s3Reader) parse(glob string) ([]string, error) {
 		return nil, err
 	}
 
+	if len(objects) == 0 && !containsGlob(glob) {
+		return nil, fmt.Errorf("file does not exist: s3://%s/%s", bucket, glob)
+	}
+
 	paths := make([]string, 0, len(objects))
 	for _, object := range objects {
 		path := fmt.Sprintf("s3://%s/%s", bucket, *object.Key)
@@ -79,6 +84,10 @@ func (r *s3Reader) parse(glob string) ([]string, error) {
 
 	return paths, nil
 
+}
+
+func containsGlob(p string) bool {
+	return strings.ContainsAny(p, `*?[{`)
 }
 
 func writeS3File(f *file, rec *record.Record, reader io.Reader) error {
