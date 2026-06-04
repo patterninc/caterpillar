@@ -9,7 +9,7 @@ The `sftp` task handles SFTP only. It does not talk to S3 directly. Instead, it 
 - **Upload (S3 → SFTP)**: the `file` task reads from `s3://…` and the `sftp` task writes the files to the server.
 - **Download (SFTP → S3)**: the `sftp` task reads files from the server and the `file` task writes them to `s3://…`.
 
-This reuses Caterpillar's existing S3 code. On download, each file's name is stored in a record context value; on upload you reference it in `path` (`{{ context "CATERPILLAR_FILE_NAME_WRITE" }}`) to keep the original names.
+This reuses Caterpillar's existing S3 code. On download, each file's sanitized base name is stored in a record context value; on upload you reference it in `path` (`{{ context "CATERPILLAR_FILE_NAME_WRITE" }}`) to keep consistent names.
 
 ## Behavior
 
