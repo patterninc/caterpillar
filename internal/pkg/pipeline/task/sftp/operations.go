@@ -103,16 +103,11 @@ func (s *sftp) download(client *pkgsftp.Client, output chan<- *record.Record) er
 
 }
 
-// parse turns Path into the list of files to download (named to mirror the
-// file task's reader.parse). A plain path is a single file; a glob is matched
-// with doublestar (so ** and {a,b} work, like the file task) by walking the
-// static base directory and matching each file against the pattern. A bare
-// directory is not expanded — glob it.
+// parse turns Path into the list of files to download.
+// A glob is matched with doublestar by walking the static base directory and matching
+// each file against the pattern; a plain path matches itself. Matching no files
+// is an error — the named file is missing, or the glob matched nothing.
 func (s *sftp) parse(client *pkgsftp.Client, remotePath string) ([]string, error) {
-
-	if !containsGlob(remotePath) {
-		return []string{remotePath}, nil
-	}
 
 	var matches []string
 	walker := client.Walk(globBase(remotePath))
@@ -130,6 +125,10 @@ func (s *sftp) parse(client *pkgsftp.Client, remotePath string) ([]string, error
 		if ok {
 			matches = append(matches, walker.Path())
 		}
+	}
+
+	if len(matches) == 0 {
+		return nil, fmt.Errorf(`no files found at %q`, remotePath)
 	}
 
 	return matches, nil
@@ -157,11 +156,6 @@ func (s *sftp) downloadOne(client *pkgsftp.Client, file string) ([]byte, error) 
 
 	return data, err
 
-}
-
-// containsGlob reports whether p has any glob metacharacter.
-func containsGlob(p string) bool {
-	return strings.ContainsAny(p, `*?[{`)
 }
 
 // globBase returns the longest leading directory of pattern with no glob
