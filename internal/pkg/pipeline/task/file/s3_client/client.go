@@ -61,16 +61,12 @@ func (c *Client) GetObjects(ctx context.Context, bucketName, pattern string) ([]
 
 	}
 
-	if len(matchingObjects) == 0 && !containsGlob(pattern) {
-		return nil, fmt.Errorf("file does not exist: s3://%s/%s", bucketName, pattern)
+	if len(matchingObjects) == 0 {
+		return nil, fmt.Errorf("no files found at s3://%s/%s", bucketName, pattern)
 	}
 
 	return matchingObjects, nil
 
-}
-
-func containsGlob(pattern string) bool {
-	return strings.ContainsAny(pattern, `*?[{`)
 }
 
 func ParseURI(path string) (bucket string, key string, err error) {

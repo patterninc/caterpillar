@@ -43,16 +43,12 @@ func (r *localReader) parse(glob string) ([]string, error) {
 		return nil, err
 	}
 
-	if len(paths) == 0 && !containsGlob(glob) {
-		return nil, fmt.Errorf("file does not exist: %s", glob)
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("no files found at %s", glob)
 	}
 
 	return paths, nil
 
-}
-
-func containsGlob(glob string) bool {
-	return strings.ContainsAny(glob, `*?[{`)
 }
 
 func writeLocalFile(f *file, rec *record.Record, reader io.Reader) error {
