@@ -27,12 +27,12 @@ func (s *sftp) upload(client *pkgsftp.Client, input <-chan *record.Record) error
 			break
 		}
 
-		remoteFile, err := s.Path.Get(rc)
+		file, err := s.Path.Get(rc)
 		if err != nil {
 			return err
 		}
 
-		if err := s.uploadOne(client, remoteFile, rc.Data); err != nil {
+		if err := s.uploadOne(client, file, rc.Data); err != nil {
 			return err
 		}
 	}
@@ -41,30 +41,30 @@ func (s *sftp) upload(client *pkgsftp.Client, input <-chan *record.Record) error
 
 }
 
-func (s *sftp) uploadOne(client *pkgsftp.Client, remoteFile string, data []byte) error {
+func (s *sftp) uploadOne(client *pkgsftp.Client, file string, data []byte) error {
 
-	return s.retry(fmt.Sprintf(`upload %s`, remoteFile), func() error {
+	return s.retry(fmt.Sprintf(`upload %s`, file), func() error {
 
-		if dir := path.Dir(remoteFile); dir != `` && dir != `.` {
+		if dir := path.Dir(file); dir != `` && dir != `.` {
 			if err := client.MkdirAll(dir); err != nil {
 				return fmt.Errorf(`creating remote dir %q: %w`, dir, err)
 			}
 		}
 
-		f, err := client.Create(remoteFile)
+		f, err := client.Create(file)
 		if err != nil {
-			return fmt.Errorf(`creating remote file %q: %w`, remoteFile, err)
+			return fmt.Errorf(`creating remote file %q: %w`, file, err)
 		}
 
 		if _, err := io.Copy(f, bytes.NewReader(data)); err != nil {
 			f.Close()
-			return fmt.Errorf(`writing remote file %q: %w`, remoteFile, err)
+			return fmt.Errorf(`writing remote file %q: %w`, file, err)
 		}
 
 		// Check Close: for SFTP writes the final flush happens here and may be the
 		// only place a late failure (e.g. server out of space) surfaces.
 		if err := f.Close(); err != nil {
-			return fmt.Errorf(`closing remote file %q: %w`, remoteFile, err)
+			return fmt.Errorf(`closing remote file %q: %w`, file, err)
 		}
 
 		return nil
@@ -136,20 +136,20 @@ func (s *sftp) parse(client *pkgsftp.Client, remotePath string) ([]string, error
 
 }
 
-func (s *sftp) downloadOne(client *pkgsftp.Client, remoteFile string) ([]byte, error) {
+func (s *sftp) downloadOne(client *pkgsftp.Client, file string) ([]byte, error) {
 
 	var data []byte
 
-	err := s.retry(fmt.Sprintf(`download %s`, remoteFile), func() error {
-		f, err := client.Open(remoteFile)
+	err := s.retry(fmt.Sprintf(`download %s`, file), func() error {
+		f, err := client.Open(file)
 		if err != nil {
-			return fmt.Errorf(`opening remote file %q: %w`, remoteFile, err)
+			return fmt.Errorf(`opening remote file %q: %w`, file, err)
 		}
 		defer f.Close()
 
 		b, err := io.ReadAll(f)
 		if err != nil {
-			return fmt.Errorf(`reading remote file %q: %w`, remoteFile, err)
+			return fmt.Errorf(`reading remote file %q: %w`, file, err)
 		}
 		data = b
 		return nil
