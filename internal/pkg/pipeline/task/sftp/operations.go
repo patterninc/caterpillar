@@ -83,7 +83,7 @@ func (s *sftp) download(client *pkgsftp.Client, output chan<- *record.Record) er
 		return err
 	}
 
-	paths, err := s.resolveDownloadPaths(client, remotePath)
+	paths, err := s.parse(client, remotePath)
 	if err != nil {
 		return err
 	}
@@ -103,11 +103,12 @@ func (s *sftp) download(client *pkgsftp.Client, output chan<- *record.Record) er
 
 }
 
-// resolveDownloadPaths turns Path into the list of files to download. A plain
-// path is a single file; a glob is matched with doublestar (so ** and {a,b}
-// work, like the file task) by walking the static base directory and matching
-// each file against the pattern. A bare directory is not expanded — glob it.
-func (s *sftp) resolveDownloadPaths(client *pkgsftp.Client, remotePath string) ([]string, error) {
+// parse turns Path into the list of files to download (named to mirror the
+// file task's reader.parse). A plain path is a single file; a glob is matched
+// with doublestar (so ** and {a,b} work, like the file task) by walking the
+// static base directory and matching each file against the pattern. A bare
+// directory is not expanded — glob it.
+func (s *sftp) parse(client *pkgsftp.Client, remotePath string) ([]string, error) {
 
 	if !containsGlob(remotePath) {
 		return []string{remotePath}, nil
