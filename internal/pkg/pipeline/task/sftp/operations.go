@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"path"
+	pathpkg "path"
 	"strings"
 
 	"github.com/bmatcuk/doublestar"
@@ -45,7 +45,7 @@ func (s *sftp) uploadOne(client *pkgsftp.Client, file string, data []byte) error
 
 	return s.retry(fmt.Sprintf(`upload %s`, file), func() error {
 
-		if dir := path.Dir(file); dir != `` && dir != `.` {
+		if dir := pathpkg.Dir(file); dir != `` && dir != `.` {
 			if err := client.MkdirAll(dir); err != nil {
 				return fmt.Errorf(`creating remote dir %q: %w`, dir, err)
 			}
@@ -78,12 +78,12 @@ func (s *sftp) uploadOne(client *pkgsftp.Client, file string, data []byte) error
 // downstream task can name what it writes (mirrors file.readFile).
 func (s *sftp) download(client *pkgsftp.Client, output chan<- *record.Record) error {
 
-	remotePath, err := s.Path.Get(nil)
+	path, err := s.Path.Get(nil)
 	if err != nil {
 		return err
 	}
 
-	paths, err := s.parse(client, remotePath)
+	paths, err := s.parse(client, path)
 	if err != nil {
 		return err
 	}
@@ -95,7 +95,7 @@ func (s *sftp) download(client *pkgsftp.Client, output chan<- *record.Record) er
 		}
 
 		rc := &record.Record{Context: ctx}
-		rc.SetContextValue(string(task.CtxKeyFileNameWrite), textutil.SlugifyFileName(path.Base(p)))
+		rc.SetContextValue(string(task.CtxKeyFileNameWrite), textutil.SlugifyFileName(pathpkg.Base(p)))
 		s.SendData(rc.Context, data, output)
 	}
 
@@ -107,20 +107,20 @@ func (s *sftp) download(client *pkgsftp.Client, output chan<- *record.Record) er
 // A glob is matched with doublestar by walking the static base directory and matching
 // each file against the pattern; a plain path matches itself. Matching no files
 // is an error — the named file is missing, or the glob matched nothing.
-func (s *sftp) parse(client *pkgsftp.Client, remotePath string) ([]string, error) {
+func (s *sftp) parse(client *pkgsftp.Client, path string) ([]string, error) {
 
 	var matches []string
-	walker := client.Walk(globBase(remotePath))
+	walker := client.Walk(globBase(path))
 	for walker.Step() {
 		if err := walker.Err(); err != nil {
-			return nil, fmt.Errorf(`walking %q: %w`, remotePath, err)
+			return nil, fmt.Errorf(`walking %q: %w`, path, err)
 		}
 		if walker.Stat().IsDir() {
 			continue
 		}
-		ok, err := doublestar.Match(remotePath, walker.Path())
+		ok, err := doublestar.Match(path, walker.Path())
 		if err != nil {
-			return nil, fmt.Errorf(`bad glob %q: %w`, remotePath, err)
+			return nil, fmt.Errorf(`bad glob %q: %w`, path, err)
 		}
 		if ok {
 			matches = append(matches, walker.Path())
@@ -128,7 +128,7 @@ func (s *sftp) parse(client *pkgsftp.Client, remotePath string) ([]string, error
 	}
 
 	if len(matches) == 0 {
-		return nil, fmt.Errorf(`no files found at %q`, remotePath)
+		return nil, fmt.Errorf(`no files found at %q`, path)
 	}
 
 	return matches, nil
