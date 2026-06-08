@@ -61,6 +61,10 @@ func (c *Client) GetObjects(ctx context.Context, bucketName, pattern string) ([]
 
 	}
 
+	if len(matchingObjects) == 0 {
+		return nil, fmt.Errorf("no files found at s3://%s/%s", bucketName, pattern)
+	}
+
 	return matchingObjects, nil
 
 }
