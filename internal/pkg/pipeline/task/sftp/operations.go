@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"path"
+	pathpkg "path"
 	"strings"
 
+	"github.com/bmatcuk/doublestar"
 	pkgsftp "github.com/pkg/sftp"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
@@ -14,16 +15,11 @@ import (
 	"github.com/patterninc/caterpillar/internal/pkg/textutil"
 )
 
-// upload (sink): write each incoming record's data to the server. When
-// remote_path is a directory, the upstream filename (carried in the record
-// context by the source task) is appended, so `file -> sftp` composes with no
-// glue.
+// upload (sink): write each incoming record's data to Path, used as-is per
+// record. To name files from the source, template Path with a context value —
+// e.g. {{ context "CATERPILLAR_FILE_NAME_WRITE" }} for a file source, or
+// {{ context "CATERPILLAR_ARCHIVE_FILE_NAME_WRITE" }} for an archive source.
 func (s *sftp) upload(client *pkgsftp.Client, input <-chan *record.Record) error {
-
-	// Cache isDirLike per remote_path so a static (or repeated) destination is
-	// stat-ed once per run rather than once per record. Local to this call so
-	// concurrent workers don't share it.
-	dirCache := make(map[string]bool)
 
 	for {
 		rc, ok := s.GetRecord(input)
@@ -31,17 +27,12 @@ func (s *sftp) upload(client *pkgsftp.Client, input <-chan *record.Record) error
 			break
 		}
 
-		remotePath, err := s.RemotePath.Get(rc)
+		file, err := s.Path.Get(rc)
 		if err != nil {
 			return err
 		}
 
-		remoteFile := remotePath
-		if filename, found := rc.GetContextValue(string(task.CtxKeyFileNameWrite)); found && filename != `` && s.isDirLikeCached(client, remotePath, dirCache) {
-			remoteFile = path.Join(remotePath, filename)
-		}
-
-		if err := s.uploadOne(client, remoteFile, rc.Data); err != nil {
+		if err := s.uploadOne(client, file, rc.Data); err != nil {
 			return err
 		}
 	}
@@ -50,32 +41,30 @@ func (s *sftp) upload(client *pkgsftp.Client, input <-chan *record.Record) error
 
 }
 
-func (s *sftp) uploadOne(client *pkgsftp.Client, remoteFile string, data []byte) error {
+func (s *sftp) uploadOne(client *pkgsftp.Client, file string, data []byte) error {
 
-	return s.retry(fmt.Sprintf(`upload %s`, remoteFile), func() error {
+	return s.retry(fmt.Sprintf(`upload %s`, file), func() error {
 
-		if dir := path.Dir(remoteFile); dir != `` && dir != `.` {
+		if dir := pathpkg.Dir(file); dir != `` && dir != `.` {
 			if err := client.MkdirAll(dir); err != nil {
 				return fmt.Errorf(`creating remote dir %q: %w`, dir, err)
 			}
 		}
 
-		f, err := client.Create(remoteFile)
+		f, err := client.Create(file)
 		if err != nil {
-			return fmt.Errorf(`creating remote file %q: %w`, remoteFile, err)
+			return fmt.Errorf(`creating remote file %q: %w`, file, err)
 		}
 
 		if _, err := io.Copy(f, bytes.NewReader(data)); err != nil {
-			f.Close() // best effort; the copy error is the underlying failure
-			return fmt.Errorf(`writing remote file %q: %w`, remoteFile, err)
+			f.Close()
+			return fmt.Errorf(`writing remote file %q: %w`, file, err)
 		}
 
-		// Check the Close error explicitly: for SFTP writes the final flush/
-		// commit happens here and may be the only place a late failure (e.g.
-		// server out of space) surfaces. Ignoring it could report success for
-		// an incomplete upload.
+		// Check Close: for SFTP writes the final flush happens here and may be the
+		// only place a late failure (e.g. server out of space) surfaces.
 		if err := f.Close(); err != nil {
-			return fmt.Errorf(`closing remote file %q: %w`, remoteFile, err)
+			return fmt.Errorf(`closing remote file %q: %w`, file, err)
 		}
 
 		return nil
@@ -84,18 +73,17 @@ func (s *sftp) uploadOne(client *pkgsftp.Client, remoteFile string, data []byte)
 
 }
 
-// download (source): read file(s) from remote_path and emit one record per
-// file. remote_path may be a single file, a glob, or a directory. The basename
-// is stored in the record context so a downstream file task can name the object
-// it writes (mirrors file.readFile).
+// download (source): read file(s) at Path (a single file or a glob) and emit
+// one record per file. The base name is stored in the record context so a
+// downstream task can name what it writes (mirrors file.readFile).
 func (s *sftp) download(client *pkgsftp.Client, output chan<- *record.Record) error {
 
-	remotePath, err := s.RemotePath.Get(nil)
+	path, err := s.Path.Get(nil)
 	if err != nil {
 		return err
 	}
 
-	paths, err := s.resolveDownloadPaths(client, remotePath)
+	paths, err := s.parse(client, path)
 	if err != nil {
 		return err
 	}
@@ -107,7 +95,7 @@ func (s *sftp) download(client *pkgsftp.Client, output chan<- *record.Record) er
 		}
 
 		rc := &record.Record{Context: ctx}
-		rc.SetContextValue(string(task.CtxKeyFileNameWrite), textutil.SlugifyFileName(path.Base(p)))
+		rc.SetContextValue(string(task.CtxKeyFileNameWrite), textutil.SlugifyFileName(pathpkg.Base(p)))
 		s.SendData(rc.Context, data, output)
 	}
 
@@ -115,49 +103,52 @@ func (s *sftp) download(client *pkgsftp.Client, output chan<- *record.Record) er
 
 }
 
-func (s *sftp) resolveDownloadPaths(client *pkgsftp.Client, remotePath string) ([]string, error) {
+// parse turns Path into the list of files to download.
+// A glob is matched with doublestar by walking the static base directory and matching
+// each file against the pattern; a plain path matches itself. Matching no files
+// is an error — the named file is missing, or the glob matched nothing.
+func (s *sftp) parse(client *pkgsftp.Client, path string) ([]string, error) {
 
-	if containsGlob(remotePath) {
-		matches, err := client.Glob(remotePath)
-		if err != nil {
-			return nil, fmt.Errorf(`globbing %q: %w`, remotePath, err)
+	var matches []string
+	walker := client.Walk(globBase(path))
+	for walker.Step() {
+		if err := walker.Err(); err != nil {
+			return nil, fmt.Errorf(`walking %q: %w`, path, err)
 		}
-		return matches, nil
+		if walker.Stat().IsDir() {
+			continue
+		}
+		ok, err := doublestar.Match(path, walker.Path())
+		if err != nil {
+			return nil, fmt.Errorf(`bad glob %q: %w`, path, err)
+		}
+		if ok {
+			matches = append(matches, walker.Path())
+		}
 	}
 
-	// A directory expands to the (non-directory) files directly inside it.
-	if info, err := client.Stat(remotePath); err == nil && info.IsDir() {
-		entries, err := client.ReadDir(remotePath)
-		if err != nil {
-			return nil, fmt.Errorf(`reading remote dir %q: %w`, remotePath, err)
-		}
-		paths := make([]string, 0, len(entries))
-		for _, e := range entries {
-			if !e.IsDir() {
-				paths = append(paths, path.Join(remotePath, e.Name()))
-			}
-		}
-		return paths, nil
+	if len(matches) == 0 {
+		return nil, fmt.Errorf(`no files found at %q`, path)
 	}
 
-	return []string{remotePath}, nil
+	return matches, nil
 
 }
 
-func (s *sftp) downloadOne(client *pkgsftp.Client, remoteFile string) ([]byte, error) {
+func (s *sftp) downloadOne(client *pkgsftp.Client, file string) ([]byte, error) {
 
 	var data []byte
 
-	err := s.retry(fmt.Sprintf(`download %s`, remoteFile), func() error {
-		f, err := client.Open(remoteFile)
+	err := s.retry(fmt.Sprintf(`download %s`, file), func() error {
+		f, err := client.Open(file)
 		if err != nil {
-			return fmt.Errorf(`opening remote file %q: %w`, remoteFile, err)
+			return fmt.Errorf(`opening remote file %q: %w`, file, err)
 		}
 		defer f.Close()
 
 		b, err := io.ReadAll(f)
 		if err != nil {
-			return fmt.Errorf(`reading remote file %q: %w`, remoteFile, err)
+			return fmt.Errorf(`reading remote file %q: %w`, file, err)
 		}
 		data = b
 		return nil
@@ -167,32 +158,20 @@ func (s *sftp) downloadOne(client *pkgsftp.Client, remoteFile string) ([]byte, e
 
 }
 
-// isDirLikeCached wraps isDirLike with a per-run cache keyed on remotePath, so
-// the same destination is stat-ed at most once instead of once per record.
-func (s *sftp) isDirLikeCached(client *pkgsftp.Client, remotePath string, cache map[string]bool) bool {
-	if v, ok := cache[remotePath]; ok {
-		return v
+// globBase returns the longest leading directory of pattern with no glob
+// metacharacter — the point from which to start walking.
+func globBase(pattern string) string {
+	i := strings.IndexAny(pattern, `*?[{`)
+	if i < 0 {
+		return pattern
 	}
-	v := s.isDirLike(client, remotePath)
-	cache[remotePath] = v
-	return v
-}
-
-// isDirLike reports whether remotePath should be treated as a directory to
-// place an uploaded file into: either it ends with "/" or it already exists as
-// a directory on the server.
-func (s *sftp) isDirLike(client *pkgsftp.Client, remotePath string) bool {
-
-	if strings.HasSuffix(remotePath, `/`) {
-		return true
+	dir := pattern[:i]
+	switch j := strings.LastIndex(dir, `/`); {
+	case j < 0:
+		return `.`
+	case j == 0:
+		return `/`
+	default:
+		return dir[:j]
 	}
-	if info, err := client.Stat(remotePath); err == nil && info.IsDir() {
-		return true
-	}
-	return false
-
-}
-
-func containsGlob(p string) bool {
-	return strings.ContainsAny(p, `*?[`)
 }

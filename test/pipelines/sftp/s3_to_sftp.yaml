@@ -18,7 +18,8 @@ tasks:
     private_key: |
       {{ indent 6 (secret "/data/sftp/clientX/private_key") }}
     host_key: '{{ secret "/data/sftp/clientX/host_key" }}'
-    remote_path: /incoming/
+    # path is used as-is per record; template the source filename onto it.
+    path: '/incoming/{{ context "CATERPILLAR_FILE_NAME_WRITE" }}'
     timeout: 30s
     max_retries: 3
     retry_delay: 2s
