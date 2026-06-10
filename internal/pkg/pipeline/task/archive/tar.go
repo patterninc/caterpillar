@@ -50,6 +50,7 @@ func (t *tarArchive) Read() {
 					log.Fatal(err)
 				}
 				rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), textutil.SlugifyFileName(filepath.Base(header.Name)))
+				rc.SetContextValue(string(task.CtxKeyFilePathWrite), textutil.SlugifyFileName(header.Name))
 				t.SendData(rc.Context, buf, t.OutputChan)
 			}
 

@@ -18,6 +18,8 @@ The task receives records from its input channel, applies the archiving operatio
 
 During **unpack**, the sanitized base filename of each extracted entry is stored in the record context under the key `CATERPILLAR_ARCHIVE_FILE_NAME_WRITE`. The stem is lowercased with non-alphanumeric characters replaced by underscores, while the extension is preserved and lowercased (e.g. `"Report 1.CSV"` → `"report_1.csv"`).
 
+The full entry path within the archive is also stored under `CATERPILLAR_FILE_PATH_WRITE`, sanitized with the same rules so separators collapse to underscores (e.g. `sub/dir/Report 1.CSV` → `sub_dir_report_1.csv`). Use it to give each unpacked entry a destination name that encodes its path inside the archive.
+
 ## Configuration Fields
 
 | Field | Type | Default | Description |

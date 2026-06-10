@@ -96,6 +96,7 @@ func (s *sftp) download(client *pkgsftp.Client, output chan<- *record.Record) er
 
 		rc := &record.Record{Context: ctx}
 		rc.SetContextValue(string(task.CtxKeyFileNameWrite), textutil.SlugifyFileName(pathpkg.Base(p)))
+		rc.SetContextValue(string(task.CtxKeyFilePathWrite), textutil.SlugifyFileName(p))
 		s.SendData(rc.Context, data, output)
 	}
 

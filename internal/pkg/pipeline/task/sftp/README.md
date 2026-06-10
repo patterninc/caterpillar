@@ -17,7 +17,7 @@ Like the `file` task, the role is **inferred from the channels**:
 
 | The task has… | Role | What it does |
 |---------------|------|--------------|
-| **no input** (it is the first task) | **source — download** | Reads file(s) at `path` (a single file or a glob; doublestar `**` and `{a,b}` are supported, like the file task) and emits one record per file. The base name is stored in the record context (`CATERPILLAR_FILE_NAME_WRITE`) so a downstream task can name what it writes. |
+| **no input** (it is the first task) | **source — download** | Reads file(s) at `path` (a single file or a glob; doublestar `**` and `{a,b}` are supported, like the file task) and emits one record per file. The base name is stored in the record context (`CATERPILLAR_FILE_NAME_WRITE`), and the full sanitized source path in `CATERPILLAR_FILE_PATH_WRITE`, so a downstream task can name what it writes. |
 | **an input** | **sink — upload** | Writes each incoming record's data to `path`, used as-is per record. To name files from the source, template `path` — e.g. `{{ context "CATERPILLAR_FILE_NAME_WRITE" }}`. |
 
 It cannot be both: configuring the task with both an input and an output is an error.
@@ -120,4 +120,4 @@ tasks:
 
 **`task_concurrency` opens multiple connections.** Setting `task_concurrency` above `1` makes the task open one SSH connection per worker and transfer files in parallel. This is faster, but it increases memory use (more files in memory at once), and some servers limit the number of connections per user.
 
-**Nested directories are not preserved.** Each file is identified by its base name only. If you download files from nested folders with a recursive glob (for example `/data/**/*.csv`), they all land in the single destination directory, and files with the same name overwrite each other. To keep a folder structure, use a separate `file → sftp` pair for each folder, with the target path set for each one.
+**Nested directories are not preserved.** If you template the destination with `CATERPILLAR_FILE_NAME_WRITE`, each file is identified by its base name only: download files from nested folders with a recursive glob (for example `/data/**/*.csv`) and they all land in the single destination directory, where files with the same name overwrite each other. To avoid collisions, template with `CATERPILLAR_FILE_PATH_WRITE` instead — it encodes the full source path into the (flat) filename, so same-named files from different folders stay distinct. To keep an actual folder structure on the target, use a separate `file → sftp` pair for each folder, with the target path set for each one.

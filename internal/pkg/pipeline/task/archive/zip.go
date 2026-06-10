@@ -41,6 +41,7 @@ func (z *zipArchive) Read() {
 			if f.FileInfo().Mode().IsRegular() {
 
 				rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), textutil.SlugifyFileName(filepath.Base(f.Name)))
+				rc.SetContextValue(string(task.CtxKeyFilePathWrite), textutil.SlugifyFileName(f.Name))
 
 				fs, err := f.Open()
 				if err != nil {

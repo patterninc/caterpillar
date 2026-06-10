@@ -22,6 +22,8 @@ The task automatically determines its mode based on the presence of input/output
 
 In read mode, the sanitized base filename is stored in the record context under the key `CATERPILLAR_FILE_NAME_WRITE`. The stem is lowercased with non-alphanumeric characters replaced by underscores, while the extension is preserved and lowercased (e.g. `"Report 1.CSV"` → `"report_1.csv"`).
 
+The full source path is also stored under `CATERPILLAR_FILE_PATH_WRITE`, sanitized with the same rules. Because slashes and other separators collapse to underscores, the value is a single flat filename segment with no directory structure (e.g. `s3://prod-bucket/reports/type=X/2026-06-10/sub/Report (1).tsv` → `s3_prod_bucket_reports_type_x_2026_06_10_sub_report_1.tsv`). Use it when you need a unique destination name that encodes the whole source path. The extension is preserved, so don't re-append it in the destination `path`.
+
 ## Configuration Fields
 
 | Field | Type | Default | Description |
