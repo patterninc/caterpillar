@@ -46,6 +46,7 @@ type kafka struct {
 	Timeout            duration.Duration    `yaml:"timeout,omitempty" json:"timeout,omitempty"`                                                                // connection, read, write, commit timeout
 	BatchFlushInterval duration.Duration    `yaml:"batch_flush_interval,omitempty" json:"batch_flush_interval,omitempty"`                                      // interval to flush incomplete batches
 	GroupID            string               `yaml:"group_id,omitempty" json:"group_id,omitempty"`                                                              // the consumer group id (optional)
+	ClientRack         string               `yaml:"client_rack,omitempty" json:"client_rack,omitempty"`                                                        // rack id for enabling rack-aware features
 	AutoOffsetReset    string               `yaml:"auto_offset_reset,omitempty" json:"auto_offset_reset,omitempty" validate:"omitempty,oneof=earliest latest"` // group-mode reset policy when stored offset is out of range; "earliest" (default) or "latest"
 	BatchSize          int                  `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`                                                          // max messages per producer batch (maps to batch.num.messages); defaults to 100
 	MaxRecords         int                  `yaml:"max_records,omitempty" json:"max_records,omitempty" validate:"omitempty,gte=0"`                             // stop reading after this many records (0 = unlimited); negative values are rejected at validation
@@ -406,6 +407,10 @@ func (k *kafka) buildConsumerConfig() (*ckafka.ConfigMap, error) {
 	_ = cfg.SetKey("isolation.level", "read_committed")
 	_ = cfg.SetKey("group.id", k.GroupID)
 
+	if k.ClientRack != "" {
+		_ = cfg.SetKey("client.rack", k.ClientRack)
+	}
+
 	return cfg, nil
 }
 
@@ -420,6 +425,10 @@ func (k *kafka) buildStandaloneConsumerConfig() (*ckafka.ConfigMap, error) {
 	_ = cfg.SetKey("enable.auto.commit", false)
 	_ = cfg.SetKey("auto.offset.reset", "earliest")
 	_ = cfg.SetKey("isolation.level", "read_committed")
+
+	if k.ClientRack != "" {
+		_ = cfg.SetKey("client.rack", k.ClientRack)
+	}
 
 	return cfg, nil
 }
