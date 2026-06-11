@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"strings"
 	"sync"
 	"time"
@@ -94,9 +95,11 @@ func (h *httpCore) getClient() *http.Client {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.MaxConnsPerHost = defaultMaxConnsPerHost
 		transport.MaxIdleConnsPerHost = defaultMaxConnsPerHost
+		jar, _ := cookiejar.New(nil)
 		h.client = &http.Client{
 			Timeout:   time.Duration(h.Timeout),
 			Transport: transport,
+			Jar:       jar,
 		}
 	})
 	return h.client
@@ -320,9 +323,11 @@ func (h *httpCore) call(endpoint string) (*result, error) {
 				}
 				break
 			}
+			jar, _ := cookiejar.New(nil)
 			client = &http.Client{
 				Timeout:   time.Duration(h.Timeout),
 				Transport: transport,
+				Jar:       jar,
 			}
 		}
 
