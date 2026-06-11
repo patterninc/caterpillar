@@ -119,7 +119,7 @@ tasks:
     bootstrap_server: kafka.local:9092
     topic: input-topic
     group_id: my-consumer-group
-    client_rack: us-west-2a   # match the broker.rack of broker closest to consumer's location
+    client_rack: us-west-2a   # match the broker.rack of the broker closest to the consumer's location
     timeout: 25s
 ```
 
