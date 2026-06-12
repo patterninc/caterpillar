@@ -34,6 +34,7 @@ There are two read modes, controlled by whether `group_id` is set:
 | `max_records` | int | `0` (unlimited) | Read-mode cap on records forwarded downstream. The reader stops cleanly once this many messages have been sent. In group mode, offsets up to the last forwarded record are committed on shutdown. Must be `>= 0`; negative values are rejected at validation. |
 | `group_id` | string | - | Consumer group id. If omitted, standalone mode is used (reads from beginning, no offset commits). |
 | `auto_offset_reset` | string | `latest` | Group-mode reset policy when no committed offset exists or the stored offset is out of range. `latest` skips to the tail; `earliest` reads from the beginning of the available log. Ignored in standalone mode. |
+| `client_rack` | string | - | Read-mode rack id, set as librdkafka `client.rack`. Lets the consumer use Kafka's rack-aware features to cut cross-AZ data transfers. Applies to standalone and group consumer modes; ignored for producers. |
 | `server_auth_type` | string | `none` | `none` or `tls` — server certificate verification mode |
 | `cert` | string | - | CA certificate PEM/CRT content used when `server_auth_type: tls` (alternatively use `cert_path`) |
 | `cert_path` | string | - | Path to CA certificate (PEM/CRT) |
@@ -107,6 +108,18 @@ tasks:
     bootstrap_server: kafka.local:9092
     topic: input-topic
     group_id: my-consumer-group
+    timeout: 25s
+```
+
+### Rack-aware consumer
+```yaml
+tasks:
+  - name: read_in_zone
+    type: kafka
+    bootstrap_server: kafka.local:9092
+    topic: input-topic
+    group_id: my-consumer-group
+    client_rack: us-west-2a   # match the broker.rack of the broker closest to the consumer's location
     timeout: 25s
 ```
 
