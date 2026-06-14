@@ -20,6 +20,7 @@ const (
 	defaultFlushInterval    = duration.Duration(2 * time.Second)
 	defaultCommitIntervalMs = 5000
 	defaultBatchSize        = 100
+	defaultAutoOffsetReset  = "latest"
 
 	// standaloneGroupPrefix is the group.id used for direct-assign reads (no group_id set); broker needs PREFIXED ACL on this prefix.
 	standaloneGroupPrefix = "caterpillar-standalone-"
@@ -33,23 +34,26 @@ type schemaRegistryConfig struct {
 }
 
 type kafka struct {
-	task.Base          `yaml:",inline" json:",inline"`
-	BootstrapServer    string               `yaml:"bootstrap_server" json:"bootstrap_server"`                             // "host:port"
-	Topic              string               `yaml:"topic" json:"topic"`                                                   // topic to read from or write to
-	ServerAuthType     string               `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"`         // "none", "tls"
-	Cert               string               `yaml:"cert,omitempty" json:"cert,omitempty"`                                 // used for Server TLS authentication
-	CertPath           string               `yaml:"cert_path,omitempty" json:"cert_path,omitempty"`                       // used for Server TLS authentication
-	UserAuthType       string               `yaml:"user_auth_type" json:"user_auth_type"`                                 // "none", "sasl", "scram"
-	Username           string               `yaml:"username,omitempty" json:"username,omitempty"`                         // used for user SASL/Scram authentication
-	Password           string               `yaml:"password,omitempty" json:"password,omitempty"`                         // used for user SASL/Scram authentication
-	Timeout            duration.Duration    `yaml:"timeout,omitempty" json:"timeout,omitempty"`                           // connection, read, write, commit timeout
-	BatchFlushInterval duration.Duration    `yaml:"batch_flush_interval,omitempty" json:"batch_flush_interval,omitempty"` // interval to flush incomplete batches
-	GroupID            string               `yaml:"group_id,omitempty" json:"group_id,omitempty"`                         // the consumer group id (optional)
-	BatchSize          int                  `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`                     // max messages per producer batch (maps to batch.num.messages); defaults to 100
-	RetryLimit         *int                 `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`                   // number of retries for read errors
-	Idempotent         bool                 `yaml:"idempotent,omitempty" json:"idempotent,omitempty"`                     // enable idempotent producer
-	Format             string               `yaml:"format,omitempty" json:"format,omitempty"`                             // message format: "json" (default) or "avro"
-	SchemaRegistry     schemaRegistryConfig `yaml:",inline" json:",inline"`                                                // Schema Registry connection — required when format is "avro"
+	task.ServerBase    `yaml:",inline" json:",inline"`
+	BootstrapServer    string               `yaml:"bootstrap_server" json:"bootstrap_server"`                                                                  // "host:port"
+	Topic              string               `yaml:"topic" json:"topic"`                                                                                        // topic to read from or write to
+	ServerAuthType     string               `yaml:"server_auth_type,omitempty" json:"server_auth_type,omitempty"`                                              // "none", "tls"
+	Cert               string               `yaml:"cert,omitempty" json:"cert,omitempty"`                                                                      // used for Server TLS authentication
+	CertPath           string               `yaml:"cert_path,omitempty" json:"cert_path,omitempty"`                                                            // used for Server TLS authentication
+	UserAuthType       string               `yaml:"user_auth_type" json:"user_auth_type"`                                                                      // "none", "sasl", "scram"
+	Username           string               `yaml:"username,omitempty" json:"username,omitempty"`                                                              // used for user SASL/Scram authentication
+	Password           string               `yaml:"password,omitempty" json:"password,omitempty"`                                                              // used for user SASL/Scram authentication
+	Timeout            duration.Duration    `yaml:"timeout,omitempty" json:"timeout,omitempty"`                                                                // connection, read, write, commit timeout
+	BatchFlushInterval duration.Duration    `yaml:"batch_flush_interval,omitempty" json:"batch_flush_interval,omitempty"`                                      // interval to flush incomplete batches
+	GroupID            string               `yaml:"group_id,omitempty" json:"group_id,omitempty"`                                                              // the consumer group id (optional)
+	ClientRack         string               `yaml:"client_rack,omitempty" json:"client_rack,omitempty"`                                                        // rack id for enabling rack-aware features
+	AutoOffsetReset    string               `yaml:"auto_offset_reset,omitempty" json:"auto_offset_reset,omitempty" validate:"omitempty,oneof=earliest latest"` // group-mode reset policy when stored offset is out of range; "earliest" (default) or "latest"
+	BatchSize          int                  `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`                                                          // max messages per producer batch (maps to batch.num.messages); defaults to 100
+	MaxRecords         int                  `yaml:"max_records,omitempty" json:"max_records,omitempty" validate:"omitempty,gte=0"`                             // stop reading after this many records (0 = unlimited); negative values are rejected at validation
+	RetryLimit         *int                 `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`                                                        // number of retries for read errors
+	Idempotent         bool                 `yaml:"idempotent,omitempty" json:"idempotent,omitempty"`                                                          // enable idempotent producer
+	Format             string               `yaml:"format,omitempty" json:"format,omitempty"`                                                                  // message format: "json" (default) or "avro"
+	SchemaRegistry     schemaRegistryConfig `yaml:",inline" json:",inline"`                                                                                    // Schema Registry connection — required when format is "avro"
 }
 
 func New() (task.Task, error) {
@@ -81,6 +85,9 @@ func (k *kafka) Init() error {
 	if k.RetryLimit == nil || *k.RetryLimit < 0 {
 		k.RetryLimit = new(int)
 		*k.RetryLimit = defaultRetryLimit
+	}
+	if k.AutoOffsetReset == "" {
+		k.AutoOffsetReset = defaultAutoOffsetReset
 	}
 
 	cfg, err := k.buildBaseConfig()
@@ -174,6 +181,9 @@ func (k *kafka) write(input <-chan *record.Record) error {
 	// Always flush so enqueued messages get delivery reports and the goroutine exits cleanly.
 	timeout := time.Duration(k.Timeout)
 	remaining := p.Flush(int(timeout.Milliseconds()))
+
+	// Close the producer BEFORE closing deliveryCh:
+	p.Close()
 	close(deliveryCh)
 	wg.Wait()
 
@@ -191,6 +201,12 @@ func (k *kafka) write(input <-chan *record.Record) error {
 
 // read polls messages from the topic, standalone mode reads from beginning on every run, group mode resumes from committed offsets.
 func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
+	if k.EndAfter > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(k.EndAfter))
+		defer cancel()
+	}
+
 	standalone := k.GroupID == ""
 
 	var cfg *ckafka.ConfigMap
@@ -232,7 +248,15 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 
 	timeout := time.Duration(k.Timeout)
 	retriesNumber := 0
+	recordsRead := 0
 	for {
+		select {
+		case <-ctx.Done():
+			fmt.Printf("kafka end_after duration reached for topic %s, stopping reader\n", k.Topic)
+			return nil
+		default:
+		}
+
 		msg, err := c.ReadMessage(timeout)
 		if err != nil {
 			if kafkaErr, ok := err.(ckafka.Error); ok && kafkaErr.Code() == ckafka.ErrTimedOut {
@@ -266,6 +290,12 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 				fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
 					k.Topic, msg.TopicPartition.Partition, err)
 			}
+		}
+
+		recordsRead++
+		if k.MaxRecords > 0 && recordsRead >= k.MaxRecords {
+			fmt.Printf("kafka max_records (%d) reached for topic %s, stopping reader\n", k.MaxRecords, k.Topic)
+			return nil
 		}
 	}
 }
@@ -368,7 +398,7 @@ func (k *kafka) buildConsumerConfig() (*ckafka.ConfigMap, error) {
 		return nil, err
 	}
 
-	_ = cfg.SetKey("auto.offset.reset", "earliest")
+	_ = cfg.SetKey("auto.offset.reset", k.AutoOffsetReset)
 	_ = cfg.SetKey("session.timeout.ms", 30000)
 	_ = cfg.SetKey("heartbeat.interval.ms", 3000)
 	_ = cfg.SetKey("enable.auto.offset.store", false)
@@ -376,6 +406,10 @@ func (k *kafka) buildConsumerConfig() (*ckafka.ConfigMap, error) {
 	_ = cfg.SetKey("auto.commit.interval.ms", defaultCommitIntervalMs)
 	_ = cfg.SetKey("isolation.level", "read_committed")
 	_ = cfg.SetKey("group.id", k.GroupID)
+
+	if k.ClientRack != "" {
+		_ = cfg.SetKey("client.rack", k.ClientRack)
+	}
 
 	return cfg, nil
 }
@@ -391,6 +425,10 @@ func (k *kafka) buildStandaloneConsumerConfig() (*ckafka.ConfigMap, error) {
 	_ = cfg.SetKey("enable.auto.commit", false)
 	_ = cfg.SetKey("auto.offset.reset", "earliest")
 	_ = cfg.SetKey("isolation.level", "read_committed")
+
+	if k.ClientRack != "" {
+		_ = cfg.SetKey("client.rack", k.ClientRack)
+	}
 
 	return cfg, nil
 }

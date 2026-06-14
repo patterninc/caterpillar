@@ -1,0 +1,26 @@
+# Copy files from S3 to a client's SFTP server.
+# The file task reads from S3 (source); the sftp task has an input, so it acts
+# as a sink and uploads. Credentials are read from SSM with the secret
+# template. The server is verified with host_key.
+tasks:
+  - name: read_from_s3
+    type: file
+    path: s3://my-bucket/outbound/clientX/*.csv
+    region: us-west-2
+  - name: upload_to_client_sftp
+    type: sftp
+    host: sftp.clientX.example.com
+    port: 22
+    username: '{{ secret "/data/sftp/clientX/username" }}'
+    # Authenticate with a private key OR a password (set exactly one). For
+    # password auth, remove the private_key block below and add a `password`
+    # field that reads from SSM with the secret template (see the README).
+    private_key: |
+      {{ indent 6 (secret "/data/sftp/clientX/private_key") }}
+    host_key: '{{ secret "/data/sftp/clientX/host_key" }}'
+    # path is used as-is per record; template the source filename onto it.
+    path: '/incoming/{{ context "CATERPILLAR_FILE_NAME_WRITE" }}'
+    timeout: 30s
+    max_retries: 3
+    retry_delay: 2s
+    fail_on_error: true

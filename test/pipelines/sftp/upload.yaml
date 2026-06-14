@@ -1,0 +1,19 @@
+# Read a local file and upload it to an SFTP server.
+# The sftp task is placed AFTER a source, so it has an input and acts as a
+# sink -> upload (role is inferred from the channels, like the file task).
+tasks:
+  - name: read_local_file
+    type: file
+    path: test/pipelines/birds.txt
+  - name: upload_to_sftp
+    type: sftp
+    host: '{{ secret "/sftp/host" }}'
+    port: 22
+    username: '{{ secret "/sftp/username" }}'
+    password: '{{ secret "/sftp/password" }}'
+    # host_key verifies the server's identity (prevents man-in-the-middle).
+    # Get the value once with: ssh-keyscan -t ed25519 -p <port> <host>
+    host_key: '{{ secret "/sftp/host_key" }}'
+    # path is used as-is per record; template the source filename onto it
+    # (the file source stores it in CATERPILLAR_FILE_NAME_WRITE).
+    path: '/upload/{{ context "CATERPILLAR_FILE_NAME_WRITE" }}'

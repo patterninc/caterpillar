@@ -8,8 +8,9 @@ tasks:
     password: {{ secret "/kafka/test-caterpillar/secret" }}
     server_auth_type: tls
     timeout: 2s
-    end_after: 30s             # stop reading after 30s of wall-clock time, regardless of traffic
-    auto_offset_reset: latest  # in group mode, skip historical data if stored offset is missing or out of range
+    max_records: 10            # stop after 10 records have been forwarded downstream
+    end_after: 30s             # safety net: stop after 30s even if max_records is not reached
+    auto_offset_reset: latest
     cert: |
       {{ indent 6 (secret "/kafka/ca-cert") }}
 
