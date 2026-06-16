@@ -20,6 +20,7 @@ require (
 	github.com/hamba/avro/v2 v2.24.0
 	github.com/itchyny/gojq v0.12.17
 	github.com/jhillyerd/enmime v1.3.0
+	github.com/patterninc/grate v0.1.0
 	github.com/pkg/sftp v1.13.10
 	github.com/stretchr/testify v1.11.1
 	github.com/xuri/excelize/v2 v2.10.0
