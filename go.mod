@@ -20,10 +20,10 @@ require (
 	github.com/hamba/avro/v2 v2.24.0
 	github.com/itchyny/gojq v0.12.17
 	github.com/jhillyerd/enmime v1.3.0
-	github.com/patterninc/grate v0.1.0
 	github.com/pkg/sftp v1.13.10
 	github.com/stretchr/testify v1.11.1
 	github.com/xuri/excelize/v2 v2.10.0
+	github.com/yamitzky/xlrd-go v0.1.0
 	golang.org/x/crypto v0.45.0
 	golang.org/x/net v0.47.0
 	google.golang.org/protobuf v1.36.9
@@ -85,7 +85,7 @@ require (
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/text v0.31.0 // indirect
+	golang.org/x/text v0.32.0 // indirect
 )
 
 require (
