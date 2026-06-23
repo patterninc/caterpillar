@@ -20,7 +20,10 @@ The file task operates in two modes depending on whether an input channel is pro
 
 The task automatically determines its mode based on the presence of input/output channels.
 
-In read mode, the sanitized base filename is stored in the record context under the key `CATERPILLAR_FILE_NAME_WRITE`. The stem is lowercased with non-alphanumeric characters replaced by underscores, while the extension is preserved and lowercased (e.g. `"Report 1.CSV"` → `"report_1.csv"`).
+In read mode, two values are stored in each record's context:
+
+- `CATERPILLAR_FILE_NAME_WRITE` — the sanitized base filename. The stem is lowercased with non-alphanumeric characters replaced by underscores, while the extension is preserved and lowercased (e.g. `"Report 1.CSV"` → `"report_1.csv"`).
+- `CATERPILLAR_FILE_PATH_WRITE` — the sanitized full source path with directory hierarchy preserved. Each segment is slugified the same way; the final segment keeps its extension; URL schemes such as `s3://bucket/` are stripped (e.g. `s3://my-bucket/ReportType=A/Folder 1/data.CSV` → `reporttype_a/folder_1/data.csv`). Reference it in the destination of a downstream write task to avoid collisions when reading nested directories with a recursive glob.
 
 ## Configuration Fields
 

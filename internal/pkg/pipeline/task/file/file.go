@@ -146,6 +146,7 @@ func (f *file) readFile(output chan<- *record.Record) error {
 		// Create a default record with context
 		rc := &record.Record{Context: ctx}
 		rc.SetContextValue(string(task.CtxKeyFileNameWrite), textutil.SlugifyFileName(filepath.Base(path)))
+		rc.SetContextValue(string(task.CtxKeyFilePathWrite), textutil.SlugifyFilePath(path))
 
 		// let's write content to output channel
 		f.SendData(rc.Context, content, output)
