@@ -32,35 +32,36 @@ func SlugifyFilePath(path string) string {
 	if path == "" {
 		return ""
 	}
+
 	if i := strings.Index(path, "://"); i > 0 {
 		rest := path[i+3:]
 		if j := strings.Index(rest, "/"); j >= 0 {
 			path = rest[j:]
 		} else {
-			path = ""
+			return ""
 		}
 	}
-	path = strings.ReplaceAll(path, "\\", "/")
-	parts := strings.Split(path, "/")
-	nonEmpty := parts[:0]
-	for _, p := range parts {
-		if p != "" {
-			nonEmpty = append(nonEmpty, p)
-		}
-	}
-	if len(nonEmpty) == 0 {
+
+	parts := strings.FieldsFunc(path, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+
+	if len(parts) == 0 {
 		return ""
 	}
-	out := make([]string, 0, len(nonEmpty))
-	for i, p := range nonEmpty {
-		if i == len(nonEmpty)-1 {
+
+	out := make([]string, 0, len(parts))
+	for i, p := range parts {
+		if i == len(parts)-1 {
 			out = append(out, SlugifyFileName(p))
 			continue
 		}
+
 		if s := Slugify(p); s != "" {
 			out = append(out, s)
 		}
 	}
+
 	return strings.Join(out, "/")
 }
 
