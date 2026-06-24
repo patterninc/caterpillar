@@ -40,6 +40,7 @@ func (c *core) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		`html`:     new(html),
 		`sst`:      new(sst),
 		`xlsx`:     new(xlsx),
+		`xls`:      new(xls),
 		`eml`:      new(eml),
 		`protobuf`: new(protobuf),
 	}

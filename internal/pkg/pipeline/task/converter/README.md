@@ -1,6 +1,6 @@
 # Converter Task
 
-The `converter` task converts data between different formats, supporting CSV, HTML, XLSX (Excel), EML (Email), Protobuf, and other data format transformations.
+The `converter` task converts data between different formats, supporting CSV, HTML, XLSX, XLS, EML (Email), Protobuf, and other data format transformations.
 
 ## Function
 
@@ -21,7 +21,7 @@ The converter task transforms data between different formats. It receives record
 |-------|------|---------|-------------|
 | `name` | string | - | Task name for identification |
 | `type` | string | `converter` | Must be "converter" |
-| `format` | string | - | Format to convert to (csv, html, sst, xlsx, eml, protobuf) |
+| `format` | string | - | Format to convert to (csv, html, sst, xlsx, xls, eml, protobuf) |
 | `delimiter` | string| \t | Used only in sst converter for spliting key and value| 
 
 ### CSV Format Options
@@ -92,7 +92,7 @@ tasks:
 ### SST Format Options
 Convert a single line to the SSTable which could be stored on s3 or via file. It expects a single line as input
 
-### XLSX Format Options
+### XLSX / XLS Format Options
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -102,14 +102,15 @@ Convert a single line to the SSTable which could be stored on s3 or via file. It
 | `sanitize_headers` | bool | `false` | If true, normalizes header row values: non-alphanumeric characters are replaced by underscores, leading/trailing underscores are trimmed, and the result is lowercased. Assumes the first unskipped row to be header |
 | `sanitize_sheet_names` | bool | `false` | If true, normalizes sheet names: non-alphanumeric characters are replaced by underscores, leading/trailing underscores are trimmed, and the result is lowercased before storing in the `xlsx_sheet_name` context key |
 
-**Important:** The XLSX converter emits **one record per sheet**. Each record contains the sheet's data in CSV format, with the sheet name available in the record context under the key `xlsx_sheet_name`.
+**Important:** Both converters emit **one record per sheet**. Each record contains the sheet's data in CSV format, with the sheet name available in the record context under the key `xlsx_sheet_name`.
 
 ## Supported Formats
 
 The converter supports the following formats:
 - **CSV**: Converts CSV data to JSON with column mapping and type conversion
 - **HTML**: Converts HTML to JSON representation with element structure
-- **XLSX**: Converts Excel files to CSV format. **Note:** Each sheet in the Excel file is emitted as a separate record with the sheet name stored in the context (key: `xlsx_sheet_name`)
+- **XLSX**: Converts modern Excel files to CSV format. **Note:** Each sheet is emitted as a separate record with the sheet name stored in the context (key: `xlsx_sheet_name`)
+- **XLS**: Converts legacy Excel 97-2003 files (`.xls`, BIFF8) to CSV format. Same options and per-sheet output as XLSX
 - **EML**: Converts EML (Email) files to their constituent parts (HTML body, Text body, Attachments)
 - **Protobuf**: Decodes binary protobuf messages to JSON using a compiled FileDescriptorSet
 
@@ -161,6 +162,20 @@ tasks:
   - name: convert_excel
     type: converter
     format: xlsx
+  - name: echo
+    type: echo
+    only_data: true
+```
+
+### Legacy Excel 97-2003 (.xls) to CSV:
+```yaml
+tasks:
+  - name: read_excel
+    type: file
+    path: data.xls
+  - name: convert_excel
+    type: converter
+    format: xls
   - name: echo
     type: echo
     only_data: true
