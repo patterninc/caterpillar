@@ -29,17 +29,9 @@ func Slugify(name string) string {
 // interior segments that slugify to "") are dropped.
 // e.g. "s3://my-bucket/ReportType=A/data 1.CSV" -> "reporttype_a/data_1.csv"
 func SlugifyFilePath(path string) string {
+	path = stripURLScheme(path)
 	if path == "" {
 		return ""
-	}
-
-	if i := strings.Index(path, "://"); i > 0 {
-		rest := path[i+3:]
-		if j := strings.Index(rest, "/"); j >= 0 {
-			path = rest[j:]
-		} else {
-			return ""
-		}
 	}
 
 	parts := strings.FieldsFunc(path, func(r rune) bool {
@@ -63,6 +55,22 @@ func SlugifyFilePath(path string) string {
 	}
 
 	return strings.Join(out, "/")
+}
+
+// stripURLScheme strips a leading "<scheme>://<host>" prefix (e.g. "s3://my-bucket")
+// from path. If a scheme is present but no path follows the host
+// (e.g. "s3://bucket-only"), an empty string is returned. When no scheme
+// is present, path is returned unchanged.
+func stripURLScheme(path string) string {
+	i := strings.Index(path, "://")
+	if i <= 0 {
+		return path
+	}
+	rest := path[i+3:]
+	if j := strings.Index(rest, "/"); j >= 0 {
+		return rest[j:]
+	}
+	return ""
 }
 
 // SlugifyFileName slugifies a filename while preserving the extension.
