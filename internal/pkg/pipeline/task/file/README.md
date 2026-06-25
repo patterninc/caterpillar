@@ -149,6 +149,26 @@ tasks:
     path: output/data_{{ macro "timestamp" }}.txt
 ```
 
+### Preserving source hierarchy when reading nested directories:
+
+When reading from a recursive glob, two files in different subdirectories can share the same base name (e.g. `reportType=X/subA/data.tsv` and `reportType=X/subB/data.tsv`). Referencing `CATERPILLAR_FILE_NAME_WRITE` alone in the destination would collide; `CATERPILLAR_FILE_PATH_WRITE` preserves the source folder hierarchy so the writes stay distinct.
+
+```yaml
+tasks:
+  - name: read_nested
+    type: file
+    path: s3://source-bucket/reportType=X/**/*.tsv
+
+  - name: write_mirrored
+    type: file
+    path: s3://dest-bucket/ds={{ macro "date" }}/{{ context "CATERPILLAR_FILE_PATH_WRITE" }}
+    region: us-east-1
+```
+
+With the inputs above, the writes land at:
+- `s3://dest-bucket/ds=.../reporttype_x/suba/data.tsv`
+- `s3://dest-bucket/ds=.../reporttype_x/subb/data.tsv`
+
 ## Sample Pipelines
 
 - `test/pipelines/file.yaml` - Basic file operations
