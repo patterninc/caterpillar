@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -61,6 +62,7 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 
 		// skip empty records
 		if len(r.Data) == 0 {
+			ack.Drop(r.Context)
 			continue
 		}
 
@@ -78,11 +80,16 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 
 		// skip empty transformed data
 		if len(transformedData) == 0 {
+			ack.Drop(r.Context)
 			continue
 		}
 
 		if output != nil {
 			c.SendData(r.Context, transformedData, output)
+		} else if a, ok := ack.FromContext(r.Context); ok {
+			// terminal (sink) mode: nothing forwards this record
+			// downstream, so this task is the last one to touch it.
+			a.Done()
 		}
 	}
 

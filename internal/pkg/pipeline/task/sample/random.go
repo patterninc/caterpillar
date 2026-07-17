@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"math/big"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 )
 
@@ -29,6 +30,8 @@ func (r *random) filter(row *record.Record, _ chan<- *record.Record) error {
 
 	if len(r.buffer) < r.size {
 		r.buffer = append(r.buffer, row)
+	} else {
+		ack.Drop(row.Context)
 	}
 
 	return nil
@@ -38,6 +41,13 @@ func (r *random) filter(row *record.Record, _ chan<- *record.Record) error {
 func (r *random) drain(output chan<- *record.Record) error {
 
 	if l := int64(len(r.buffer)); l > 0 {
+
+		// draws are with replacement, so the same buffered record can be
+		// sent zero, one, or multiple times. Tally every draw first, then
+		// adjust each record's ack for its final send count before sending
+		// any of them - otherwise a downstream Done/Fail for an earlier
+		// send could race ahead of a later AddBranch call for the same ack.
+		counts := make([]int, l)
 		for i := 0; i < r.limit; i++ {
 
 			index, err := rand.Int(rand.Reader, big.NewInt(l))
@@ -45,9 +55,20 @@ func (r *random) drain(output chan<- *record.Record) error {
 				return err
 			}
 
-			r.sendRecord(r.buffer[index.Int64()], output)
+			counts[index.Int64()]++
 
 		}
+
+		for i, count := range counts {
+			ack.Fanout(r.buffer[i].Context, count)
+		}
+
+		for i, count := range counts {
+			for range count {
+				r.sendRecord(r.buffer[i], output)
+			}
+		}
+
 	}
 
 	return nil

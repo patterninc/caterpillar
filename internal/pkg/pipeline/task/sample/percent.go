@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 )
 
@@ -42,6 +43,8 @@ func (p *percent) filter(r *record.Record, output chan<- *record.Record) error {
 
 	if n.Int64() < int64(p.cutoff) {
 		p.sendRecord(r, output)
+	} else {
+		ack.Drop(r.Context)
 	}
 
 	return nil

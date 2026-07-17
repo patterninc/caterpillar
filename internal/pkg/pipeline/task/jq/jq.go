@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/patterninc/caterpillar/internal/pkg/config"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -41,9 +42,11 @@ func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err
 				return err
 			}
 			if items == nil {
+				ack.Drop(r.Context)
 				continue
 			}
 			if splitItems, ok := items.([]any); j.Explode && ok {
+				ack.Fanout(r.Context, len(splitItems))
 				for _, splitItem := range splitItems {
 					if j.AsRaw {
 						j.SendData(r.Context, fmt.Appendf(nil, "%v", splitItem), output)

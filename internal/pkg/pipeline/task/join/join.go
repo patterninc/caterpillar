@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -95,13 +96,19 @@ func (j *join) sendJoinedRecords(buffer []*record.Record, output chan<- *record.
 
 	// Join all data with the specified delimiter
 	var joinedData strings.Builder
+	ctxs := make([]context.Context, len(buffer))
 	for i, r := range buffer {
 		if i > 0 {
 			joinedData.WriteString(j.Delimiter)
 		}
 		joinedData.Write(r.Data)
+		ctxs[i] = r.Context
 	}
 
-	j.SendData(ctx, []byte(joinedData.String()), output)
+	// this is a fan-in: one output record is produced from len(buffer)
+	// inputs, so its ack must transitively complete every one of theirs
+	// instead of discarding them.
+	joinedAck := ack.Joined(ctxs...)
+	j.SendData(ack.WithContext(ctx, joinedAck), []byte(joinedData.String()), output)
 
 }

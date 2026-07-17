@@ -14,16 +14,23 @@ import (
 	qs "github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
 
 const (
-	defaultConcurrency      = 10
-	defaultMaxMessages      = 10
-	defaultWaitTimeSeconds  = 10
-	receiptsQueueMultiplier = 1000
-	defaultRegion           = "us-west-2"
+	defaultConcurrency     = 10
+	defaultMaxMessages     = 10
+	defaultWaitTimeSeconds = 10
+	defaultRegion          = "us-west-2"
+
+	// inFlight bounds how many messages can be unacknowledged (received but
+	// not yet deleted) at once. It's a multiple of Concurrency rather than
+	// Concurrency itself so fetching can run some distance ahead of full
+	// downstream completion instead of stalling every time Concurrency
+	// messages are simultaneously in flight.
+	inFlightMultiplier = 5
 )
 
 var (
@@ -93,28 +100,24 @@ func (s *sqs) Run(input <-chan *record.Record, output chan<- *record.Record) err
 		return s.sendMessages(input)
 	}
 
-	// If input is nil, act as a source: start getMessages and receipt workers
-	// let's create channel to which getMessages function will communicate messages receipts
-	receipts := make(chan *string, s.Concurrency*receiptsQueueMultiplier)
-
-	// we set a pool of workers that will delete messages from the queue
+	// If input is nil, act as a source: read messages and, once every
+	// downstream task has finished with a given message, delete its
+	// receipt so it isn't redelivered.
+	inFlight := make(chan struct{}, s.Concurrency*inFlightMultiplier)
 	var wg sync.WaitGroup
-	wg.Add(s.Concurrency)
-	for i := 0; i < s.Concurrency; i++ {
-		go s.processReceipts(receipts, &wg)
-	}
 
-	err := s.getMessages(ctx, output, receipts)
+	err := s.getMessages(ctx, output, inFlight, &wg)
 
+	// wait for every deleteOnComplete goroutine spawned below to finish
+	// (and its receipt to be deleted or left alone) before this task's Run
+	// returns, so a shutdown never abandons in-flight acknowledgements.
 	wg.Wait()
 
 	return err
 
 }
 
-func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record, receipts chan *string) error {
-
-	defer close(receipts)
+func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record, inFlight chan struct{}, wg *sync.WaitGroup) error {
 
 	// do we need to stop pipeline after a while?
 	if s.EndAfter > 0 {
@@ -156,34 +159,59 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record, rec
 			}
 
 			for _, m := range receiveMessageOutput.Messages {
-				// create new record and send it downstream
 
-				if output != nil {
-					s.SendData(ctx, []byte(*m.Body), output)
+				// nothing to forward to, so there's no downstream ack to
+				// wait for: delete the receipt right away, same as when
+				// there's no consumer at all.
+				if output == nil {
+					if _, err := s.client.DeleteMessage(ctx, &qs.DeleteMessageInput{
+						QueueUrl:      &s.QueueURL,
+						ReceiptHandle: m.ReceiptHandle,
+					}); err != nil {
+						fmt.Printf("failed to delete message %s from queue %s: %v\n", aws.ToString(m.MessageId), s.QueueURL, err)
+					}
+					continue
 				}
 
-				// send receipt to receipts channel for deletion
-				receipts <- m.ReceiptHandle
+				inFlight <- struct{}{}
+
+				msgAck := ack.New()
+				s.SendData(ack.WithContext(ctx, msgAck), []byte(*m.Body), output)
+
+				wg.Add(1)
+				go s.deleteOnComplete(msgAck, m.MessageId, m.ReceiptHandle, inFlight, wg)
 			}
 		}
 	}
 
 }
 
-func (s *sqs) processReceipts(receipts <-chan *string, wg *sync.WaitGroup) error {
+// deleteOnComplete waits until every downstream task has finished
+// processing the record derived from this message, deletes its receipt so
+// it isn't redelivered, and frees its inFlight slot. It runs detached from
+// getMessages, since getMessages must return (closing the task's output
+// channel) before downstream tasks can drain and signal completion; wg lets
+// Run wait for it to finish before returning.
+func (s *sqs) deleteOnComplete(msgAck *ack.Ack, messageId, receiptHandle *string, inFlight chan struct{}, wg *sync.WaitGroup) {
 
 	defer wg.Done()
+	defer func() { <-inFlight }()
 
-	for receipt := range receipts {
-		if _, err := s.client.DeleteMessage(ctx, &qs.DeleteMessageInput{
-			QueueUrl:      &s.QueueURL,
-			ReceiptHandle: receipt,
-		}); err != nil {
-			return err
-		}
+	<-msgAck.Wait()
+
+	// a downstream failure means this message wasn't fully processed:
+	// leave its receipt alone so SQS redelivers it after the visibility
+	// timeout instead of losing it.
+	if msgAck.Failed() {
+		return
 	}
 
-	return nil
+	if _, err := s.client.DeleteMessage(ctx, &qs.DeleteMessageInput{
+		QueueUrl:      &s.QueueURL,
+		ReceiptHandle: receiptHandle,
+	}); err != nil {
+		fmt.Printf("failed to delete message %s from queue %s: %v\n", aws.ToString(messageId), s.QueueURL, err)
+	}
 
 }
 
@@ -204,6 +232,10 @@ func (s *sqs) sendMessages(input <-chan *record.Record) error {
 		})
 		if err != nil {
 			return err
+		}
+
+		if a, ok := ack.FromContext(r.Context); ok {
+			a.Done()
 		}
 	}
 	return nil

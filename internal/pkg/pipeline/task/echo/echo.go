@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -42,6 +43,8 @@ func (e *echo) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 
 		if output != nil {
 			e.SendRecord(r, output)
+		} else if a, ok := ack.FromContext(r.Context); ok {
+			a.Done()
 		}
 	}
 

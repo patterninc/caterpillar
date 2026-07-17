@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/patterninc/caterpillar/internal/pkg/config"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 	"github.com/patterninc/caterpillar/internal/pkg/textutil"
@@ -202,6 +203,10 @@ func (f *file) writeFile(input <-chan *record.Record) error {
 		}
 		if err := writerFunction(&fs, rc, bytes.NewReader(rc.Data)); err != nil {
 			return err
+		}
+
+		if a, ok := ack.FromContext(rc.Context); ok {
+			a.Done()
 		}
 	}
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -75,6 +76,14 @@ func (h *heimdall) Run(input <-chan *record.Record, output chan<- *record.Record
 			jobReq := h.buildJobRequest(jobContext)
 			if err := h.submitJob(jobReq, output); err != nil {
 				return err
+			}
+
+			// terminal (sink) mode: nothing forwards rc downstream, so this
+			// task is the last one to touch it.
+			if output == nil {
+				if a, ok := ack.FromContext(rc.Context); ok {
+					a.Done()
+				}
 			}
 		}
 		return nil

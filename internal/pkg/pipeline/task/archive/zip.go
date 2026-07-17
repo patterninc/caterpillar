@@ -3,11 +3,13 @@ package archive
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"io"
 	"log"
 	"path/filepath"
 	"strings"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 	"github.com/patterninc/caterpillar/internal/pkg/textutil"
@@ -26,6 +28,7 @@ func (z *zipArchive) Read() {
 		}
 
 		if len(rc.Data) == 0 {
+			ack.Drop(rc.Context)
 			continue
 		}
 
@@ -35,6 +38,19 @@ func (z *zipArchive) Read() {
 		if err != nil {
 			log.Fatal(err)
 		}
+
+		// this is a fan-out: one archive record can expand into multiple
+		// file records, so the ack must represent all of them - computed
+		// up front, before any of them is sent - or a downstream Done/Fail
+		// for the first file could race ahead of a later count adjustment.
+		regularFiles := 0
+		for _, f := range r.File {
+			if f.FileInfo().Mode().IsRegular() {
+				regularFiles++
+			}
+		}
+		ack.Fanout(rc.Context, regularFiles)
+
 		for _, f := range r.File {
 
 			// check the file type is regular file
@@ -66,6 +82,7 @@ func (z *zipArchive) Write() {
 	zipBuf := new(bytes.Buffer)
 	zipWriter := zip.NewWriter(zipBuf)
 	var rc record.Record
+	var ctxs []context.Context
 
 	for {
 		rec, ok := z.GetRecord(z.InputChan)
@@ -94,13 +111,19 @@ func (z *zipArchive) Write() {
 		}
 
 		rc.Context = rec.Context
+		ctxs = append(ctxs, rec.Context)
 	}
 
 	if err := zipWriter.Close(); err != nil {
 		log.Fatal(err)
 	}
 
+	// this is a fan-in: one archive record is produced from every input
+	// record consumed above, so its ack must transitively complete all of
+	// theirs instead of discarding all but the last.
+	joinedAck := ack.Joined(ctxs...)
+
 	// Send the complete ZIP archive
-	z.SendData(rc.Context, zipBuf.Bytes(), z.OutputChan)
+	z.SendData(ack.WithContext(rc.Context, joinedAck), zipBuf.Bytes(), z.OutputChan)
 
 }

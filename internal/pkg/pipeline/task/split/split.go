@@ -3,6 +3,7 @@ package split
 import (
 	"strings"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -29,6 +30,7 @@ func (s *split) Run(input <-chan *record.Record, output chan<- *record.Record) e
 			break
 		}
 		lines := strings.Split(strings.TrimSuffix(string(r.Data), s.Delimiter), s.Delimiter)
+		ack.Fanout(r.Context, len(lines))
 		for _, line := range lines {
 			s.SendData(r.Context, []byte(line), output)
 		}

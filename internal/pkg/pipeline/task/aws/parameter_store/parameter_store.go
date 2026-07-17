@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm/types"
 
 	"github.com/patterninc/caterpillar/internal/pkg/jq"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -89,6 +90,14 @@ func (p *parameterStore) Run(input <-chan *record.Record, output chan<- *record.
 
 			if output != nil {
 				p.SendRecord(r, output)
+			}
+		}
+
+		// terminal (sink) mode: nothing forwards r downstream, so this task
+		// is the last one to touch it, once all its parameters are set.
+		if output == nil {
+			if a, ok := ack.FromContext(r.Context); ok {
+				a.Done()
 			}
 		}
 	}

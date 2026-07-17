@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 	"gopkg.in/yaml.v3"
@@ -189,7 +190,18 @@ func (p *Pipeline) distributeToChannels(input <-chan *record.Record, outputs []c
 		}
 	}()
 
+	branches := 0
+	for _, ch := range outputs {
+		if ch != nil {
+			branches++
+		}
+	}
+
 	for rec := range input {
+		// this is a structural fan-out: the same record is duplicated to
+		// every parallel DAG branch, so its ack must represent all of them
+		// before any branch can complete it.
+		ack.Fanout(rec.Context, branches)
 		for _, ch := range outputs {
 			if ch != nil {
 				ch <- rec

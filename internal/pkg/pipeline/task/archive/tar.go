@@ -3,11 +3,13 @@ package archive
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"io"
 	"log"
 	"path/filepath"
 	"strings"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 	"github.com/patterninc/caterpillar/internal/pkg/textutil"
@@ -27,10 +29,32 @@ func (t *tarArchive) Read() {
 		}
 
 		if len(rc.Data) == 0 {
+			ack.Drop(rc.Context)
 			continue
 		}
 
 		b := rc.Data
+
+		// this is a fan-out: one archive record can expand into multiple
+		// file records, so the ack must represent all of them - counted up
+		// front, before any of them is sent - or a downstream Done/Fail for
+		// the first file could race ahead of a later count adjustment. tar
+		// readers are forward-only, so counting takes its own pass over a
+		// fresh reader.
+		regularFiles := 0
+		for counter := tar.NewReader(bytes.NewReader(b)); ; {
+			header, err := counter.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				log.Fatal(err)
+			}
+			if header.Typeflag == tar.TypeReg {
+				regularFiles++
+			}
+		}
+		ack.Fanout(rc.Context, regularFiles)
 
 		r := tar.NewReader(bytes.NewReader(b))
 
@@ -62,12 +86,15 @@ func (t *tarArchive) Write() {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	var rc record.Record
+	var ctxs []context.Context
 
 	for {
 		rec, ok := t.GetRecord(t.InputChan)
 		if !ok {
 			break
 		}
+		ctxs = append(ctxs, rec.Context)
+
 		b := rec.Data
 
 		if len(b) == 0 {
@@ -105,5 +132,10 @@ func (t *tarArchive) Write() {
 		log.Fatal(err)
 	}
 
-	t.SendData(rc.Context, buf.Bytes(), t.OutputChan)
+	// this is a fan-in: one archive record is produced from every input
+	// record consumed above, so its ack must transitively complete all of
+	// theirs instead of discarding all but the last.
+	joinedAck := ack.Joined(ctxs...)
+
+	t.SendData(ack.WithContext(rc.Context, joinedAck), buf.Bytes(), t.OutputChan)
 }
