@@ -22,7 +22,7 @@ require (
 	github.com/jhillyerd/enmime v1.3.0
 	github.com/pkg/sftp v1.13.10
 	github.com/stretchr/testify v1.11.1
-	github.com/xuri/excelize/v2 v2.10.0
+	github.com/xuri/excelize/v2 v2.11.0
 	github.com/yamitzky/xlrd-go v0.1.0
 	golang.org/x/crypto v0.45.0
 	golang.org/x/net v0.47.0
