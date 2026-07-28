@@ -1,0 +1,5 @@
+﻿"Product Name","SKU (id)","Unit Price","In Stock"
+"Widget, Large",WD-001,19.99,true
+"Bolt ""M8""",BL-008,0.45,true
+Grommet,GR-100,2.50,false
+"Sprocket, 12T",SP-012,7.25,true

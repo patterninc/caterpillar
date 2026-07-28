@@ -25,6 +25,10 @@ type csv struct {
 var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 
 func (c *csv) convert(data []byte, _ string) ([]converterOutput, error) {
+	// a leading BOM would otherwise be read as part of the first field, which
+	// csv.Reader rejects when that field is quoted
+	data = bytes.TrimPrefix(data, utf8BOM)
+
 	// Initialize columns if not provided
 	if len(c.Columns) == 0 {
 		if err := c.initializeColumns(data); err != nil {
