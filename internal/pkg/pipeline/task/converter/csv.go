@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -23,11 +22,7 @@ type csv struct {
 	Columns   []*csvColumn `yaml:"columns" json:"columns"`
 }
 
-var (
-	// Pre-compile regex for column name sanitization
-	columnNameRegex = regexp.MustCompile(`[^a-zA-Z0-9]+`)
-	utf8BOM         = []byte{0xEF, 0xBB, 0xBF}
-)
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 
 func (c *csv) convert(data []byte, _ string) ([]converterOutput, error) {
 	// Initialize columns if not provided
