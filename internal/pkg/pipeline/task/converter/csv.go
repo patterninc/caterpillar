@@ -86,7 +86,9 @@ func (c *csv) convert(data []byte, _ string) ([]converterOutput, error) {
 
 // initializeColumns sets up column definitions based on the first row of CSV data
 func (c *csv) initializeColumns(data []byte) error {
-	reader := ec.NewReader(bytes.NewReader(stripUTF8BOMAndWhitespace(data)))
+	// padding around the header row is not part of any column name, and whitespace
+	// ahead of a quoted first field would otherwise fail to parse
+	reader := ec.NewReader(bytes.NewReader(bytes.TrimSpace(data)))
 	firstRow, err := reader.Read()
 	if err != nil {
 		return err
@@ -132,10 +134,4 @@ func toNumeric(s string) (any, bool) {
 
 	return nil, false
 
-}
-
-// stripUTF8BOMAndWhitespace strips a UTF-8 BOM and surrounding whitespace from a single CSV line.
-func stripUTF8BOMAndWhitespace(data []byte) []byte {
-	data = bytes.TrimPrefix(data, utf8BOM)
-	return bytes.TrimSpace(data)
 }
