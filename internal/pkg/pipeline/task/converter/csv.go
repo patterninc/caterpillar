@@ -6,10 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/patterninc/caterpillar/internal/pkg/textutil"
 )
 
 type csvColumn struct {
@@ -20,6 +19,19 @@ type csvColumn struct {
 type csv struct {
 	SkipFirst bool         `yaml:"skip_first,omitempty" json:"skip_first,omitempty"`
 	Columns   []*csvColumn `yaml:"columns" json:"columns"`
+}
+
+// Pre-compile regex for column name sanitization
+var columnNameRegex = regexp.MustCompile(`[^a-zA-Z0-9]+`)
+
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
+// prepareCSVLine strips a UTF-8 BOM and surrounding whitespace from a single CSV line.
+// S3 exports often include a BOM; without removing it Go's csv.Reader fails on the header
+// with "bare \" in non-quoted-field" at column 4.
+func prepareCSVLine(data []byte) []byte {
+	data = bytes.TrimPrefix(data, utf8BOM)
+	return bytes.TrimSpace(data)
 }
 
 func (c *csv) convert(data []byte, _ string) ([]converterOutput, error) {
@@ -80,7 +92,7 @@ func (c *csv) convert(data []byte, _ string) ([]converterOutput, error) {
 
 // initializeColumns sets up column definitions based on the first row of CSV data
 func (c *csv) initializeColumns(data []byte) error {
-	reader := ec.NewReader(bytes.NewReader(data))
+	reader := ec.NewReader(bytes.NewReader(prepareCSVLine(data)))
 	firstRow, err := reader.Read()
 	if err != nil {
 		return err
@@ -91,7 +103,7 @@ func (c *csv) initializeColumns(data []byte) error {
 	if c.SkipFirst {
 		// Use first row as column headers
 		for i, name := range firstRow {
-			sanitizedName := textutil.Slugify(name)
+			sanitizedName := strings.ToLower(columnNameRegex.ReplaceAllString(name, "_"))
 			c.Columns[i] = &csvColumn{Name: sanitizedName}
 		}
 		// Keep SkipFirst as true so the convert function knows to skip this row
