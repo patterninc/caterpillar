@@ -22,7 +22,13 @@ type csv struct {
 	Columns   []*csvColumn `yaml:"columns" json:"columns"`
 }
 
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
 func (c *csv) convert(data []byte, _ string) ([]converterOutput, error) {
+	// a leading BOM would otherwise be read as part of the first field, which
+	// csv.Reader rejects when that field is quoted
+	data = bytes.TrimPrefix(data, utf8BOM)
+
 	// Initialize columns if not provided
 	if len(c.Columns) == 0 {
 		if err := c.initializeColumns(data); err != nil {
@@ -80,7 +86,9 @@ func (c *csv) convert(data []byte, _ string) ([]converterOutput, error) {
 
 // initializeColumns sets up column definitions based on the first row of CSV data
 func (c *csv) initializeColumns(data []byte) error {
-	reader := ec.NewReader(bytes.NewReader(data))
+	// padding around the header row is not part of any column name, and whitespace
+	// ahead of a quoted first field would otherwise fail to parse
+	reader := ec.NewReader(bytes.NewReader(bytes.TrimSpace(data)))
 	firstRow, err := reader.Read()
 	if err != nil {
 		return err
