@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/patterninc/caterpillar/internal/pkg/textutil"
 )
 
 type csvColumn struct {
@@ -21,18 +23,11 @@ type csv struct {
 	Columns   []*csvColumn `yaml:"columns" json:"columns"`
 }
 
-// Pre-compile regex for column name sanitization
-var columnNameRegex = regexp.MustCompile(`[^a-zA-Z0-9]+`)
-
-var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
-
-// prepareCSVLine strips a UTF-8 BOM and surrounding whitespace from a single CSV line.
-// S3 exports often include a BOM; without removing it Go's csv.Reader fails on the header
-// with "bare \" in non-quoted-field" at column 4.
-func prepareCSVLine(data []byte) []byte {
-	data = bytes.TrimPrefix(data, utf8BOM)
-	return bytes.TrimSpace(data)
-}
+var (
+	// Pre-compile regex for column name sanitization
+	columnNameRegex = regexp.MustCompile(`[^a-zA-Z0-9]+`)
+	utf8BOM         = []byte{0xEF, 0xBB, 0xBF}
+)
 
 func (c *csv) convert(data []byte, _ string) ([]converterOutput, error) {
 	// Initialize columns if not provided
@@ -92,7 +87,7 @@ func (c *csv) convert(data []byte, _ string) ([]converterOutput, error) {
 
 // initializeColumns sets up column definitions based on the first row of CSV data
 func (c *csv) initializeColumns(data []byte) error {
-	reader := ec.NewReader(bytes.NewReader(prepareCSVLine(data)))
+	reader := ec.NewReader(bytes.NewReader(stripUTF8BOMAndWhitespace(data)))
 	firstRow, err := reader.Read()
 	if err != nil {
 		return err
@@ -103,7 +98,7 @@ func (c *csv) initializeColumns(data []byte) error {
 	if c.SkipFirst {
 		// Use first row as column headers
 		for i, name := range firstRow {
-			sanitizedName := strings.ToLower(columnNameRegex.ReplaceAllString(name, "_"))
+			sanitizedName := textutil.Slugify(name)
 			c.Columns[i] = &csvColumn{Name: sanitizedName}
 		}
 		// Keep SkipFirst as true so the convert function knows to skip this row
@@ -138,4 +133,10 @@ func toNumeric(s string) (any, bool) {
 
 	return nil, false
 
+}
+
+// stripUTF8BOMAndWhitespace strips a UTF-8 BOM and surrounding whitespace from a single CSV line.
+func stripUTF8BOMAndWhitespace(data []byte) []byte {
+	data = bytes.TrimPrefix(data, utf8BOM)
+	return bytes.TrimSpace(data)
 }
