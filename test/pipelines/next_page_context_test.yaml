@@ -1,0 +1,51 @@
+# Pagination state carried in record context: each page republishes the query for
+# the next one. page_id cannot substitute here -- the offset advances by the item
+# count actually received, not by a fixed page size.
+tasks:
+  - name: seed_source
+    type: file
+    path: test/pipelines/names.txt
+
+  - name: build_first_request
+    type: jq
+    path: |
+      {
+        endpoint: "https://jsonplaceholder.typicode.com/posts?_limit=3&_start=0"
+      }
+    # next_page reads current_query, so it has to exist before the first render.
+    context:
+      current_query: '"_limit=3&_start=0"'
+
+  - name: fetch_pages
+    type: http
+    method: GET
+    next_page: |
+      [inputs] as $input |
+      ($input[0].data | fromjson) as $body |
+      ($body | length) as $count |
+      "{{ context "current_query" }}" as $query |
+      ($query | capture("_start=(?<offset>[0-9]+)") | .offset | tonumber) as $offset |
+      ($offset + $count) as $next_offset |
+      if $count >= 3 and $next_offset < 9 then
+        (($query | sub("&_start=[0-9]+"; "")) + "&_start=" + ($next_offset | tostring)) as $next_query |
+        {
+          endpoint: ("https://jsonplaceholder.typicode.com/posts?" + $next_query),
+          context: {
+            current_query: $next_query
+          }
+        }
+      else empty end
+
+  # Expect three records, each reporting the query that fetched it:
+  #   _start=0 -> ids 1,2,3    _start=3 -> ids 4,5,6    _start=6 -> ids 7,8,9
+  - name: report_carried_state
+    type: jq
+    path: |
+      {
+        query_used: "{{ context "current_query" }}",
+        ids: map(.id)
+      }
+
+  - name: echo
+    type: echo
+    only_data: true
