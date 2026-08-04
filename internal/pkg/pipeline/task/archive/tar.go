@@ -20,6 +20,13 @@ type tarArchive struct {
 	*channelStruct
 }
 
+// tarFile is a regular file extracted from an archive, held until the total
+// file count is known and the fan-out ack can be sized.
+type tarFile struct {
+	name string
+	data []byte
+}
+
 func (t *tarArchive) Read() {
 
 	for {
@@ -39,22 +46,9 @@ func (t *tarArchive) Read() {
 		// file records, so the ack must represent all of them - counted up
 		// front, before any of them is sent - or a downstream Done/Fail for
 		// the first file could race ahead of a later count adjustment. tar
-		// readers are forward-only, so counting takes its own pass over a
-		// fresh reader.
-		regularFiles := 0
-		for counter := tar.NewReader(bytes.NewReader(b)); ; {
-			header, err := counter.Next()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				log.Fatal(err)
-			}
-			if header.Typeflag == tar.TypeReg {
-				regularFiles++
-			}
-		}
-		ack.Fanout(rc.Context, regularFiles)
+		// readers are forward-only, so the single pass below extracts every
+		// regular file first and only sends them once the count is known.
+		files := make([]tarFile, 0)
 
 		r := tar.NewReader(bytes.NewReader(b))
 
@@ -68,15 +62,26 @@ func (t *tarArchive) Read() {
 			}
 
 			// check the file type is regular file
-			if header.Typeflag == tar.TypeReg {
-				buf := make([]byte, header.Size)
-				if _, err := io.ReadFull(r, buf); err != nil && err != io.EOF {
-					log.Fatal(err)
-				}
-				rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), textutil.SlugifyFileName(filepath.Base(header.Name)))
-				t.SendData(rc.Context, buf, t.OutputChan)
+			if header.Typeflag != tar.TypeReg {
+				continue
 			}
 
+			buf := make([]byte, header.Size)
+			if _, err := io.ReadFull(r, buf); err != nil && err != io.EOF {
+				log.Fatal(err)
+			}
+
+			files = append(files, tarFile{
+				name: textutil.SlugifyFileName(filepath.Base(header.Name)),
+				data: buf,
+			})
+		}
+
+		ack.Fanout(rc.Context, len(files))
+
+		for _, f := range files {
+			rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), f.name)
+			t.SendData(rc.Context, f.data, t.OutputChan)
 		}
 	}
 }

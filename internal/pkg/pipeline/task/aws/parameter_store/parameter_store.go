@@ -66,12 +66,12 @@ func (p *parameterStore) Run(input <-chan *record.Record, output chan<- *record.
 		for parameterName, parameterQuery := range p.SetParameters {
 			parameterValue, err := parameterQuery.Execute(r.Data)
 			if err != nil {
-				return err
+				return ack.Rejected(r.Context, err)
 			}
 
 			parameterValueString, isString := parameterValue.(string)
 			if !isString {
-				return fmt.Errorf("%s parameter value is not string", parameterName)
+				return ack.Rejected(r.Context, fmt.Errorf("%s parameter value is not string", parameterName))
 			}
 
 			putParameterInput := &ssm.PutParameterInput{
@@ -85,7 +85,7 @@ func (p *parameterStore) Run(input <-chan *record.Record, output chan<- *record.
 			}
 
 			if _, err := p.client.PutParameter(ctx, putParameterInput); err != nil {
-				return err
+				return ack.Rejected(r.Context, err)
 			}
 
 			if output != nil {

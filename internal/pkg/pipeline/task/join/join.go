@@ -56,11 +56,15 @@ func (j *join) Run(input <-chan *record.Record, output chan<- *record.Record) er
 		tickerCh = ticker.C
 	}
 
+	// the input receive has to live inside the select: with a default case the
+	// select never blocks, so control would fall straight through to a bare
+	// channel receive and tickerCh would only be serviced between records -
+	// never firing while input is stalled, which is exactly when a partially
+	// filled buffer needs flushing. With duration unset tickerCh is nil, so
+	// this degenerates to today's plain blocking receive on input.
 	for {
 		select {
-		default:
-			// Try to get a record from input
-			r, ok := j.GetRecord(input)
+		case r, ok := <-input:
 			if !ok {
 				// Input channel closed, send any remaining records
 				j.flushBuffer(&buffer, output)

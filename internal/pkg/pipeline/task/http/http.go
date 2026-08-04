@@ -159,10 +159,10 @@ func (h *httpCore) Run(input <-chan *record.Record, output chan<- *record.Record
 			// let's get our http object
 			newHttp, err := h.newFromInput(rc.Data)
 			if err != nil {
-				return err
+				return ack.Rejected(rc.Context, err)
 			}
 			if err := newHttp.processItem(rc, output); err != nil {
-				return err
+				return ack.Rejected(rc.Context, err)
 			}
 
 			// terminal (sink) mode: nothing forwards rc downstream, so this

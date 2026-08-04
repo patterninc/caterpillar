@@ -1,0 +1,66 @@
+# Exercises acknowledgment across every shape that changes a record's branch
+# count, in one DAG. Acks only exist when the source creates them, so this has
+# to be SQS-driven to test anything: with any other source, Fanout/Joined are
+# no-ops.
+#
+# Each message body is {"id": N, "items": [1,2,3,4,5]}.
+#
+#   read_queue                       1 record  per message
+#     >> explode_items               5 records (task fan-out: jq explode)
+#     >> [tag_a, tag_b]             10 records (structural fan-out: DAG branches)
+#     >> batch                                 (fan-in: join, 7 at a time)
+#     >> save
+#
+# With the default 20 messages: 20 x 5 x 2 = 200 records into join, so 28 full
+# batches of 7 plus a final partial batch of 4 = 29 files, 200 records, and
+# each item value appearing exactly 40 times (20 messages x 2 branches).
+#
+# The message is only deleted once all 10 of its branches have landed, so a
+# correct run ends with the queue at 0 visible / 0 in flight. Any leak shows up
+# as leftover depth; any premature ack shows up as a short record count.
+#
+# join's batch size is deliberately NOT a divisor of the record count, so
+# records are always left buffered when the source stops reading. That is the
+# case that deadlocks if a source waits for its acknowledgements before its
+# output channel closes: join can only flush those last records once the
+# channel closes, and the channel can only close once the source stops
+# waiting. Keep it indivisible or this fixture stops testing that.
+#
+# Seed the queue first (see test/pipelines/setup_localstack_fanout.sh), then:
+#   AWS_ENDPOINT_URL=http://localhost:4566 AWS_ACCESS_KEY_ID=test \
+#   AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-west-2 \
+#   go run ./cmd/caterpillar -conf test/pipelines/sqs_fanout_fanin_dag.yaml
+
+tasks:
+  - name: read_queue
+    type: sqs
+    queue_url: http://sqs.us-west-2.localhost.localstack.cloud:4566/000000000000/local-sqs-fanout-fanin-queue
+    exit_on_empty: true
+
+  # fan-out: one message becomes one record per item in the array
+  - name: explode_items
+    type: jq
+    path: '.items'
+    explode: true
+
+  # structural fan-out: the DAG duplicates every record into both branches
+  - name: tag_a
+    type: jq
+    path: '{value: ., branch: "a"}'
+
+  - name: tag_b
+    type: jq
+    path: '{value: ., branch: "b"}'
+
+  # fan-in: seven records become one, and its ack must transitively complete
+  # all seven
+  - name: batch
+    type: join
+    number: 7
+    delimiter: "\n"
+
+  - name: save
+    type: file
+    path: ./output/fanout/{{ macro "uuid" }}.json
+
+dag: read_queue >> explode_items >> [tag_a,tag_b] >> batch >> save

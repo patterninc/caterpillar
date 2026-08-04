@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -24,13 +23,6 @@ const (
 	defaultMaxMessages     = 10
 	defaultWaitTimeSeconds = 10
 	defaultRegion          = "us-west-2"
-
-	// inFlight bounds how many messages can be unacknowledged (received but
-	// not yet deleted) at once. It's a multiple of Concurrency rather than
-	// Concurrency itself so fetching can run some distance ahead of full
-	// downstream completion instead of stalling every time Concurrency
-	// messages are simultaneously in flight.
-	inFlightMultiplier = 5
 )
 
 var (
@@ -47,7 +39,8 @@ type sqs struct {
 	ExitOnEmpty     bool   `yaml:"exit_on_empty,omitempty" json:"exit_on_empty,omitempty"`
 	MessageGroupId  string `yaml:"message_group_id,omitempty" json:"message_group_id,omitempty"` // used for FIFO queues
 
-	client *qs.Client
+	client  *qs.Client
+	tracker *ack.Tracker
 }
 
 func New() (task.Task, error) {
@@ -74,6 +67,8 @@ func (s *sqs) Init() error {
 	}
 
 	s.client = qs.NewFromConfig(awsConfig)
+	s.tracker = ack.NewTracker(s.Concurrency)
+
 	return nil
 }
 
@@ -95,29 +90,36 @@ func (s *sqs) extractRegionFromQueueURL() string {
 
 func (s *sqs) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	// Client is already initialized in RunPreHook - just use it
+	// Client is already initialized in Init - just use it
 	if input != nil {
 		return s.sendMessages(input)
 	}
 
-	// If input is nil, act as a source: read messages and, once every
-	// downstream task has finished with a given message, delete its
-	// receipt so it isn't redelivered.
-	inFlight := make(chan struct{}, s.Concurrency*inFlightMultiplier)
-	var wg sync.WaitGroup
-
-	err := s.getMessages(ctx, output, inFlight, &wg)
-
-	// wait for every deleteOnComplete goroutine spawned below to finish
-	// (and its receipt to be deleted or left alone) before this task's Run
-	// returns, so a shutdown never abandons in-flight acknowledgements.
-	wg.Wait()
-
-	return err
+	// If input is nil, act as a source: read messages and hand each one's
+	// receipt to the tracker, which deletes it once every downstream task
+	// has finished with the record it produced. Finish - not Run - waits for
+	// those deletions; see Finish.
+	return s.getMessages(ctx, output)
 
 }
 
-func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record, inFlight chan struct{}, wg *sync.WaitGroup) error {
+// Finish waits for every deferred deletion to run (and each receipt to be
+// deleted or left alone) before the pipeline treats this task as complete, so
+// a shutdown never abandons in-flight acknowledgements. It can't happen in
+// Run: downstream tasks that only emit once their input closes can't finish
+// with a record until this task's output channel is closed, which the
+// pipeline does only after Run returns.
+func (s *sqs) Finish() error {
+
+	if s.tracker != nil {
+		s.tracker.Wait()
+	}
+
+	return nil
+
+}
+
+func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) error {
 
 	// do we need to stop pipeline after a while?
 	if s.EndAfter > 0 {
@@ -164,47 +166,50 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record, inF
 				// wait for: delete the receipt right away, same as when
 				// there's no consumer at all.
 				if output == nil {
-					if _, err := s.client.DeleteMessage(ctx, &qs.DeleteMessageInput{
-						QueueUrl:      &s.QueueURL,
-						ReceiptHandle: m.ReceiptHandle,
-					}); err != nil {
-						fmt.Printf("failed to delete message %s from queue %s: %v\n", aws.ToString(m.MessageId), s.QueueURL, err)
-					}
+					s.deleteMessage(m.MessageId, m.ReceiptHandle)
 					continue
 				}
-
-				inFlight <- struct{}{}
 
 				msgAck := ack.New()
 				s.SendData(ack.WithContext(ctx, msgAck), []byte(*m.Body), output)
 
-				wg.Add(1)
-				go s.deleteOnComplete(msgAck, m.MessageId, m.ReceiptHandle, inFlight, wg)
+				s.tracker.Track(msgAck, &messageAck{
+					sqs:           s,
+					messageId:     m.MessageId,
+					receiptHandle: m.ReceiptHandle,
+				})
 			}
 		}
 	}
 
 }
 
-// deleteOnComplete waits until every downstream task has finished
-// processing the record derived from this message, deletes its receipt so
-// it isn't redelivered, and frees its inFlight slot. It runs detached from
-// getMessages, since getMessages must return (closing the task's output
-// channel) before downstream tasks can drain and signal completion; wg lets
-// Run wait for it to finish before returning.
-func (s *sqs) deleteOnComplete(msgAck *ack.Ack, messageId, receiptHandle *string, inFlight chan struct{}, wg *sync.WaitGroup) {
+// messageAck acknowledges one received message on behalf of ack.Tracker.
+type messageAck struct {
+	sqs           *sqs
+	messageId     *string
+	receiptHandle *string
+}
 
-	defer wg.Done()
-	defer func() { <-inFlight }()
+// Ack deletes the message's receipt so SQS doesn't redeliver it. On a
+// downstream failure it does nothing: the message wasn't fully processed, so
+// leaving the receipt alone lets SQS redeliver it once the visibility
+// timeout expires instead of losing it.
+func (m *messageAck) Ack(failed bool) {
 
-	<-msgAck.Wait()
-
-	// a downstream failure means this message wasn't fully processed:
-	// leave its receipt alone so SQS redelivers it after the visibility
-	// timeout instead of losing it.
-	if msgAck.Failed() {
+	if failed {
 		return
 	}
+
+	m.sqs.deleteMessage(m.messageId, m.receiptHandle)
+
+}
+
+// deleteMessage acknowledges a message by deleting its receipt so it isn't
+// redelivered. A failure to delete is logged rather than returned: the
+// message has already been processed, and the worst case is a redelivery
+// after the visibility timeout.
+func (s *sqs) deleteMessage(messageId, receiptHandle *string) {
 
 	if _, err := s.client.DeleteMessage(ctx, &qs.DeleteMessageInput{
 		QueueUrl:      &s.QueueURL,
@@ -231,7 +236,7 @@ func (s *sqs) sendMessages(input <-chan *record.Record) error {
 			MessageGroupId: s.getMessageGroupID(),
 		})
 		if err != nil {
-			return err
+			return ack.Rejected(r.Context, err)
 		}
 
 		if a, ok := ack.FromContext(r.Context); ok {

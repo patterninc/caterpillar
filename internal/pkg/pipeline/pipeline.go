@@ -263,11 +263,42 @@ func (p *Pipeline) runTaskConcurrently(t task.Task, input <-chan *record.Record,
 		}(t, input, output)
 	}
 
-	go func(wg *sync.WaitGroup, out chan<- *record.Record) {
+	go func(t task.Task, wg *sync.WaitGroup, in <-chan *record.Record, out chan<- *record.Record) {
+
 		wg.Wait()
+
+		// every worker has returned. If any of them bailed out early there can
+		// be records left in this task's input that nobody is going to process
+		// and, now, nobody left to consume - which would block whatever is
+		// still writing upstream. Drain them and reject their acks so a source
+		// deferring acknowledgement redelivers them instead of waiting forever.
+		// This only ever finds anything when a worker returned an error; on the
+		// normal path the workers have already drained the channel.
+		if in != nil {
+			for r := range in {
+				ack.Reject(r.Context)
+			}
+		}
+
 		if out != nil {
 			close(out)
 		}
+
+		// the output channel is closed, so downstream tasks can now drain to
+		// completion: this is the only safe point at which a source can wait
+		// for its deferred acknowledgements.
+		if f, ok := t.(task.Finisher); ok {
+			if err := f.Finish(); err != nil {
+				fmt.Printf("error finishing %s: %s\n", t.GetName(), err)
+				if t.GetFailOnError() {
+					p.locker.Lock()
+					p.errors[t.GetName()] = err
+					p.locker.Unlock()
+				}
+			}
+		}
+
 		p.wg.Done()
-	}(&taskWg, output)
+
+	}(t, &taskWg, input, output)
 }

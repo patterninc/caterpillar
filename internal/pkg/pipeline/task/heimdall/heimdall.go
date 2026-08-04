@@ -69,13 +69,13 @@ func (h *heimdall) Run(input <-chan *record.Record, output chan<- *record.Record
 			// Parse the input record to get dynamic context
 			var jobContext map[string]any
 			if err := json.Unmarshal([]byte(rc.Data), &jobContext); err != nil {
-				return err
+				return ack.Rejected(rc.Context, err)
 			}
 
 			// Create a job request with the dynamic context
 			jobReq := h.buildJobRequest(jobContext)
 			if err := h.submitJob(jobReq, output); err != nil {
-				return err
+				return ack.Rejected(rc.Context, err)
 			}
 
 			// terminal (sink) mode: nothing forwards rc downstream, so this

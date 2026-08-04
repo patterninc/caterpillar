@@ -154,6 +154,37 @@ func Drop(ctx context.Context) {
 	}
 }
 
+// Reject completes the Ack embedded in ctx, if any, as FAILED, for a record a
+// task could not process. It is the counterpart of Drop: Drop means "this
+// record is legitimately finished with", Reject means "this record never made
+// it", so the source leaves it unacknowledged and the broker redelivers it
+// instead of the pipeline waiting forever for a completion that can't come.
+//
+// A task bailing out mid-stream should Reject both the record it failed on and
+// every record still queued behind it, since it won't be processing those
+// either.
+func Reject(ctx context.Context) {
+	if a, ok := FromContext(ctx); ok {
+		a.Fail()
+	}
+}
+
+// Rejected is Reject followed by err, for the common case of a task bailing
+// out on the record it is holding:
+//
+//	if err != nil {
+//		return ack.Rejected(r.Context, err)
+//	}
+//
+// Keeping the settle and the return on one line stops the two drifting apart -
+// a bare `return err` here strands the record, and the symptom is the whole
+// pipeline hanging at shutdown rather than anything that points back to this
+// line.
+func Rejected(ctx context.Context, err error) error {
+	Reject(ctx)
+	return err
+}
+
 // Joined returns a new Ack with a single pending branch representing one
 // output record produced by combining n inputs (a "fan-in"), such as join
 // or archiving several records into one file. Attach it to that output

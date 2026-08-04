@@ -70,11 +70,11 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 		var err error
 		if c.Action == defaultAction {
 			if transformedData, err = c.compress(r); err != nil {
-				return err
+				return ack.Rejected(r.Context, err)
 			}
 		} else {
 			if transformedData, err = c.decompress(r); err != nil {
-				return err
+				return ack.Rejected(r.Context, err)
 			}
 		}
 

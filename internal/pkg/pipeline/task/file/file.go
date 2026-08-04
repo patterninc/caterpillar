@@ -159,6 +159,22 @@ func (f *file) readFile(output chan<- *record.Record) error {
 
 }
 
+// abort settles rc as failed, then returns err. Bailing out without doing this
+// leaves a source that defers acknowledgement waiting forever for a record
+// this task is never going to write; rejecting it lets the broker redeliver
+// it instead.
+//
+// Only rc is rejected, never the records still queued behind it: other workers
+// of this task are still running and will write those. The pipeline rejects
+// whatever is genuinely left over once every worker has returned.
+func (f *file) abort(rc *record.Record, err error) error {
+
+	ack.Reject(rc.Context)
+
+	return err
+
+}
+
 func (f *file) writeFile(input <-chan *record.Record) error {
 
 	for {
@@ -170,13 +186,13 @@ func (f *file) writeFile(input <-chan *record.Record) error {
 		// Evaluate the path with the record context
 		path, err := f.Path.Get(rc)
 		if err != nil {
-			return err
+			return f.abort(rc, err)
 		}
 
 		// Determine the scheme from the evaluated path
 		parsedURL, err := url.Parse(path)
 		if err != nil {
-			return err
+			return f.abort(rc, err)
 		}
 		pathScheme := parsedURL.Scheme
 		if pathScheme == `` {
@@ -199,10 +215,10 @@ func (f *file) writeFile(input <-chan *record.Record) error {
 
 		writerFunction, found := writers[pathScheme]
 		if !found {
-			return unknownSchemeError(pathScheme)
+			return f.abort(rc, unknownSchemeError(pathScheme))
 		}
 		if err := writerFunction(&fs, rc, bytes.NewReader(rc.Data)); err != nil {
-			return err
+			return f.abort(rc, err)
 		}
 
 		if a, ok := ack.FromContext(rc.Context); ok {
