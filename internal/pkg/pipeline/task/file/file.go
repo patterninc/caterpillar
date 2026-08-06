@@ -159,14 +159,13 @@ func (f *file) readFile(output chan<- *record.Record) error {
 
 }
 
-// abort settles rc as failed, then returns err. Bailing out without doing this
-// leaves a source that defers acknowledgement waiting forever for a record
-// this task is never going to write; rejecting it lets the broker redeliver
-// it instead.
+// abort settles rc as failed, then returns err, so a source deferring
+// acknowledgement redelivers the record rather than waiting forever for a
+// write that will never happen.
 //
-// Only rc is rejected, never the records still queued behind it: other workers
-// of this task are still running and will write those. The pipeline rejects
-// whatever is genuinely left over once every worker has returned.
+// Only rc is rejected, never the records queued behind it: sibling workers are
+// still running and will write those, and the pipeline rejects whatever is
+// genuinely left over once every worker has returned.
 func (f *file) abort(rc *record.Record, err error) error {
 
 	ack.Reject(rc.Context)

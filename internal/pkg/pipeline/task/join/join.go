@@ -57,11 +57,10 @@ func (j *join) Run(input <-chan *record.Record, output chan<- *record.Record) er
 	}
 
 	// the input receive has to live inside the select: with a default case the
-	// select never blocks, so control would fall straight through to a bare
-	// channel receive and tickerCh would only be serviced between records -
-	// never firing while input is stalled, which is exactly when a partially
-	// filled buffer needs flushing. With duration unset tickerCh is nil, so
-	// this degenerates to today's plain blocking receive on input.
+	// select never blocks, so tickerCh is only serviced between records and
+	// never fires while input is stalled - which is exactly when a partially
+	// filled buffer needs flushing. With duration unset tickerCh is nil and
+	// this is a plain blocking receive on input.
 	for {
 		select {
 		case r, ok := <-input:
@@ -109,9 +108,8 @@ func (j *join) sendJoinedRecords(buffer []*record.Record, output chan<- *record.
 		ctxs[i] = r.Context
 	}
 
-	// this is a fan-in: one output record is produced from len(buffer)
-	// inputs, so its ack must transitively complete every one of theirs
-	// instead of discarding them.
+	// fan-in: the output record is produced from every buffered input, so its
+	// ack must transitively complete every one of theirs.
 	joinedAck := ack.Joined(ctxs...)
 	j.SendData(ack.WithContext(ctx, joinedAck), []byte(joinedData.String()), output)
 

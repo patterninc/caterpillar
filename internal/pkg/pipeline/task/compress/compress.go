@@ -87,8 +87,8 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 		if output != nil {
 			c.SendData(r.Context, transformedData, output)
 		} else if a, ok := ack.FromContext(r.Context); ok {
-			// terminal (sink) mode: nothing forwards this record
-			// downstream, so this task is the last one to touch it.
+			// terminal (sink) mode: nothing forwards this record on, so
+			// settle it here.
 			a.Done()
 		}
 	}

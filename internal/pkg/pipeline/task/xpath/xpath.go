@@ -54,13 +54,10 @@ func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) e
 			}
 		}
 
-		// this is a fan-out: one input record yields one output per container
-		// node, so the ack must represent all of them, counted before any is
-		// sent - otherwise a downstream Done for the first node could settle
-		// the whole record while later nodes are still in flight. queryFields
-		// is pure, so extracting every node up front costs only memory, and
-		// the original node position is carried along since node_index is
-		// part of the output contract.
+		// fan-out: one output per container node, counted before any is sent,
+		// or a downstream Done for the first could settle the whole record
+		// while later nodes are still in flight. node_index is part of the
+		// output contract, so the original position travels with the data.
 		type nodePayload struct {
 			index int
 			data  []byte

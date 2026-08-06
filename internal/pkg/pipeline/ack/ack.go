@@ -1,7 +1,6 @@
-// Package ack tracks completion of a single source record (e.g. an SQS
-// message) as it flows through a pipeline, so the source task can defer
-// acknowledging it (e.g. deleting the SQS receipt) until every downstream
-// branch produced from it has finished processing.
+// Package ack tracks completion of a single source record as it flows through
+// a pipeline, so the source task can defer acknowledging it until every
+// downstream branch produced from it has finished processing.
 package ack
 
 import (
@@ -13,28 +12,19 @@ type catterpillarAckKey string
 
 const CATERPILLAR_ACK catterpillarAckKey = "CATERPILLAR_ACK"
 
-// Ack is created once per source record with exactly one pending branch:
-// the record itself. It rides downstream attached to the record's
-// context.Context (see WithContext/FromContext), so tasks that just
-// transform a record in place need no explicit wiring at all.
+// Ack is created once per source record with exactly one pending branch: the
+// record itself. It rides downstream on the record's context.Context, so tasks
+// that only transform a record need no explicit wiring.
 //
-// Tasks that fan a single input record out into multiple output records
-// (e.g. split, or jq with explode) must call AddBranch(n-1) before sending
-// the n outputs, so Wait's channel only closes once all n have completed
-// (see the Fanout helper below). Tasks that decide not to forward a record
-// at all (a filter, an empty query result) must call Done or Fail exactly
-// once for it (see Drop). Tasks that fan multiple input records IN into a
-// single output record (e.g. join, or archiving many records into one
-// file) must attach the Ack returned by Joined to that output record
-// instead of any one input's Ack, so completing the joined output
-// transitively completes every record that went into it (see Joined).
-// Terminal tasks (those with a nil output channel) must call Done, or
-// Fail, once they finish processing each record they consume.
+// Tasks that change a record's branch count must say so before sending: Fanout
+// for one-to-many, Joined for many-to-one, Drop or Reject for a record they
+// don't forward. A task with a nil output channel settles every record it
+// consumes.
 type Ack struct {
 	remaining atomic.Int32
 	failed    atomic.Bool
 	done      chan struct{}
-	children  []*Ack // completed (Done or Fail, per failed) once this Ack itself completes; see Joined
+	children  []*Ack // settled with this Ack's own outcome once it completes; see Joined
 }
 
 // New returns an Ack with a single pending branch.
@@ -55,10 +45,9 @@ func (a *Ack) Done() {
 	a.complete(false)
 }
 
-// Fail marks one branch as complete but unsuccessful, so Failed reports
-// true once every branch has finished. Use this instead of Done when a
-// branch didn't actually make it to where it needed to go (e.g. a Kafka
-// delivery failure), so the source knows not to acknowledge the record.
+// Fail marks one branch as complete but unsuccessful, so Failed reports true
+// once every branch has finished. Use it when a branch didn't make it to where
+// it needed to go, so the source knows not to acknowledge the record.
 func (a *Ack) Fail() {
 	a.complete(true)
 }
@@ -73,10 +62,9 @@ func (a *Ack) complete(failed bool) {
 		return
 	}
 
-	// this Ack itself is now fully complete: propagate that to whatever
-	// Acks it was joined from, based on whether ANY of its own branches
-	// failed (not just this particular call), since a single downstream
-	// success/failure on the joined record applies to all of them equally.
+	// a joined record's single downstream outcome applies equally to every
+	// record that went into it, so children get this Ack's overall result
+	// rather than the outcome of this particular call.
 	anyFailed := a.failed.Load()
 	for _, c := range a.children {
 		if anyFailed {
@@ -103,11 +91,8 @@ func (a *Ack) Wait() <-chan struct{} {
 }
 
 // WithContext returns a copy of ctx carrying a, recoverable later via
-// FromContext as the record moves downstream (record.Record.Context is
-// forwarded by tasks even when they construct a new *record.Record). A nil
-// ctx (e.g. an aggregating task, like archive pack, that never actually
-// received a record to inherit a context from) is treated as
-// context.Background() instead of panicking.
+// FromContext. A nil ctx is treated as context.Background(), since an
+// aggregating task may never have received a record to inherit one from.
 func WithContext(ctx context.Context, a *Ack) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -121,14 +106,11 @@ func FromContext(ctx context.Context) (*Ack, bool) {
 	return a, ok
 }
 
-// Fanout adjusts the Ack embedded in ctx, if any, so it represents n
-// branches derived from the single incoming branch ctx currently carries.
-// Call it once, before sending any of the n outputs: this guarantees the
-// adjustment is visible before any of those outputs can reach a downstream
-// Done/Fail call, which would otherwise be able to race ahead of it. n may
-// be 0 (the incoming record produces no output and is immediately
-// completed) or repeat a record multiple times (n counts sends, not
-// distinct records).
+// Fanout adjusts the Ack embedded in ctx, if any, so it represents n branches
+// derived from the single branch ctx currently carries. Call it once, before
+// sending any of the n outputs, so no downstream Done/Fail can race ahead of
+// the adjustment. n counts sends rather than distinct records; n == 0
+// completes the Ack immediately.
 func Fanout(ctx context.Context, n int) {
 
 	a, ok := FromContext(ctx)
@@ -145,8 +127,8 @@ func Fanout(ctx context.Context, n int) {
 
 }
 
-// Drop completes the Ack embedded in ctx, if any, for a record a task
-// decided not to forward downstream (e.g. it was filtered out). It is the
+// Drop completes the Ack embedded in ctx, if any, for a record a task decided
+// not to forward downstream (e.g. it was filtered out). It is the
 // single-record equivalent of Fanout(ctx, 0).
 func Drop(ctx context.Context) {
 	if a, ok := FromContext(ctx); ok {
@@ -154,45 +136,31 @@ func Drop(ctx context.Context) {
 	}
 }
 
-// Reject completes the Ack embedded in ctx, if any, as FAILED, for a record a
-// task could not process. It is the counterpart of Drop: Drop means "this
-// record is legitimately finished with", Reject means "this record never made
-// it", so the source leaves it unacknowledged and the broker redelivers it
-// instead of the pipeline waiting forever for a completion that can't come.
-//
-// A task bailing out mid-stream should Reject both the record it failed on and
-// every record still queued behind it, since it won't be processing those
-// either.
+// Reject completes the Ack embedded in ctx, if any, as failed, for a record a
+// task could not process. Where Drop means the record is legitimately finished
+// with, Reject means it never made it: the source leaves it unacknowledged and
+// the broker redelivers it, rather than the pipeline waiting for a completion
+// that can't come.
 func Reject(ctx context.Context) {
 	if a, ok := FromContext(ctx); ok {
 		a.Fail()
 	}
 }
 
-// Rejected is Reject followed by err, for the common case of a task bailing
-// out on the record it is holding:
-//
-//	if err != nil {
-//		return ack.Rejected(r.Context, err)
-//	}
-//
-// Keeping the settle and the return on one line stops the two drifting apart -
-// a bare `return err` here strands the record, and the symptom is the whole
-// pipeline hanging at shutdown rather than anything that points back to this
-// line.
+// Rejected is Reject followed by err, for a task bailing out on the record it
+// is holding. Keeping the settle and the return on one line stops the two
+// drifting apart: a bare return strands the record, and the symptom is the
+// whole pipeline hanging at shutdown rather than anything pointing here.
 func Rejected(ctx context.Context, err error) error {
 	Reject(ctx)
 	return err
 }
 
-// Joined returns a new Ack with a single pending branch representing one
-// output record produced by combining n inputs (a "fan-in"), such as join
-// or archiving several records into one file. Attach it to that output
-// record via WithContext before sending it. Completing the returned Ack
-// (Done or Fail, however the output record's own journey downstream ends)
-// transitively completes every Ack found among ctxs, so a downstream
-// success or failure on the combined record is correctly attributed back
-// to each record that went into it. ctxs with no Ack attached are ignored.
+// Joined returns a new Ack with a single pending branch representing one output
+// record combined from several inputs. Attach it to that output via
+// WithContext: completing it transitively completes every Ack found among
+// ctxs, so the combined record's outcome is attributed back to each record
+// that went into it. ctxs with no Ack attached are ignored.
 func Joined(ctxs ...context.Context) *Ack {
 
 	a := New()

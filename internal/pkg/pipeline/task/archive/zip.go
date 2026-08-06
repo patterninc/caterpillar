@@ -39,10 +39,9 @@ func (z *zipArchive) Read() {
 			log.Fatal(err)
 		}
 
-		// this is a fan-out: one archive record can expand into multiple
-		// file records, so the ack must represent all of them - computed
-		// up front, before any of them is sent - or a downstream Done/Fail
-		// for the first file could race ahead of a later count adjustment.
+		// fan-out: the ack must cover every file before any of them is sent,
+		// or a downstream Done/Fail for the first could race ahead of a later
+		// count adjustment.
 		regularFiles := 0
 		for _, f := range r.File {
 			if f.FileInfo().Mode().IsRegular() {
@@ -118,9 +117,8 @@ func (z *zipArchive) Write() {
 		log.Fatal(err)
 	}
 
-	// this is a fan-in: one archive record is produced from every input
-	// record consumed above, so its ack must transitively complete all of
-	// theirs instead of discarding all but the last.
+	// fan-in: the archive record is produced from every input consumed above,
+	// so its ack must transitively complete all of theirs.
 	joinedAck := ack.Joined(ctxs...)
 
 	// Send the complete ZIP archive

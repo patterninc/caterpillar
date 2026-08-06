@@ -165,8 +165,7 @@ func (h *httpCore) Run(input <-chan *record.Record, output chan<- *record.Record
 				return ack.Rejected(rc.Context, err)
 			}
 
-			// terminal (sink) mode: nothing forwards rc downstream, so this
-			// task is the last one to touch it.
+			// terminal (sink) mode: nothing forwards rc on, so settle it here.
 			if output == nil {
 				if a, ok := ack.FromContext(rc.Context); ok {
 					a.Done()

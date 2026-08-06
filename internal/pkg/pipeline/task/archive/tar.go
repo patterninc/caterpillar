@@ -20,8 +20,8 @@ type tarArchive struct {
 	*channelStruct
 }
 
-// tarFile is a regular file extracted from an archive, held until the total
-// file count is known and the fan-out ack can be sized.
+// tarFile is a regular file extracted from an archive, buffered until the
+// total file count is known and the fan-out ack can be sized.
 type tarFile struct {
 	name string
 	data []byte
@@ -42,12 +42,10 @@ func (t *tarArchive) Read() {
 
 		b := rc.Data
 
-		// this is a fan-out: one archive record can expand into multiple
-		// file records, so the ack must represent all of them - counted up
-		// front, before any of them is sent - or a downstream Done/Fail for
-		// the first file could race ahead of a later count adjustment. tar
-		// readers are forward-only, so the single pass below extracts every
-		// regular file first and only sends them once the count is known.
+		// fan-out: the ack must cover every file before any of them is sent,
+		// or a downstream Done/Fail for the first could race ahead of a later
+		// count adjustment. tar readers are forward-only, so extract in a
+		// single pass and send once the count is known.
 		files := make([]tarFile, 0)
 
 		r := tar.NewReader(bytes.NewReader(b))
@@ -137,9 +135,8 @@ func (t *tarArchive) Write() {
 		log.Fatal(err)
 	}
 
-	// this is a fan-in: one archive record is produced from every input
-	// record consumed above, so its ack must transitively complete all of
-	// theirs instead of discarding all but the last.
+	// fan-in: the archive record is produced from every input consumed above,
+	// so its ack must transitively complete all of theirs.
 	joinedAck := ack.Joined(ctxs...)
 
 	t.SendData(ack.WithContext(rc.Context, joinedAck), buf.Bytes(), t.OutputChan)

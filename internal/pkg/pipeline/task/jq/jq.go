@@ -28,9 +28,9 @@ func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err
 	}
 
 	if output == nil {
-		// terminal: a jq transform with nowhere to send has no effect, but the
-		// input still has to be drained and each record's ack settled, or a
-		// source deferring acknowledgement never finishes.
+		// terminal: the transform has no effect, but input still has to be
+		// drained and each record's ack settled, or a source deferring
+		// acknowledgement never finishes.
 		for {
 			r, ok := j.GetRecord(input)
 			if !ok {
@@ -64,7 +64,7 @@ func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err
 		if splitItems, ok := items.([]any); j.Explode && ok {
 			// marshal every item before adjusting the ack: failing partway
 			// through afterwards would leave branches counted but never sent,
-			// and there's no clean way to unwind a partial fan-out.
+			// and a partial fan-out can't be unwound.
 			payloads := make([][]byte, 0, len(splitItems))
 			for _, splitItem := range splitItems {
 				if j.AsRaw {

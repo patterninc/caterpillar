@@ -159,16 +159,14 @@ func (k *kafka) write(input <-chan *record.Record) error {
 					fmt.Printf("delivery failed for topic %s partition %d: %v\n",
 						k.Topic, m.TopicPartition.Partition, m.TopicPartition.Error)
 				}
-				// the source record failed to make it to Kafka: fail its ack
-				// instead of dropping it silently, so the source knows not
-				// to acknowledge/delete it (letting it be retried upstream).
+				// the source record never made it to the topic, so fail its
+				// ack: the source must leave it unacknowledged for retry.
 				if a, ok := m.Opaque.(*ack.Ack); ok {
 					a.Fail()
 				}
 				continue
 			}
-			// only mark the source record complete once the broker has confirmed
-			// delivery, not merely once it's been enqueued locally.
+			// settle only on broker-confirmed delivery, not on local enqueue.
 			if a, ok := m.Opaque.(*ack.Ack); ok {
 				a.Done()
 			}

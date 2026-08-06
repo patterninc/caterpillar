@@ -42,11 +42,10 @@ func (r *random) drain(output chan<- *record.Record) error {
 
 	if l := int64(len(r.buffer)); l > 0 {
 
-		// draws are with replacement, so the same buffered record can be
-		// sent zero, one, or multiple times. Tally every draw first, then
-		// adjust each record's ack for its final send count before sending
-		// any of them - otherwise a downstream Done/Fail for an earlier
-		// send could race ahead of a later AddBranch call for the same ack.
+		// draws are with replacement, so a buffered record can be sent zero,
+		// one, or many times. Tally every draw and size each ack for its final
+		// send count before sending any, or a downstream Done/Fail for an
+		// earlier send could race ahead of a later AddBranch on the same ack.
 		counts := make([]int, l)
 		for i := 0; i < r.limit; i++ {
 

@@ -95,20 +95,18 @@ func (s *sqs) Run(input <-chan *record.Record, output chan<- *record.Record) err
 		return s.sendMessages(input)
 	}
 
-	// If input is nil, act as a source: read messages and hand each one's
-	// receipt to the tracker, which deletes it once every downstream task
-	// has finished with the record it produced. Finish - not Run - waits for
-	// those deletions; see Finish.
+	// If input is nil, act as a source: read messages and hand each receipt to
+	// the tracker, which deletes it once every downstream task has finished
+	// with the record it produced. Finish, not Run, waits for those deletions.
 	return s.getMessages(ctx, output)
 
 }
 
-// Finish waits for every deferred deletion to run (and each receipt to be
-// deleted or left alone) before the pipeline treats this task as complete, so
-// a shutdown never abandons in-flight acknowledgements. It can't happen in
-// Run: downstream tasks that only emit once their input closes can't finish
-// with a record until this task's output channel is closed, which the
-// pipeline does only after Run returns.
+// Finish waits for every deferred deletion before the pipeline treats this
+// task as complete, so a shutdown never abandons in-flight acknowledgements.
+// It can't happen in Run: downstream tasks that emit only once their input
+// closes can't finish with a record until this task's output channel is
+// closed, which the pipeline does only after Run returns.
 func (s *sqs) Finish() error {
 
 	if s.tracker != nil {
@@ -162,9 +160,8 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 
 			for _, m := range receiveMessageOutput.Messages {
 
-				// nothing to forward to, so there's no downstream ack to
-				// wait for: delete the receipt right away, same as when
-				// there's no consumer at all.
+				// nothing to forward to, so there's no downstream ack to wait
+				// for: delete the receipt right away.
 				if output == nil {
 					s.deleteMessage(m.MessageId, m.ReceiptHandle)
 					continue
@@ -192,9 +189,8 @@ type messageAck struct {
 }
 
 // Ack deletes the message's receipt so SQS doesn't redeliver it. On a
-// downstream failure it does nothing: the message wasn't fully processed, so
-// leaving the receipt alone lets SQS redeliver it once the visibility
-// timeout expires instead of losing it.
+// downstream failure it does nothing: leaving the receipt alone lets SQS
+// redeliver the message once the visibility timeout expires.
 func (m *messageAck) Ack(failed bool) {
 
 	if failed {
@@ -205,10 +201,9 @@ func (m *messageAck) Ack(failed bool) {
 
 }
 
-// deleteMessage acknowledges a message by deleting its receipt so it isn't
-// redelivered. A failure to delete is logged rather than returned: the
-// message has already been processed, and the worst case is a redelivery
-// after the visibility timeout.
+// deleteMessage acknowledges a message by deleting its receipt. A failure is
+// logged rather than returned: the message has already been processed, so the
+// worst case is a redelivery after the visibility timeout.
 func (s *sqs) deleteMessage(messageId, receiptHandle *string) {
 
 	if _, err := s.client.DeleteMessage(ctx, &qs.DeleteMessageInput{

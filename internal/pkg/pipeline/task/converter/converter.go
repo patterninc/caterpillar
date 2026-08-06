@@ -80,18 +80,12 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) er
 
 		outputs, err := c.convert(r.Data, c.Delimiter)
 		if err != nil {
-			// this record is being abandoned, so settle its ack as failed:
-			// leaving it pending would strand a source that defers
-			// acknowledgement, which waits for a completion that can no longer
-			// come. Rejecting sends the message back for redelivery instead.
 			return ack.Rejected(r.Context, err)
 		}
 
-		// this is a fan-out: one input record can convert into many outputs -
-		// a csv row each, an xlsx sheet each - so the ack must represent all
-		// of them, counted before any is sent, or a downstream Done for the
-		// first could settle the whole record while the rest are still in
-		// flight. A count of 0 (nothing converted) completes it right here.
+		// fan-out: one input can convert into many outputs, so count them all
+		// before sending any, or a downstream Done for the first could settle
+		// the whole record while the rest are still in flight.
 		sends := 0
 		for _, out := range outputs {
 			if out.Data != nil {

@@ -39,11 +39,10 @@ type Task interface {
 }
 
 // Finisher is implemented by tasks with work to do only once their output
-// channel has been closed. A source deferring acknowledgement is the case
-// this exists for: its acks can only settle after every downstream task has
-// drained, and downstream tasks that emit on input close - join, archive
-// pack, sample tail/random - can only drain once the source's output channel
-// is closed. Waiting inside Run would therefore deadlock.
+// channel has been closed. Deferred acknowledgement is the case this exists
+// for: a source's acks settle only after every downstream task has drained,
+// and a downstream task that emits on input close can't drain until the
+// source's output channel is closed, so waiting inside Run would deadlock.
 //
 // The pipeline calls Finish exactly once per task, after every worker of that
 // task has returned from Run and after the task's output channel is closed.
@@ -125,10 +124,8 @@ func (b *Base) SendData(ctx context.Context, data []byte, output chan<- *record.
 func (b *Base) SendRecord(r *record.Record, output chan<- *record.Record) /* we should return error here */ {
 
 	if output == nil {
-		// terminal task: nothing forwards r downstream, so this is the last
-		// place that will ever touch it. Settle its ack here rather than
-		// dropping it, or a source deferring acknowledgement waits forever
-		// for a completion that can no longer come.
+		// terminal task: nothing forwards r downstream, so settle its ack here
+		// or a source deferring acknowledgement waits forever for it.
 		ack.Drop(r.Context)
 		return
 	}

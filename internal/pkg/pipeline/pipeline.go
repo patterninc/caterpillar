@@ -198,9 +198,9 @@ func (p *Pipeline) distributeToChannels(input <-chan *record.Record, outputs []c
 	}
 
 	for rec := range input {
-		// this is a structural fan-out: the same record is duplicated to
-		// every parallel DAG branch, so its ack must represent all of them
-		// before any branch can complete it.
+		// structural fan-out: the record is duplicated to every parallel DAG
+		// branch, so its ack must represent all of them before any branch can
+		// complete it.
 		ack.Fanout(rec.Context, branches)
 		for _, ch := range outputs {
 			if ch != nil {
@@ -267,13 +267,10 @@ func (p *Pipeline) runTaskConcurrently(t task.Task, input <-chan *record.Record,
 
 		wg.Wait()
 
-		// every worker has returned. If any of them bailed out early there can
-		// be records left in this task's input that nobody is going to process
-		// and, now, nobody left to consume - which would block whatever is
-		// still writing upstream. Drain them and reject their acks so a source
-		// deferring acknowledgement redelivers them instead of waiting forever.
-		// This only ever finds anything when a worker returned an error; on the
-		// normal path the workers have already drained the channel.
+		// a worker that bailed out early can leave records in this task's
+		// input with nobody left to consume them, blocking upstream writers.
+		// Reject them so a source deferring acknowledgement redelivers them
+		// rather than waiting forever.
 		if in != nil {
 			for r := range in {
 				ack.Reject(r.Context)
@@ -285,8 +282,8 @@ func (p *Pipeline) runTaskConcurrently(t task.Task, input <-chan *record.Record,
 		}
 
 		// the output channel is closed, so downstream tasks can now drain to
-		// completion: this is the only safe point at which a source can wait
-		// for its deferred acknowledgements.
+		// completion: the only safe point at which a source can wait for its
+		// deferred acknowledgements.
 		if f, ok := t.(task.Finisher); ok {
 			if err := f.Finish(); err != nil {
 				fmt.Printf("error finishing %s: %s\n", t.GetName(), err)

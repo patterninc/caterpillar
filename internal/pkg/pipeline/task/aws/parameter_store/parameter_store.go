@@ -93,8 +93,8 @@ func (p *parameterStore) Run(input <-chan *record.Record, output chan<- *record.
 			}
 		}
 
-		// terminal (sink) mode: nothing forwards r downstream, so this task
-		// is the last one to touch it, once all its parameters are set.
+		// terminal (sink) mode: nothing forwards r on, so settle it here once
+		// all its parameters are set.
 		if output == nil {
 			if a, ok := ack.FromContext(r.Context); ok {
 				a.Done()
