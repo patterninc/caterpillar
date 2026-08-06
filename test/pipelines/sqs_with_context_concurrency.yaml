@@ -1,7 +1,7 @@
 tasks:
   - name: read_queue
     type: sqs
-    queue_url: https://sqs.us-west-2.amazonaws.com/123456789012/my-queue
+    queue_url: http://sqs.us-west-2.localhost.localstack.cloud:4566/000000000000/local-sqs-context-concurrency-queue
     exit_on_empty: true
   - name: extract_urls
     type: jq

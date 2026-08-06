@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 	"gopkg.in/yaml.v3"
@@ -189,7 +190,18 @@ func (p *Pipeline) distributeToChannels(input <-chan *record.Record, outputs []c
 		}
 	}()
 
+	branches := 0
+	for _, ch := range outputs {
+		if ch != nil {
+			branches++
+		}
+	}
+
 	for rec := range input {
+		// structural fan-out: the record is duplicated to every parallel DAG
+		// branch, so its ack must represent all of them before any branch can
+		// complete it.
+		ack.Fanout(rec.Context, branches)
 		for _, ch := range outputs {
 			if ch != nil {
 				ch <- rec
@@ -251,11 +263,39 @@ func (p *Pipeline) runTaskConcurrently(t task.Task, input <-chan *record.Record,
 		}(t, input, output)
 	}
 
-	go func(wg *sync.WaitGroup, out chan<- *record.Record) {
+	go func(t task.Task, wg *sync.WaitGroup, in <-chan *record.Record, out chan<- *record.Record) {
+
 		wg.Wait()
+
+		// a worker that bailed out early can leave records in this task's
+		// input with nobody left to consume them, blocking upstream writers.
+		// Reject them so a source deferring acknowledgement redelivers them
+		// rather than waiting forever.
+		if in != nil {
+			for r := range in {
+				ack.Reject(r.Context)
+			}
+		}
+
 		if out != nil {
 			close(out)
 		}
+
+		// the output channel is closed, so downstream tasks can now drain to
+		// completion: the only safe point at which a source can wait for its
+		// deferred acknowledgements.
+		if f, ok := t.(task.Finisher); ok {
+			if err := f.Finish(); err != nil {
+				fmt.Printf("error finishing %s: %s\n", t.GetName(), err)
+				if t.GetFailOnError() {
+					p.locker.Lock()
+					p.errors[t.GetName()] = err
+					p.locker.Unlock()
+				}
+			}
+		}
+
 		p.wg.Done()
-	}(&taskWg, output)
+
+	}(t, &taskWg, input, output)
 }

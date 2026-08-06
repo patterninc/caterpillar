@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -148,10 +149,26 @@ func (k *kafka) write(input <-chan *record.Record) error {
 	go func() {
 		defer wg.Done()
 		for e := range deliveryCh {
-			if m, ok := e.(*ckafka.Message); ok && m.TopicPartition.Error != nil && firstDeliveryErr == nil {
-				firstDeliveryErr = m.TopicPartition.Error
-				fmt.Printf("delivery failed for topic %s partition %d: %v\n",
-					k.Topic, m.TopicPartition.Partition, m.TopicPartition.Error)
+			m, ok := e.(*ckafka.Message)
+			if !ok {
+				continue
+			}
+			if m.TopicPartition.Error != nil {
+				if firstDeliveryErr == nil {
+					firstDeliveryErr = m.TopicPartition.Error
+					fmt.Printf("delivery failed for topic %s partition %d: %v\n",
+						k.Topic, m.TopicPartition.Partition, m.TopicPartition.Error)
+				}
+				// the source record never made it to the topic, so fail its
+				// ack: the source must leave it unacknowledged for retry.
+				if a, ok := m.Opaque.(*ack.Ack); ok {
+					a.Fail()
+				}
+				continue
+			}
+			// settle only on broker-confirmed delivery, not on local enqueue.
+			if a, ok := m.Opaque.(*ack.Ack); ok {
+				a.Done()
 			}
 		}
 	}()
@@ -169,9 +186,15 @@ func (k *kafka) write(input <-chan *record.Record) error {
 			break
 		}
 
+		var opaque any
+		if a, ok := ack.FromContext(r.Context); ok {
+			opaque = a
+		}
+
 		if err = p.Produce(&ckafka.Message{
 			TopicPartition: ckafka.TopicPartition{Topic: &k.Topic, Partition: ckafka.PartitionAny},
 			Value:          msgBytes,
+			Opaque:         opaque,
 		}, deliveryCh); err != nil {
 			produceErr = fmt.Errorf("failed to enqueue message to topic %s: %w", k.Topic, err)
 			break

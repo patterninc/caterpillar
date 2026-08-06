@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sns/types"
 	"github.com/google/uuid"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -103,7 +104,11 @@ func (s *snsTask) Run(input <-chan *record.Record, output chan<- *record.Record)
 
 		_, err := s.client.Publish(r.Context, publishInput)
 		if err != nil {
-			return fmt.Errorf("failed to publish to SNS topic %s: %w", s.TopicArn, err)
+			return ack.Rejected(r.Context, fmt.Errorf("failed to publish to SNS topic %s: %w", s.TopicArn, err))
+		}
+
+		if a, ok := ack.FromContext(r.Context); ok {
+			a.Done()
 		}
 	}
 

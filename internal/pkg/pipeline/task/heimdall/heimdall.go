@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -68,13 +69,20 @@ func (h *heimdall) Run(input <-chan *record.Record, output chan<- *record.Record
 			// Parse the input record to get dynamic context
 			var jobContext map[string]any
 			if err := json.Unmarshal([]byte(rc.Data), &jobContext); err != nil {
-				return err
+				return ack.Rejected(rc.Context, err)
 			}
 
 			// Create a job request with the dynamic context
 			jobReq := h.buildJobRequest(jobContext)
 			if err := h.submitJob(jobReq, output); err != nil {
-				return err
+				return ack.Rejected(rc.Context, err)
+			}
+
+			// terminal (sink) mode: nothing forwards rc on, so settle it here.
+			if output == nil {
+				if a, ok := ack.FromContext(rc.Context); ok {
+					a.Done()
+				}
 			}
 		}
 		return nil

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/patterninc/caterpillar/internal/pkg/config"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -22,49 +23,75 @@ func New() (task.Task, error) {
 
 func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
-	if input != nil && output != nil {
+	if input == nil {
+		return nil
+	}
+
+	if output == nil {
+		// terminal: the transform has no effect, but input still has to be
+		// drained and each record's ack settled, or a source deferring
+		// acknowledgement never finishes.
 		for {
 			r, ok := j.GetRecord(input)
 			if !ok {
-				break
+				return nil
 			}
+			ack.Drop(r.Context)
+		}
+	}
 
-			// First evaluate config templates in the path
-			query, err := j.Path.GetJQ(r)
-			if err != nil {
-				return err
-			}
+	for {
+		r, ok := j.GetRecord(input)
+		if !ok {
+			break
+		}
 
-			// Execute the JQ query
-			items, err := query.Execute(r.Data)
-			if err != nil {
-				return err
-			}
-			if items == nil {
-				continue
-			}
-			if splitItems, ok := items.([]any); j.Explode && ok {
-				for _, splitItem := range splitItems {
-					if j.AsRaw {
-						j.SendData(r.Context, fmt.Appendf(nil, "%v", splitItem), output)
-					} else {
-						jsonItem, err := json.Marshal(splitItem)
-						if err != nil {
-							return err
-						}
-						j.SendData(r.Context, jsonItem, output)
-					}
-				}
-			} else {
+		// First evaluate config templates in the path
+		query, err := j.Path.GetJQ(r)
+		if err != nil {
+			return ack.Rejected(r.Context, err)
+		}
+
+		// Execute the JQ query
+		items, err := query.Execute(r.Data)
+		if err != nil {
+			return ack.Rejected(r.Context, err)
+		}
+		if items == nil {
+			ack.Drop(r.Context)
+			continue
+		}
+		if splitItems, ok := items.([]any); j.Explode && ok {
+			// marshal every item before adjusting the ack: failing partway
+			// through afterwards would leave branches counted but never sent,
+			// and a partial fan-out can't be unwound.
+			payloads := make([][]byte, 0, len(splitItems))
+			for _, splitItem := range splitItems {
 				if j.AsRaw {
-					j.SendData(r.Context, fmt.Appendf(nil, "%v", items), output)
-				} else {
-					jsonItem, err := json.Marshal(items)
-					if err != nil {
-						return err
-					}
-					j.SendData(r.Context, jsonItem, output)
+					payloads = append(payloads, fmt.Appendf(nil, "%v", splitItem))
+					continue
 				}
+				jsonItem, err := json.Marshal(splitItem)
+				if err != nil {
+					return ack.Rejected(r.Context, err)
+				}
+				payloads = append(payloads, jsonItem)
+			}
+
+			ack.Fanout(r.Context, len(payloads))
+
+			for _, payload := range payloads {
+				j.SendData(r.Context, payload, output)
+			}
+		} else {
+			if j.AsRaw {
+				j.SendData(r.Context, fmt.Appendf(nil, "%v", items), output)
+			} else {
+				jsonItem, err := json.Marshal(items)
+				if err != nil {
+					return ack.Rejected(r.Context, err)
+				}
+				j.SendData(r.Context, jsonItem, output)
 			}
 		}
 	}

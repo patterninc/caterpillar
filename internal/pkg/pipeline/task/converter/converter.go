@@ -3,6 +3,7 @@ package converter
 import (
 	"fmt"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -79,8 +80,19 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) er
 
 		outputs, err := c.convert(r.Data, c.Delimiter)
 		if err != nil {
-			return err
+			return ack.Rejected(r.Context, err)
 		}
+
+		// fan-out: one input can convert into many outputs, so count them all
+		// before sending any, or a downstream Done for the first could settle
+		// the whole record while the rest are still in flight.
+		sends := 0
+		for _, out := range outputs {
+			if out.Data != nil {
+				sends++
+			}
+		}
+		ack.Fanout(r.Context, sends)
 
 		for _, out := range outputs {
 			if out.Data != nil {

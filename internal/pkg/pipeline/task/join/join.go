@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -55,11 +56,14 @@ func (j *join) Run(input <-chan *record.Record, output chan<- *record.Record) er
 		tickerCh = ticker.C
 	}
 
+	// the input receive has to live inside the select: with a default case the
+	// select never blocks, so tickerCh is only serviced between records and
+	// never fires while input is stalled - which is exactly when a partially
+	// filled buffer needs flushing. With duration unset tickerCh is nil and
+	// this is a plain blocking receive on input.
 	for {
 		select {
-		default:
-			// Try to get a record from input
-			r, ok := j.GetRecord(input)
+		case r, ok := <-input:
 			if !ok {
 				// Input channel closed, send any remaining records
 				j.flushBuffer(&buffer, output)
@@ -95,13 +99,18 @@ func (j *join) sendJoinedRecords(buffer []*record.Record, output chan<- *record.
 
 	// Join all data with the specified delimiter
 	var joinedData strings.Builder
+	ctxs := make([]context.Context, len(buffer))
 	for i, r := range buffer {
 		if i > 0 {
 			joinedData.WriteString(j.Delimiter)
 		}
 		joinedData.Write(r.Data)
+		ctxs[i] = r.Context
 	}
 
-	j.SendData(ctx, []byte(joinedData.String()), output)
+	// fan-in: the output record is produced from every buffered input, so its
+	// ack must transitively complete every one of theirs.
+	joinedAck := ack.Joined(ctxs...)
+	j.SendData(ack.WithContext(ctx, joinedAck), []byte(joinedData.String()), output)
 
 }

@@ -3,6 +3,7 @@ package replace
 import (
 	"regexp"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -24,14 +25,29 @@ func (r *replace) Run(input <-chan *record.Record, output chan<- *record.Record)
 		return err
 	}
 
-	if output != nil {
+	if input == nil {
+		return nil
+	}
+
+	if output == nil {
+		// terminal: the replacement has no effect, but input still has to be
+		// drained and each record's ack settled, or a source deferring
+		// acknowledgement never finishes.
 		for {
 			record, ok := r.GetRecord(input)
 			if !ok {
-				break
+				return nil
 			}
-			r.SendData(record.Context, []byte(rx.ReplaceAllString(string(record.Data), r.Replacement)), output)
+			ack.Drop(record.Context)
 		}
+	}
+
+	for {
+		record, ok := r.GetRecord(input)
+		if !ok {
+			break
+		}
+		r.SendData(record.Context, []byte(rx.ReplaceAllString(string(record.Data), r.Replacement)), output)
 	}
 
 	return nil

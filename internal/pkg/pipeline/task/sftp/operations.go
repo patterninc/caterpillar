@@ -10,6 +10,7 @@ import (
 	"github.com/bmatcuk/doublestar"
 	pkgsftp "github.com/pkg/sftp"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 	"github.com/patterninc/caterpillar/internal/pkg/textutil"
@@ -29,11 +30,15 @@ func (s *sftp) upload(client *pkgsftp.Client, input <-chan *record.Record) error
 
 		file, err := s.Path.Get(rc)
 		if err != nil {
-			return err
+			return ack.Rejected(rc.Context, err)
 		}
 
 		if err := s.uploadOne(client, file, rc.Data); err != nil {
-			return err
+			return ack.Rejected(rc.Context, err)
+		}
+
+		if a, ok := ack.FromContext(rc.Context); ok {
+			a.Done()
 		}
 	}
 

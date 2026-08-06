@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/patterninc/caterpillar/internal/pkg/jq"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 )
 
@@ -35,6 +36,18 @@ type Task interface {
 	GetFailOnError() bool
 	GetTaskConcurrency() int
 	Init() error // Called once after unmarshaling, before pipeline execution
+}
+
+// Finisher is implemented by tasks with work to do only once their output
+// channel has been closed. Deferred acknowledgement is the case this exists
+// for: a source's acks settle only after every downstream task has drained,
+// and a downstream task that emits on input close can't drain until the
+// source's output channel is closed, so waiting inside Run would deadlock.
+//
+// The pipeline calls Finish exactly once per task, after every worker of that
+// task has returned from Run and after the task's output channel is closed.
+type Finisher interface {
+	Finish() error
 }
 
 type Base struct {
@@ -111,6 +124,9 @@ func (b *Base) SendData(ctx context.Context, data []byte, output chan<- *record.
 func (b *Base) SendRecord(r *record.Record, output chan<- *record.Record) /* we should return error here */ {
 
 	if output == nil {
+		// terminal task: nothing forwards r downstream, so settle its ack here
+		// or a source deferring acknowledgement waits forever for it.
+		ack.Drop(r.Context)
 		return
 	}
 
