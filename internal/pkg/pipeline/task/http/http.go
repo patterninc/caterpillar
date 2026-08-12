@@ -270,6 +270,19 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 					}
 				}
 			}
+
+			// Applied before the next iteration renders its templates, so pagination
+			// can carry state a single response doesn't contain. JSON-encoded to
+			// match task.Base, so `{{ context }}` renders the same either way.
+			if contextVal, ok := nextPageMap["context"].(map[string]interface{}); ok {
+				for name, value := range contextVal {
+					encoded, err := json.Marshal(value)
+					if err != nil {
+						return fmt.Errorf("cannot set context value %s: %s", name, err)
+					}
+					rc.SetContextValue(name, string(encoded))
+				}
+			}
 		} else {
 			break
 		}
