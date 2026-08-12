@@ -24,9 +24,9 @@ func (n *nth) filter(r *record.Record, output chan<- *record.Record) error {
 
 	if n.index%n.divider == 0 {
 		n.sendRecord(r, output)
-	} else {
-		ack.Drop(r.Context)
 	}
+
+	ack.Release(r.Context)
 
 	n.index++
 

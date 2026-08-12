@@ -1,6 +1,7 @@
 package heimdall
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -74,23 +75,18 @@ func (h *heimdall) Run(input <-chan *record.Record, output chan<- *record.Record
 
 			// Create a job request with the dynamic context
 			jobReq := h.buildJobRequest(jobContext)
-			if err := h.submitJob(jobReq, output); err != nil {
+			if err := h.submitJob(rc.Context, jobReq, output); err != nil {
 				return ack.Rejected(rc.Context, err)
 			}
 
-			// terminal (sink) mode: nothing forwards rc on, so settle it here.
-			if output == nil {
-				if a, ok := ack.FromContext(rc.Context); ok {
-					a.Done()
-				}
-			}
+			ack.Release(rc.Context)
 		}
 		return nil
 	}
 
 	// Create a job request with the configured context
 	jobReq := h.buildJobRequest(h.JobRequest.Context)
-	return h.submitJob(jobReq, output)
+	return h.submitJob(ctx, jobReq, output)
 
 }
 
@@ -110,7 +106,7 @@ func (h *heimdall) buildJobRequest(context map[string]any) *jobRequest {
 	}
 }
 
-func (h *heimdall) submitJob(jobReq *jobRequest, output chan<- *record.Record) error {
+func (h *heimdall) submitJob(srcCtx context.Context, jobReq *jobRequest, output chan<- *record.Record) error {
 
 	response := &response{}
 
@@ -128,14 +124,14 @@ func (h *heimdall) submitJob(jobReq *jobRequest, output chan<- *record.Record) e
 		if !h.GetResult {
 			return nil
 		}
-		return h.sendToOutput(response.Result, output)
+		return h.sendToOutput(srcCtx, response.Result, output)
 	}
 
 	// For asynchronous jobs, poll until completion
-	return h.processAsyncJob(response.ID, output)
+	return h.processAsyncJob(srcCtx, response.ID, output)
 }
 
-func (h *heimdall) processAsyncJob(jobID string, output chan<- *record.Record) error {
+func (h *heimdall) processAsyncJob(srcCtx context.Context, jobID string, output chan<- *record.Record) error {
 
 	// Set timeout for job polling
 	endTime := time.Now().Add(time.Duration(h.Timeout))
@@ -158,7 +154,7 @@ func (h *heimdall) processAsyncJob(jobID string, output chan<- *record.Record) e
 			if err := h.api(http.MethodGet, fmt.Sprintf(h.Endpoint+endpointJobResult, jobID), nil, result); err != nil {
 				return err
 			}
-			return h.sendToOutput(result, output)
+			return h.sendToOutput(srcCtx, result, output)
 		case jobStatusFailed:
 			return fmt.Errorf("job id %s failed", jobID)
 		}

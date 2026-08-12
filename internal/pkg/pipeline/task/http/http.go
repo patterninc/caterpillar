@@ -165,12 +165,9 @@ func (h *httpCore) Run(input <-chan *record.Record, output chan<- *record.Record
 				return ack.Rejected(rc.Context, err)
 			}
 
-			// terminal (sink) mode: nothing forwards rc on, so settle it here.
-			if output == nil {
-				if a, ok := ack.FromContext(rc.Context); ok {
-					a.Done()
-				}
-			}
+			// one release per input record, however many pages it produced: each
+			// page's send registered its own branch.
+			ack.Release(rc.Context)
 		}
 	}
 

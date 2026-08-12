@@ -97,6 +97,7 @@ func (b *Base) Run(input <-chan *record.Record, output chan<- *record.Record) er
 
 	for r := range input {
 		b.SendRecord(r, output)
+		ack.Release(r.Context)
 	}
 
 	return nil
@@ -124,10 +125,14 @@ func (b *Base) SendData(ctx context.Context, data []byte, output chan<- *record.
 func (b *Base) SendRecord(r *record.Record, output chan<- *record.Record) /* we should return error here */ {
 
 	if output == nil {
-		// terminal task: nothing forwards r downstream, so settle its ack here
-		// or a source deferring acknowledgement waits forever for it.
-		ack.Drop(r.Context)
 		return
+	}
+
+	// every send registers its own branch, before the record is visible to another
+	// goroutine. This is what removes the need for a task to declare a fan-out
+	// count: N sends are N branches, and the task then releases its input once.
+	if a, ok := ack.FromContext(r.Context); ok {
+		a.AddBranch(1)
 	}
 
 	defer func() {

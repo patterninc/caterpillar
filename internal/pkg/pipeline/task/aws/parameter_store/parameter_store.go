@@ -88,18 +88,12 @@ func (p *parameterStore) Run(input <-chan *record.Record, output chan<- *record.
 				return ack.Rejected(r.Context, err)
 			}
 
-			if output != nil {
-				p.SendRecord(r, output)
-			}
+			p.SendRecord(r, output)
 		}
 
-		// terminal (sink) mode: nothing forwards r on, so settle it here once
-		// all its parameters are set.
-		if output == nil {
-			if a, ok := ack.FromContext(r.Context); ok {
-				a.Done()
-			}
-		}
+		// released once per record, not once per parameter: the sends above each
+		// registered their own branch.
+		ack.Release(r.Context)
 	}
 
 	return nil

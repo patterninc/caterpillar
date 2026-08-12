@@ -20,13 +20,6 @@ type tarArchive struct {
 	*channelStruct
 }
 
-// tarFile is a regular file extracted from an archive, buffered until the
-// total file count is known and the fan-out ack can be sized.
-type tarFile struct {
-	name string
-	data []byte
-}
-
 func (t *tarArchive) Read() {
 
 	for {
@@ -36,17 +29,11 @@ func (t *tarArchive) Read() {
 		}
 
 		if len(rc.Data) == 0 {
-			ack.Drop(rc.Context)
+			ack.Release(rc.Context)
 			continue
 		}
 
 		b := rc.Data
-
-		// fan-out: the ack must cover every file before any of them is sent,
-		// or a downstream Done/Fail for the first could race ahead of a later
-		// count adjustment. tar readers are forward-only, so extract in a
-		// single pass and send once the count is known.
-		files := make([]tarFile, 0)
 
 		r := tar.NewReader(bytes.NewReader(b))
 
@@ -69,18 +56,11 @@ func (t *tarArchive) Read() {
 				log.Fatal(err)
 			}
 
-			files = append(files, tarFile{
-				name: textutil.SlugifyFileName(filepath.Base(header.Name)),
-				data: buf,
-			})
+			rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), textutil.SlugifyFileName(filepath.Base(header.Name)))
+			t.SendData(rc.Context, buf, t.OutputChan)
 		}
 
-		ack.Fanout(rc.Context, len(files))
-
-		for _, f := range files {
-			rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), f.name)
-			t.SendData(rc.Context, f.data, t.OutputChan)
-		}
+		ack.Release(rc.Context)
 	}
 }
 

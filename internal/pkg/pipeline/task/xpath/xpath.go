@@ -49,21 +49,10 @@ func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) e
 					return ack.Rejected(r.Context, fmt.Errorf("no nodes found for XPath: %s", x.Container))
 				}
 				fmt.Println("container is missing - ", x.Container)
-				ack.Drop(r.Context)
+				ack.Release(r.Context)
 				continue
 			}
 		}
-
-		// fan-out: one output per container node, counted before any is sent,
-		// or a downstream Done for the first could settle the whole record
-		// while later nodes are still in flight. node_index is part of the
-		// output contract, so the original position travels with the data.
-		type nodePayload struct {
-			index int
-			data  []byte
-		}
-
-		payloads := make([]nodePayload, 0, len(containerNodes))
 
 		for i, container := range containerNodes {
 			data, err := x.queryFields(container)
@@ -72,16 +61,13 @@ func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) e
 			}
 
 			if len(data) != 0 {
-				payloads = append(payloads, nodePayload{index: i + 1, data: data})
+				index := fmt.Sprintf("%d", i+1)
+				r.SetContextValue(nodeIndexKey, index)
+				x.SendData(r.Context, data, output)
 			}
 		}
 
-		ack.Fanout(r.Context, len(payloads))
-
-		for _, p := range payloads {
-			r.SetContextValue(nodeIndexKey, fmt.Sprintf("%d", p.index))
-			x.SendData(r.Context, p.data, output)
-		}
+		ack.Release(r.Context)
 	}
 
 	return nil

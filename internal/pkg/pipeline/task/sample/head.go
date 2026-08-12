@@ -25,9 +25,9 @@ func (h *head) filter(r *record.Record, output chan<- *record.Record) error {
 	if h.index < h.limit {
 		h.sendRecord(r, output)
 		h.index++
-	} else {
-		ack.Drop(r.Context)
 	}
+
+	ack.Release(r.Context)
 
 	return nil
 

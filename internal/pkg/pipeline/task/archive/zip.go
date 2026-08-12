@@ -28,7 +28,7 @@ func (z *zipArchive) Read() {
 		}
 
 		if len(rc.Data) == 0 {
-			ack.Drop(rc.Context)
+			ack.Release(rc.Context)
 			continue
 		}
 
@@ -38,17 +38,6 @@ func (z *zipArchive) Read() {
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		// fan-out: the ack must cover every file before any of them is sent,
-		// or a downstream Done/Fail for the first could race ahead of a later
-		// count adjustment.
-		regularFiles := 0
-		for _, f := range r.File {
-			if f.FileInfo().Mode().IsRegular() {
-				regularFiles++
-			}
-		}
-		ack.Fanout(rc.Context, regularFiles)
 
 		for _, f := range r.File {
 
@@ -73,6 +62,8 @@ func (z *zipArchive) Read() {
 				z.SendData(rc.Context, buf, z.OutputChan)
 			}
 		}
+
+		ack.Release(rc.Context)
 	}
 }
 

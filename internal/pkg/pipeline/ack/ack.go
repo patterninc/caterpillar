@@ -5,6 +5,7 @@ package ack
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 )
 
@@ -12,55 +13,82 @@ type catterpillarAckKey string
 
 const CATERPILLAR_ACK catterpillarAckKey = "CATERPILLAR_ACK"
 
-// Ack is created once per source record with exactly one pending branch: the
-// record itself. It rides downstream on the record's context.Context, so tasks
-// that only transform a record need no explicit wiring.
-//
-// Tasks that change a record's branch count must say so before sending: Fanout
-// for one-to-many, Joined for many-to-one, Drop or Reject for a record they
-// don't forward. A task with a nil output channel settles every record it
-// consumes.
+// Ack is created once per source record and rides downstream on its context. The
+// counter is the live branches descending from that record, and each send registers
+// its own — so a task declares no fan-out count, it settles what it consumes.
 type Ack struct {
+	mu        sync.Mutex
+	settled   bool
 	remaining atomic.Int32
 	failed    atomic.Bool
 	done      chan struct{}
 	children  []*Ack // settled with this Ack's own outcome once it completes; see Joined
 }
 
-// New returns an Ack with a single pending branch.
+// New returns an Ack with no branches yet. The send that puts its record on an
+// output channel registers the first one, which is why a counter that starts at
+// one would never reach zero.
 func New() *Ack {
-	a := &Ack{done: make(chan struct{})}
-	a.remaining.Store(1)
-	return a
+	return &Ack{done: make(chan struct{})}
 }
 
 // AddBranch registers cnt additional branches that must call Done or Fail
-// before Wait's channel closes.
+// before Wait's channel closes. Sending a record does this for the caller.
 func (a *Ack) AddBranch(cnt int32) {
-	a.remaining.Add(cnt)
-}
 
-// Done marks one branch as complete.
-func (a *Ack) Done() {
-	a.complete(false)
-}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
-// Fail marks one branch as complete but unsuccessful, so Failed reports true
-// once every branch has finished. Use it when a branch didn't make it to where
-// it needed to go, so the source knows not to acknowledge the record.
-func (a *Ack) Fail() {
-	a.complete(true)
-}
-
-func (a *Ack) complete(failed bool) {
-
-	if failed {
-		a.failed.Store(true)
-	}
-
-	if a.remaining.Add(-1) != 0 {
+	// a settled record has already been reported to the source; re-opening its
+	// counter would let it settle a second time and close done twice.
+	if a.settled {
 		return
 	}
+
+	a.remaining.Add(cnt)
+
+}
+
+// Done marks one branch as complete, settling the record if it was the last.
+func (a *Ack) Done() {
+
+	a.mu.Lock()
+
+	if a.settled || a.remaining.Add(-1) != 0 {
+		a.mu.Unlock()
+		return
+	}
+
+	a.settled = true
+	a.mu.Unlock()
+
+	a.finish()
+
+}
+
+// Fail abandons the record so the broker redelivers it. It settles immediately
+// rather than decrementing like Done, because a sibling branch that never
+// completes would otherwise suppress the failure and hang the source.
+func (a *Ack) Fail() {
+
+	a.mu.Lock()
+
+	// after settling, the outcome is already reported: a late Fail must not flip a
+	// record the source has been told to acknowledge into one it redelivers.
+	if a.settled {
+		a.mu.Unlock()
+		return
+	}
+
+	a.settled = true
+	a.failed.Store(true)
+	a.mu.Unlock()
+
+	a.finish()
+
+}
+
+func (a *Ack) finish() {
 
 	// a joined record's single downstream outcome applies equally to every
 	// record that went into it, so children get this Ack's overall result
@@ -106,38 +134,17 @@ func FromContext(ctx context.Context) (*Ack, bool) {
 	return a, ok
 }
 
-// Fanout adjusts the Ack embedded in ctx, if any, so it represents n branches
-// derived from the single branch ctx currently carries. Call it once, before
-// sending any of the n outputs, so no downstream Done/Fail can race ahead of
-// the adjustment. n counts sends rather than distinct records; n == 0
-// completes the Ack immediately.
-func Fanout(ctx context.Context, n int) {
-
-	a, ok := FromContext(ctx)
-	if !ok {
-		return
-	}
-
-	switch {
-	case n == 0:
-		a.Done()
-	case n > 1:
-		a.AddBranch(int32(n - 1))
-	}
-
-}
-
-// Drop completes the Ack embedded in ctx, if any, for a record a task decided
-// not to forward downstream (e.g. it was filtered out). It is the
-// single-record equivalent of Fanout(ctx, 0).
-func Drop(ctx context.Context) {
+// Release completes one branch: this task is finished with the record, whether it
+// forwarded, fanned out, or filtered it. Exactly once per record consumed —
+// twice acknowledges early, never leaves it for redelivery.
+func Release(ctx context.Context) {
 	if a, ok := FromContext(ctx); ok {
 		a.Done()
 	}
 }
 
 // Reject completes the Ack embedded in ctx, if any, as failed, for a record a
-// task could not process. Where Drop means the record is legitimately finished
+// task could not process. Where Release means the record is legitimately finished
 // with, Reject means it never made it: the source leaves it unacknowledged and
 // the broker redelivers it, rather than the pipeline waiting for a completion
 // that can't come.
@@ -156,11 +163,9 @@ func Rejected(ctx context.Context, err error) error {
 	return err
 }
 
-// Joined returns a new Ack with a single pending branch representing one output
-// record combined from several inputs. Attach it to that output via
-// WithContext: completing it transitively completes every Ack found among
-// ctxs, so the combined record's outcome is attributed back to each record
-// that went into it. ctxs with no Ack attached are ignored.
+// Joined returns an Ack for one record combined from several inputs; completing it
+// transitively completes every Ack among ctxs. An aggregator therefore does not
+// Release its inputs — this settles them, per contribution rather than per Ack.
 func Joined(ctxs ...context.Context) *Ack {
 
 	a := New()

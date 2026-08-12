@@ -107,9 +107,7 @@ func (s *snsTask) Run(input <-chan *record.Record, output chan<- *record.Record)
 			return ack.Rejected(r.Context, fmt.Errorf("failed to publish to SNS topic %s: %w", s.TopicArn, err))
 		}
 
-		if a, ok := ack.FromContext(r.Context); ok {
-			a.Done()
-		}
+		ack.Release(r.Context)
 	}
 
 	return nil

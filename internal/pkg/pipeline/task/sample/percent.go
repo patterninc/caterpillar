@@ -43,9 +43,9 @@ func (p *percent) filter(r *record.Record, output chan<- *record.Record) error {
 
 	if n.Int64() < int64(p.cutoff) {
 		p.sendRecord(r, output)
-	} else {
-		ack.Drop(r.Context)
 	}
+
+	ack.Release(r.Context)
 
 	return nil
 

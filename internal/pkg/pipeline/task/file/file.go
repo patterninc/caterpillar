@@ -220,9 +220,7 @@ func (f *file) writeFile(input <-chan *record.Record) error {
 			return f.abort(rc, err)
 		}
 
-		if a, ok := ack.FromContext(rc.Context); ok {
-			a.Done()
-		}
+		ack.Release(rc.Context)
 	}
 
 	return nil

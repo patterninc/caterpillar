@@ -38,7 +38,7 @@ func (r *replace) Run(input <-chan *record.Record, output chan<- *record.Record)
 			if !ok {
 				return nil
 			}
-			ack.Drop(record.Context)
+			ack.Release(record.Context)
 		}
 	}
 
@@ -48,6 +48,7 @@ func (r *replace) Run(input <-chan *record.Record, output chan<- *record.Record)
 			break
 		}
 		r.SendData(record.Context, []byte(rx.ReplaceAllString(string(record.Data), r.Replacement)), output)
+		ack.Release(record.Context)
 	}
 
 	return nil

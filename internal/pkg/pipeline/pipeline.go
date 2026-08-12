@@ -190,23 +190,27 @@ func (p *Pipeline) distributeToChannels(input <-chan *record.Record, outputs []c
 		}
 	}()
 
-	branches := 0
-	for _, ch := range outputs {
-		if ch != nil {
-			branches++
-		}
-	}
-
 	for rec := range input {
-		// structural fan-out: the record is duplicated to every parallel DAG
-		// branch, so its ack must represent all of them before any branch can
-		// complete it.
-		ack.Fanout(rec.Context, branches)
+
+		// this duplication doesn't go through Base.SendRecord, so it registers each
+		// branch itself. The branch the record arrived with is released only once
+		// every copy has been handed over, so a branch that completes early cannot
+		// settle the record while later ones are still being dispatched.
+		a, tracked := ack.FromContext(rec.Context)
+
 		for _, ch := range outputs {
 			if ch != nil {
+				if tracked {
+					a.AddBranch(1)
+				}
 				ch <- rec
 			}
 		}
+
+		if tracked {
+			a.Done()
+		}
+
 	}
 }
 

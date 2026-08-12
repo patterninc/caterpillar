@@ -30,10 +30,10 @@ func (s *split) Run(input <-chan *record.Record, output chan<- *record.Record) e
 			break
 		}
 		lines := strings.Split(strings.TrimSuffix(string(r.Data), s.Delimiter), s.Delimiter)
-		ack.Fanout(r.Context, len(lines))
 		for _, line := range lines {
 			s.SendData(r.Context, []byte(line), output)
 		}
+		ack.Release(r.Context)
 	}
 
 	return nil

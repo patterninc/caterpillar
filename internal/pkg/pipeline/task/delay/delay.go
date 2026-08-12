@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -37,6 +38,7 @@ func (d *delay) Run(input <-chan *record.Record, output chan<- *record.Record) e
 		}
 
 		d.SendRecord(r, output)
+		ack.Release(r.Context)
 	}
 
 	return nil

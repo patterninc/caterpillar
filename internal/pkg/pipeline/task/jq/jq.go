@@ -36,7 +36,7 @@ func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err
 			if !ok {
 				return nil
 			}
-			ack.Drop(r.Context)
+			ack.Release(r.Context)
 		}
 	}
 
@@ -58,30 +58,20 @@ func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err
 			return ack.Rejected(r.Context, err)
 		}
 		if items == nil {
-			ack.Drop(r.Context)
+			ack.Release(r.Context)
 			continue
 		}
 		if splitItems, ok := items.([]any); j.Explode && ok {
-			// marshal every item before adjusting the ack: failing partway
-			// through afterwards would leave branches counted but never sent,
-			// and a partial fan-out can't be unwound.
-			payloads := make([][]byte, 0, len(splitItems))
 			for _, splitItem := range splitItems {
 				if j.AsRaw {
-					payloads = append(payloads, fmt.Appendf(nil, "%v", splitItem))
+					j.SendData(r.Context, fmt.Appendf(nil, "%v", splitItem), output)
 					continue
 				}
 				jsonItem, err := json.Marshal(splitItem)
 				if err != nil {
 					return ack.Rejected(r.Context, err)
 				}
-				payloads = append(payloads, jsonItem)
-			}
-
-			ack.Fanout(r.Context, len(payloads))
-
-			for _, payload := range payloads {
-				j.SendData(r.Context, payload, output)
+				j.SendData(r.Context, jsonItem, output)
 			}
 		} else {
 			if j.AsRaw {
@@ -94,6 +84,8 @@ func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err
 				j.SendData(r.Context, jsonItem, output)
 			}
 		}
+
+		ack.Release(r.Context)
 	}
 
 	return

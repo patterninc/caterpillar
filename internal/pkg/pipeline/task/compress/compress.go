@@ -62,7 +62,7 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 
 		// skip empty records
 		if len(r.Data) == 0 {
-			ack.Drop(r.Context)
+			ack.Release(r.Context)
 			continue
 		}
 
@@ -80,17 +80,12 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 
 		// skip empty transformed data
 		if len(transformedData) == 0 {
-			ack.Drop(r.Context)
+			ack.Release(r.Context)
 			continue
 		}
 
-		if output != nil {
-			c.SendData(r.Context, transformedData, output)
-		} else if a, ok := ack.FromContext(r.Context); ok {
-			// terminal (sink) mode: nothing forwards this record on, so
-			// settle it here.
-			a.Done()
-		}
+		c.SendData(r.Context, transformedData, output)
+		ack.Release(r.Context)
 	}
 
 	return nil

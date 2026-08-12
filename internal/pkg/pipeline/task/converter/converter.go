@@ -83,17 +83,6 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) er
 			return ack.Rejected(r.Context, err)
 		}
 
-		// fan-out: one input can convert into many outputs, so count them all
-		// before sending any, or a downstream Done for the first could settle
-		// the whole record while the rest are still in flight.
-		sends := 0
-		for _, out := range outputs {
-			if out.Data != nil {
-				sends++
-			}
-		}
-		ack.Fanout(r.Context, sends)
-
 		for _, out := range outputs {
 			if out.Data != nil {
 				// Add metadata to context
@@ -104,6 +93,8 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) er
 				c.SendData(r.Context, out.Data, output)
 			}
 		}
+
+		ack.Release(r.Context)
 	}
 
 	return nil

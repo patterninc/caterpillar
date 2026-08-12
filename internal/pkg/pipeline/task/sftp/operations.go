@@ -37,9 +37,7 @@ func (s *sftp) upload(client *pkgsftp.Client, input <-chan *record.Record) error
 			return ack.Rejected(rc.Context, err)
 		}
 
-		if a, ok := ack.FromContext(rc.Context); ok {
-			a.Done()
-		}
+		ack.Release(rc.Context)
 	}
 
 	return nil

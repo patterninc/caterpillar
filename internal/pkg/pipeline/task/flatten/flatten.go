@@ -43,6 +43,7 @@ func (f *flatten) Run(input <-chan *record.Record, output chan<- *record.Record)
 		}
 
 		f.SendData(r.Context, flatJson, output)
+		ack.Release(r.Context)
 	}
 
 	return nil

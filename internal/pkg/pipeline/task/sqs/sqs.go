@@ -234,9 +234,7 @@ func (s *sqs) sendMessages(input <-chan *record.Record) error {
 			return ack.Rejected(r.Context, err)
 		}
 
-		if a, ok := ack.FromContext(r.Context); ok {
-			a.Done()
-		}
+		ack.Release(r.Context)
 	}
 	return nil
 }

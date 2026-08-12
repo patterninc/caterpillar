@@ -145,6 +145,35 @@ func (k *kafka) write(input <-chan *record.Record) error {
 		wg               sync.WaitGroup
 		firstDeliveryErr error
 	)
+
+	// acks for records the producer has taken but not yet confirmed. A message that
+	// never produces a delivery report — a flush timeout, typically — would
+	// otherwise leave its source record unsettled and the pipeline waiting on it
+	// forever, so whatever is left here at the end is failed explicitly.
+	var (
+		pendingMu sync.Mutex
+		pending   = make(map[*ack.Ack]struct{})
+	)
+
+	settle := func(a *ack.Ack, deliveryErr error) {
+
+		if a == nil {
+			return
+		}
+
+		pendingMu.Lock()
+		delete(pending, a)
+		pendingMu.Unlock()
+
+		if deliveryErr != nil {
+			a.Fail()
+			return
+		}
+
+		a.Done()
+
+	}
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -153,6 +182,7 @@ func (k *kafka) write(input <-chan *record.Record) error {
 			if !ok {
 				continue
 			}
+			a, _ := m.Opaque.(*ack.Ack)
 			if m.TopicPartition.Error != nil {
 				if firstDeliveryErr == nil {
 					firstDeliveryErr = m.TopicPartition.Error
@@ -161,15 +191,11 @@ func (k *kafka) write(input <-chan *record.Record) error {
 				}
 				// the source record never made it to the topic, so fail its
 				// ack: the source must leave it unacknowledged for retry.
-				if a, ok := m.Opaque.(*ack.Ack); ok {
-					a.Fail()
-				}
+				settle(a, m.TopicPartition.Error)
 				continue
 			}
 			// settle only on broker-confirmed delivery, not on local enqueue.
-			if a, ok := m.Opaque.(*ack.Ack); ok {
-				a.Done()
-			}
+			settle(a, nil)
 		}
 	}()
 
@@ -183,12 +209,17 @@ func (k *kafka) write(input <-chan *record.Record) error {
 		msgBytes, err := codec.serialize(k.Topic, r.Data)
 		if err != nil {
 			produceErr = fmt.Errorf("failed to serialize record for topic %s: %w", k.Topic, err)
+			ack.Reject(r.Context)
 			break
 		}
 
 		var opaque any
-		if a, ok := ack.FromContext(r.Context); ok {
+		a, tracked := ack.FromContext(r.Context)
+		if tracked {
 			opaque = a
+			pendingMu.Lock()
+			pending[a] = struct{}{}
+			pendingMu.Unlock()
 		}
 
 		if err = p.Produce(&ckafka.Message{
@@ -197,6 +228,8 @@ func (k *kafka) write(input <-chan *record.Record) error {
 			Opaque:         opaque,
 		}, deliveryCh); err != nil {
 			produceErr = fmt.Errorf("failed to enqueue message to topic %s: %w", k.Topic, err)
+			// the producer never took it, so no delivery report is coming
+			settle(a, produceErr)
 			break
 		}
 	}
@@ -209,6 +242,14 @@ func (k *kafka) write(input <-chan *record.Record) error {
 	p.Close()
 	close(deliveryCh)
 	wg.Wait()
+
+	// no delivery report ever arrived for these, so nothing else will settle them
+	pendingMu.Lock()
+	for a := range pending {
+		a.Fail()
+	}
+	pending = nil
+	pendingMu.Unlock()
 
 	if produceErr != nil {
 		return produceErr

@@ -41,11 +41,8 @@ func (e *echo) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 		// fmt.Println(r.GetContextValue(`names`))
 		fmt.Println(time.Now().Format(timeNowFormat), `-`, e.Name, `-`, string(item))
 
-		if output != nil {
-			e.SendRecord(r, output)
-		} else if a, ok := ack.FromContext(r.Context); ok {
-			a.Done()
-		}
+		e.SendRecord(r, output)
+		ack.Release(r.Context)
 	}
 
 	return
