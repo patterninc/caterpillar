@@ -10,13 +10,12 @@ tasks:
     path: |
       [
         .[]
-        | . as $case
-        | ($case.data | bcrypt($case.salt)) as $actual
+        | bcrypt(.data; .salt) as $actual
         | {
-            "name": $case.name,
-            "expected": $case.expected,
+            "name": .name,
+            "expected": .expected,
             "actual": $actual,
-            "match": ($actual == $case.expected)
+            "match": ($actual == .expected)
           }
       ] as $results
       | $results + [

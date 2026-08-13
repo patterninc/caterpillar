@@ -213,16 +213,17 @@ func messageAuthOptions() []gojq.CompilerOption {
 // caller-supplied salt has to be assembled here.
 func bcryptOptions() []gojq.CompilerOption {
 
-	opt := gojq.WithFunction("bcrypt", 1, 1, func(raw any, args []any) any {
+	opt := gojq.WithFunction("bcrypt", 2, 2, func(_ any, args []any) any {
 
-		data, ok := raw.(string)
+		// args[0] is the data to hash, args[1] is the salt
+		data, ok := args[0].(string)
 		if !ok {
-			panic(fmt.Errorf("expected string for data for bcrypt, got %T", raw))
+			panic(fmt.Errorf("expected string for data for bcrypt, got %T", args[0]))
 		}
 
-		salt, ok := args[0].(string)
+		salt, ok := args[1].(string)
 		if !ok {
-			panic(fmt.Errorf("expected string for salt for bcrypt, got %T", args[0]))
+			panic(fmt.Errorf("expected string for salt for bcrypt, got %T", args[1]))
 		}
 
 		encodedSalt, version, cost, err := parseBcryptSalt(salt)

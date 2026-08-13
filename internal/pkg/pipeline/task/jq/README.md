@@ -112,10 +112,10 @@ its own random salt, so this function exists for schemes that derive a value fro
 for example an API that signs requests with `bcrypt(client_id + "_" + timestamp)` using the client
 secret as the salt.
 
-**Signature:** `data | bcrypt(salt)`
+**Signature:** `bcrypt(data; salt)`
 
 **Parameters:**
-- `data` (string, piped): The value to hash. Maximum 72 bytes — bcrypt reads no further, so longer input is rejected rather than silently truncated.
+- `data` (string): The value to hash. Maximum 72 bytes — bcrypt reads no further, so longer input is rejected rather than silently truncated.
 - `salt` (string): Either a bare 22-character salt or a full modular-crypt string such as `$2a$04$abcdefghijklmnopqrstuu`. A complete hash is also accepted, in which case its salt is reused.
 
 To select a version or cost, supply the salt in modular-crypt form — `$2b$10$abcdefghijklmnopqrstuu`
@@ -134,24 +134,22 @@ tasks:
     type: jq
     path: |
       {
-        "signature": (
-          (.client_id + "_" + (.timestamp | tostring))
-          | bcrypt("{{ env \"CLIENT_SECRET\" }}")
+        "signature": bcrypt(
+          .client_id + "_" + (.timestamp | tostring);
+          "{{ env \"CLIENT_SECRET\" }}"
         )
       }
 ```
 
-When the salt comes from the record rather than a literal, bind it first. Inside `bcrypt(...)` the
-input is the piped string, so a bare `.salt` would be evaluated against that string instead of the
-enclosing object:
+Both arguments are evaluated against the record, so a salt carried on the record needs no binding:
 
 ```yaml
 tasks:
   - name: sign_with_per_record_salt
     type: jq
     path: |
-      . as $record | {
-        "signature": ($record.payload | bcrypt($record.salt))
+      {
+        "signature": bcrypt(.payload; .salt)
       }
 ```
 
