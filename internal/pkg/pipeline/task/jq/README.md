@@ -128,6 +128,59 @@ tasks:
         }
 ```
 
+### bcrypt
+
+Hashes the piped value with bcrypt using a salt you supply. Go's standard bcrypt always generates
+its own random salt, so this function exists for schemes that derive a value from a *fixed* salt —
+for example an API that signs requests with `bcrypt(client_id + "_" + timestamp)` using the client
+secret as the salt.
+
+**Signature:** `data | bcrypt(salt)`
+
+**Parameters:**
+- `data` (string, piped): The value to hash. Maximum 72 bytes — bcrypt reads no further, so longer input is rejected rather than silently truncated.
+- `salt` (string): Either a bare 22-character salt or a full modular-crypt string such as `$2a$04$abcdefghijklmnopqrstuu`. A complete hash is also accepted, in which case its salt is reused.
+
+To select a version or cost, supply the salt in modular-crypt form — `$2b$10$abcdefghijklmnopqrstuu`
+uses version `2b` at cost 10. A bare salt defaults to version `2a` at cost 4. Supported versions are
+`2`, `2a`, `2b` and `2y`; `2x` is not supported. Cost ranges from 4 to 31.
+
+The salt uses bcrypt's own base64 alphabet (`./A-Za-z0-9`), which orders characters differently from
+standard base64, so a salt produced by `@base64` will not round-trip.
+
+**Returns:** A modular-crypt string, `$<version>$<cost>$<salt><checksum>`
+
+**Example:**
+```yaml
+tasks:
+  - name: sign_token_request
+    type: jq
+    path: |
+      {
+        "signature": (
+          (.client_id + "_" + (.timestamp | tostring))
+          | bcrypt("{{ env \"CLIENT_SECRET\" }}")
+        )
+      }
+```
+
+When the salt comes from the record rather than a literal, bind it first. Inside `bcrypt(...)` the
+input is the piped string, so a bare `.salt` would be evaluated against that string instead of the
+enclosing object:
+
+```yaml
+tasks:
+  - name: sign_with_per_record_salt
+    type: jq
+    path: |
+      . as $record | {
+        "signature": ($record.payload | bcrypt($record.salt))
+      }
+```
+
+**Note:** The default cost of 4 is the lowest bcrypt permits. It suits reproducing a signature, but
+choose a substantially higher cost when hashing anything that needs to resist offline attack.
+
 ### translate
 
 Translates text using AWS Translate service.
@@ -158,10 +211,13 @@ tasks:
 
 ## Sample Pipelines
 
+- `test/pipelines/bcrypt_test.yaml` - bcrypt hashing against known-answer vectors
 - `test/pipelines/context_test.yaml` - JQ with context variables
 - `test/pipelines/convert_industries.yaml` - Data transformation with JQ
+- `test/pipelines/hash_test.yaml` - Hashing with JQ
 - `test/pipelines/html2json.yaml` - HTML to JSON conversion
 - `test/pipelines/translate_test.yaml` - Text translation with JQ
+- `test/pipelines/uuid_test.yaml` - UUID generation with JQ
 
 ## Use Cases
 

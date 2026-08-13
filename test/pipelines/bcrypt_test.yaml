@@ -1,0 +1,34 @@
+tasks:
+  - name: read_bcrypt_cases
+    type: file
+    path: test/pipelines/bcrypt_cases.json
+  - name: hash_and_compare
+    type: jq
+    explode: true
+    # Each case carries either an expected hash or an expected error message. The salt is
+    # bound to $case first: inside bcrypt(...) the input is the piped data string, so a
+    # bare .salt would not resolve there.
+    path: |
+      [
+        .[]
+        | . as $case
+        | (try ($case.data | bcrypt($case.salt)) catch tostring) as $actual
+        | ($case.expected // $case.expected_error) as $expected
+        | {
+            "name": $case.name,
+            "expected": $expected,
+            "actual": $actual,
+            "match": ($actual == $expected)
+          }
+      ] as $results
+      | $results + [
+          {
+            "name": "summary",
+            "passed": ([$results[] | select(.match)] | length),
+            "total": ($results | length),
+            "all_passed": (([$results[] | select(.match | not)] | length) == 0)
+          }
+        ]
+  - name: echo
+    type: echo
+    only_data: true
