@@ -1,0 +1,32 @@
+tasks:
+  - name: read_bcrypt_cases
+    type: file
+    path: test/pipelines/bcrypt_cases.json
+  - name: hash_and_compare
+    type: jq
+    explode: true
+    # Only valid input belongs here: bcrypt panics on a bad salt or oversized data, which
+    # takes the run down instead of failing a comparison.
+    path: |
+      [
+        .[]
+        | . as $case
+        | ($case.data | bcrypt($case.salt)) as $actual
+        | {
+            "name": $case.name,
+            "expected": $case.expected,
+            "actual": $actual,
+            "match": ($actual == $case.expected)
+          }
+      ] as $results
+      | $results + [
+          {
+            "name": "summary",
+            "passed": ([$results[] | select(.match)] | length),
+            "total": ($results | length),
+            "all_passed": (([$results[] | select(.match | not)] | length) == 0)
+          }
+        ]
+  - name: echo
+    type: echo
+    only_data: true
