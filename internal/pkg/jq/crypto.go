@@ -104,7 +104,7 @@ func cryptoHashOptions() []gojq.CompilerOption {
 		opt := gojq.WithFunction(name, 0, 0, func(raw any, _ []any) any {
 			str, ok := raw.(string)
 			if !ok {
-				panic(fmt.Errorf("expected string for %s, got %T", name, raw))
+				return fmt.Errorf("expected string for %s, got %T", name, raw)
 			}
 			return fn(str)
 		})
@@ -133,15 +133,15 @@ func signOptions() []gojq.CompilerOption {
 			// args[0] is the data to sign, args[1] is the private key
 			data, ok := args[0].(string)
 			if !ok {
-				panic(fmt.Errorf("expected string for data for sign  %s, got %T", name, args[0]))
+				return fmt.Errorf("expected string for data for sign  %s, got %T", name, args[0])
 			}
 			key, ok := args[1].(string)
 			if !ok {
-				panic(fmt.Errorf("expected string for key for sign %s, got %T", name, args[1]))
+				return fmt.Errorf("expected string for key for sign %s, got %T", name, args[1])
 			}
 			result, err := fn(data, []byte(key))
 			if err != nil {
-				panic(err)
+				return err
 			}
 			return result
 		})
@@ -157,17 +157,17 @@ func messageAuthOptions() []gojq.CompilerOption {
 		opt := gojq.WithFunction(name, 2, 3, func(_ any, args []any) any {
 			data, ok := args[0].(string)
 			if !ok {
-				panic(fmt.Errorf("expected string for data %s, got %T", name, args[0]))
+				return fmt.Errorf("expected string for data %s, got %T", name, args[0])
 			}
 			key, ok := args[1].(string)
 			if !ok {
-				panic(fmt.Errorf("expected string for key %s, got %T", name, args[0]))
+				return fmt.Errorf("expected string for key %s, got %T", name, args[0])
 			}
 			var pref = []byte{}
 			if len(args) == 3 {
 				p, ok := args[2].(string)
 				if !ok {
-					panic(fmt.Errorf("expected string for pref %s, got %T", name, args[2]))
+					return fmt.Errorf("expected string for pref %s, got %T", name, args[2])
 				}
 				pref = []byte(p)
 			}

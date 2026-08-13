@@ -82,8 +82,10 @@ func (q *Query) Execute(document []byte, inputs ...any) (any, error) {
 			break
 		}
 
-		if _, isError := v.(error); isError {
-			return nil, nil
+		// Custom functions signal failure by returning an error rather than panicking,
+		// since gojq does not recover panics raised inside them.
+		if err, isError := v.(error); isError {
+			return nil, err
 		}
 
 		result = append(result, v)

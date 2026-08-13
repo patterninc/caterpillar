@@ -105,6 +105,29 @@ tasks:
 
 In addition to standard JQ functions, Caterpillar provides custom functions to extend JQ capabilities:
 
+### Error handling
+
+Custom functions report bad input as a JQ error. With `fail_on_error: false` (the default) the
+offending record is logged and skipped and the task carries on; with `fail_on_error: true` the error
+stops the task and fails the pipeline.
+
+Because these are ordinary JQ errors, they can be caught and turned into data. Bind the result of a
+single call rather than repeating the call in both branches, since some of these functions are
+expensive:
+
+```yaml
+tasks:
+  - name: hash_or_report
+    type: jq
+    path: |
+      . as $record
+      | (try ($record.payload | sha256) catch "error: \(.)") as $outcome
+      | {
+          "id": $record.id,
+          "outcome": $outcome
+        }
+```
+
 ### translate
 
 Translates text using AWS Translate service.

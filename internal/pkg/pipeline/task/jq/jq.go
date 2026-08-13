@@ -38,7 +38,13 @@ func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err
 			// Execute the JQ query
 			items, err := query.Execute(r.Data)
 			if err != nil {
-				return err
+				// One malformed record must not truncate the stream, so a query failure
+				// only stops the task when the pipeline asked to fail on error.
+				if j.GetFailOnError() {
+					return err
+				}
+				fmt.Printf("error in %s: skipping record %d: %s\n", j.GetName(), r.ID, err)
+				continue
 			}
 			if items == nil {
 				continue

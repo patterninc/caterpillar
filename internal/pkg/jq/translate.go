@@ -2,6 +2,7 @@ package jq
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -55,31 +56,31 @@ func translateText(_ any, args []any) any {
 	ctx := context.Background()
 	txClient, err := new(ctx)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	if len(args) < 3 {
-		panic("translate requires 3 arguments: text, source language, target language")
+		return fmt.Errorf("translate requires 3 arguments: text, source language, target language")
 	}
 
 	textStr, ok := args[0].(string)
 	if !ok {
-		panic("invalid text type")
+		return fmt.Errorf("expected string for text for translate, got %T", args[0])
 	}
 
 	sourceLang, ok := args[1].(string)
 	if !ok {
-		panic("invalid source language type")
+		return fmt.Errorf("expected string for source language for translate, got %T", args[1])
 	}
 
 	targetLang, ok := args[2].(string)
 	if !ok {
-		panic("invalid target language type")
+		return fmt.Errorf("expected string for target language for translate, got %T", args[2])
 	}
 
 	translatedText, err := txClient.TranslateText(ctx, textStr, sourceLang, targetLang)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	return translatedText
