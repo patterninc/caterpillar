@@ -1,0 +1,68 @@
+[
+  {
+    "name": "bare_salt_defaults_to_2a_cost_4",
+    "data": "allmine",
+    "salt": "XajjQvNhvvRt5GSeFk1xFe",
+    "expected": "$2a$04$XajjQvNhvvRt5GSeFk1xFeFSjbRlNk/Ta1yxtAEbNtK1N.ZPZVHUu"
+  },
+  {
+    "name": "upstream_known_answer_cost_10",
+    "data": "allmine",
+    "salt": "$2a$10$XajjQvNhvvRt5GSeFk1xFe",
+    "expected": "$2a$10$XajjQvNhvvRt5GSeFk1xFeyqRrsxkhBkUiQeg0dt.wU1qD4aFDcga"
+  },
+  {
+    "name": "cost_read_from_salt_prefix",
+    "data": "allmine",
+    "salt": "$2a$06$XajjQvNhvvRt5GSeFk1xFe",
+    "expected": "$2a$06$XajjQvNhvvRt5GSeFk1xFenXDhAWTtiuYVFqohMZ8DFcwdkTSrQ9m"
+  },
+  {
+    "name": "version_2b",
+    "data": "allmine",
+    "salt": "$2b$04$XajjQvNhvvRt5GSeFk1xFe",
+    "expected": "$2b$04$XajjQvNhvvRt5GSeFk1xFeFSjbRlNk/Ta1yxtAEbNtK1N.ZPZVHUu"
+  },
+  {
+    "name": "version_2y",
+    "data": "allmine",
+    "salt": "$2y$04$XajjQvNhvvRt5GSeFk1xFe",
+    "expected": "$2y$04$XajjQvNhvvRt5GSeFk1xFeFSjbRlNk/Ta1yxtAEbNtK1N.ZPZVHUu"
+  },
+  {
+    "name": "full_hash_reused_as_salt",
+    "data": "allmine",
+    "salt": "$2a$10$XajjQvNhvvRt5GSeFk1xFeyqRrsxkhBkUiQeg0dt.wU1qD4aFDcga",
+    "expected": "$2a$10$XajjQvNhvvRt5GSeFk1xFeyqRrsxkhBkUiQeg0dt.wU1qD4aFDcga"
+  },
+  {
+    "name": "single_byte_of_data",
+    "data": "k",
+    "salt": "XajjQvNhvvRt5GSeFk1xFe",
+    "expected": "$2a$04$XajjQvNhvvRt5GSeFk1xFepbFmn5qB6E32eDZVF4nGTBzvpodiua2"
+  },
+  {
+    "name": "data_at_72_byte_maximum",
+    "data": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "salt": "XajjQvNhvvRt5GSeFk1xFe",
+    "expected": "$2a$04$XajjQvNhvvRt5GSeFk1xFeEJbavgjNvL/jG9AE6IkyS6AkyJy/ySS"
+  },
+  {
+    "name": "non_ascii_data",
+    "data": "pästel-Ω",
+    "salt": "XajjQvNhvvRt5GSeFk1xFe",
+    "expected": "$2a$04$XajjQvNhvvRt5GSeFk1xFe730/5CcL3wKWG7T7.STsMSIB3tRROg."
+  },
+  {
+    "name": "salt_of_all_dots",
+    "data": "allmine",
+    "salt": "......................",
+    "expected": "$2a$04$......................COqHO4FmNPvlXsQuH6eZpm4fmQBEyxG"
+  },
+  {
+    "name": "request_signature_shape",
+    "data": "test-client-id_1699999999999",
+    "salt": "$2a$04$abcdefghijklmnopqrstuu",
+    "expected": "$2a$04$abcdefghijklmnopqrstuuH1UXnaO7ONwppVwdkk87sINyprJzJI."
+  }
+]
