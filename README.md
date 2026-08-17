@@ -76,15 +76,19 @@ Caterpillar is built around the concept of **tasks** that process **records** in
 
 Errors fall into two tiers, chosen per task by `fail_on_error`.
 
-**Without `fail_on_error` (the default), an error is reported and the run still exits zero.**
-It prints as `error in <task name>: <error>` but is not recorded against the pipeline, so an
-unnoticed failure resembles a clean run that merely produced fewer records than expected. The
-line goes to stdout, interleaved with record output, rather than to stderr.
+**Without `fail_on_error` (the default), a failure is reported and the run still exits zero.**
+Nothing is recorded against the pipeline, so an unnoticed failure resembles a clean run that
+merely produced fewer records than expected. Both forms below go to stdout, interleaved with
+record output, rather than to stderr — which is why they are easy to miss.
 
-How much work survives depends on the task. `jq` treats a query error as a property of the
-offending record: it reports the error, skips that record, and keeps consuming, so one bad
-record costs one record. Most other tasks instead end the worker's read loop, which at the
-default `task_concurrency: 1` ends the task and leaves downstream with nothing further.
+How much work survives, and which form you get, depends on the task:
+
+- `jq` treats a query error as a property of the offending record. It emits
+  `WARN: <task name>: skipping record <id>: <error>`, drops that record, and keeps consuming,
+  so one bad record costs one record.
+- Most tasks instead end the worker's read loop and report `error in <task name>: <error>`. At
+  the default `task_concurrency: 1` that ends the task, leaving downstream with nothing
+  further.
 
 **With `fail_on_error: true`, the error fails the run.** Set it on any task whose failure
 should be fatal:

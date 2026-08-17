@@ -40,9 +40,10 @@ func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err
 			if err != nil {
 				// A query error is a property of this record, not of the pipeline, so
 				// without fail_on_error we report it and move to the next record rather
-				// than ending the task and starving everything downstream.
+				// than ending the task and starving everything downstream. It warns
+				// rather than errors because the run is not failing over it.
 				if !j.GetFailOnError() {
-					fmt.Printf("error in %s (record %d): %s\n", j.GetName(), r.ID, err)
+					fmt.Printf("WARN: %s: skipping record %d: %s\n", j.GetName(), r.ID, err)
 					continue
 				}
 				return err
