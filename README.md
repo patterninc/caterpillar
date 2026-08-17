@@ -87,8 +87,16 @@ How much work survives, and which form you get, depends on the task:
   `WARN: <task name>: skipping record <id>: <error>`, drops that record, and keeps consuming,
   so one bad record costs one record.
 - Most tasks instead end the worker's read loop and report `error in <task name>: <error>`. At
-  the default `task_concurrency: 1` that ends the task, leaving downstream with nothing
-  further.
+  the default `task_concurrency: 1` that ends the task. Records already buffered in its output
+  channel still reach downstream; that channel is then closed, and the rest of the pipeline
+  finishes normally.
+
+> **Backpressure caveat.** Ending a read loop early is only safe while the upstream task has
+> finished producing. If it is still producing, the channel between them fills to
+> `channel_size` (default 10,000) and the upstream blocks on send forever — its own output
+> channel never closes, so the run neither completes nor exits, with no failure summary. A
+> pipeline that can hold more than `channel_size` records in flight cannot rely on
+> `fail_on_error` to terminate the run promptly.
 
 **With `fail_on_error: true`, the error fails the run.** Set it on any task whose failure
 should be fatal:
