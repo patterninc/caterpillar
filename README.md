@@ -79,7 +79,8 @@ loop and stops that task. There is no framework-wide tolerant tier — a task ei
 never hit an error at all. Errors are reported as `error in <task name>: <error>` on stdout,
 interleaved with record output rather than sent to stderr, which is why they are easy to miss.
 
-What `fail_on_error` decides is whether a critical error fails the *run*:
+What `fail_on_error` decides is the run's verdict — the exit status reported to whatever
+scheduled the pipeline:
 
 ```yaml
 tasks:
@@ -88,11 +89,15 @@ tasks:
     fail_on_error: true  # Failure here fails the run
 ```
 
-- **Unset (the default)** — the error is printed but not recorded against the pipeline, and the
-  run still exits zero. An unnoticed failure resembles a clean run that merely produced fewer
-  records than expected.
+- **Unset (the default)** — the error is printed, nothing is recorded against the pipeline, and
+  the run exits zero. This *attests the run as successful*: a caller reading the exit status is
+  told the pipeline succeeded, even though the error cost records. Such a run is
+  indistinguishable from a clean one that simply had less data to process.
 - **`fail_on_error: true`** — the error is recorded and the run exits non-zero with a
-  `pipeline failed with errors:` summary naming each failed task.
+  `pipeline failed with errors:` summary naming each failed task, attesting the run as failed.
+
+Leaving it unset is therefore a positive claim that errors on that task are acceptable, not a
+neutral default, and is worth choosing deliberately for every task that can fail.
 
 Either way the failing worker stops while other tasks are left to drain, so the non-zero exit
 arrives at the end of the run. `fail_on_error` is not a kill switch for work already in flight.
