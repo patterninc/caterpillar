@@ -1,0 +1,27 @@
+# Failure-path pipeline: this is EXPECTED to exit 1, reporting
+#   Task 'raise_on_match' failed with error: error: unexpected name: Abby
+# after echoing the four names that precede Abby. A zero exit, with the other nine
+# names echoed and Abby simply absent, is the regression this guards: the jq error
+# was swallowed into an empty result, the record was dropped silently, and
+# fail_on_error had nothing to act on.
+tasks:
+  - name: read_names
+    type: file
+    path: test/pipelines/names.txt
+  - name: split_to_lines
+    type: split
+    delimiter: "\n"
+  - name: first_ten
+    type: sample
+    filter: head
+    limit: 10
+  - name: raise_on_match
+    type: jq
+    fail_on_error: true
+    path: |
+      if . == "Abby" then
+        error("unexpected name: \(.)")
+      else . end
+  - name: echo
+    type: echo
+    only_data: true

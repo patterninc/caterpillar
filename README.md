@@ -22,7 +22,7 @@ The system is particularly useful for:
 
 ### Prerequisites
 
-- Go 1.24.5 or later
+- Go 1.24.7 or later
 - AWS CLI configured (for AWS-related tasks)
 
 ### Building and Running
@@ -74,20 +74,28 @@ Caterpillar is built around the concept of **tasks** that process **records** in
 
 ### Error Handling
 
-By default, tasks handle errors gracefully:
-- **Non-critical errors** are logged but don't stop the pipeline
-- **Task failures** are recorded but processing continues
-- **Pipeline completion** returns a count of processed records
+By default, an error is logged and the pipeline exits zero:
+- **The failing worker stops.** Returning an error ends that worker's read loop, so it stops
+  consuming records rather than skipping the offending record and carrying on. With the
+  default `task_concurrency: 1` that ends the task, and downstream receives nothing further;
+  with several workers, the others keep going.
+- **The error is printed** as `error in <task name>: <error>`, but is not recorded against
+  the pipeline unless `fail_on_error` is set on that task.
+- **The exit code stays zero**, which is why an unnoticed failure can look like a clean run
+  that simply produced fewer records than expected.
 
-However, you can configure tasks to fail the entire pipeline on error:
+Set `fail_on_error` on any task whose failure should fail the run:
 ```yaml
 tasks:
   - name: critical_task
     type: http
-    fail_on_error: true  # Pipeline stops if this task fails
+    fail_on_error: true  # Failure here fails the run
 ```
 
-When `fail_on_error` is set, the pipeline will return a non-zero exit code if any configured task encounters an error.
+The error is then recorded against the pipeline, and the run exits non-zero with a
+`pipeline failed with errors:` summary naming each failed task. Remaining tasks still drain
+to completion first — `fail_on_error` determines how the run is *reported*, and does not
+cancel work already in flight.
 
 ### DAG (Directed Acyclic Graph) Execution - EXPERIMENTAL
 
@@ -224,6 +232,7 @@ tasks:
 
 Caterpillar supports the following tasks, each of which can serve different roles depending on their configuration:
 
+- **`archive`** - [Pack and unpack archives (tar, zip)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/archive/README.md)
 - **`aws_parameter_store`** - [Read parameters from AWS Systems Manager Parameter Store](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/aws/parameter_store/README.md)
 - **`compress`** - [Compress or decompress data using various algorithms](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/compress/README.md)
 - **`converter`** - [Convert data between different formats (CSV, HTML, JSON, XML, SST, Protobuf)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/converter/README.md)
@@ -322,25 +331,22 @@ Each task supports common configuration options:
 tasks:
   - name: my_task
     type: http
-    fail_on_error: true        # Stop pipeline on error
+    fail_on_error: true        # Fail the run if this task errors
     task_concurrency: 10       # Process with 10 concurrent workers
     context:
       extracted_value: .data.value  # Set context for downstream tasks
 ```
 
-### Error Handling
-Tasks can be configured to fail the entire pipeline on error:
-
-```yaml
-tasks:
-  - name: critical_task
-    type: http
-    fail_on_error: true  # Pipeline stops if this task fails
-```
+For what happens with and without `fail_on_error`, see [Error Handling](#error-handling)
+under Core Concepts.
 
 ## Examples
 
-See the `test/pipelines/` directory for comprehensive examples of different pipeline configurations and task combinations.
+See the `test/pipelines/` directory for comprehensive examples of different pipeline configurations and task combinations. Files named `*_test.yaml` there double as this project's tests — each exercises one feature end to end and is meant to be run directly:
+
+```bash
+./caterpillar -conf test/pipelines/hash_test.yaml
+```
 
 ## Credits
 
