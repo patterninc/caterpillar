@@ -19,30 +19,32 @@ The JQ task applies JQ queries to transform JSON data. It receives records from 
 | `path` | string | - | JQ query expression to apply |
 | `explode` | bool | `false` | If true, splits array results into individual records |
 | `as_raw` | bool | `false` | If true, outputs raw values instead of JSON |
-| `ignore_error` | bool | `true` | If true, a query error is non-critical: the record is skipped and the task continues (see [Query Errors](#query-errors)) |
-| `fail_on_error` | bool | `false` | Promotes an ignored query error back to critical, so it ends the task and the run exits non-zero |
+| `ignore_error` | bool | `false` | If true, a query error is non-critical: the record is skipped and the task continues (see [Query Errors](#query-errors)) |
+| `fail_on_error` | bool | `false` | Whether a critical query error makes the run exit non-zero |
 
 ## Query Errors
 
 A query can fail on a single record — an explicit `error("...")`, or a runtime type error such
-as adding a number to a string. `ignore_error` classifies that failure and `fail_on_error`
-promotes it:
+as adding a number to a string. `ignore_error` classifies that failure:
 
-- **Non-critical** — `ignore_error: true`, the default. The record is skipped and the task
-  continues, so one bad record costs one record. Each skip reports
-  `WARN: <task name>: skipping record <id>: <error>`. The run exits zero, which makes those
-  lines the only signal that data was dropped.
-- **Critical** — `ignore_error: false`. The error ends the task, and records behind it are never
-  processed.
-- **Promoted** — `fail_on_error: true` turns an otherwise-ignored error critical *and* attests
-  the run as failed. It takes precedence, so it makes `ignore_error` moot.
+- **Critical** (the default) — the error ends the task, and records behind it are never
+  processed. `fail_on_error` then decides the run's verdict, exactly as it does for any other
+  task's error.
+- **Non-critical** (`ignore_error: true`) — the record is skipped and the task continues, so one
+  bad record costs one record. Each skip reports
+  `WARN: <task name>: skipping record <id>: <error>`.
 
 | `ignore_error` | `fail_on_error` | task | run |
 |---|---|---|---|
-| `true` (default) | unset (default) | continues, that record dropped | exits 0 |
-| `true` | `true` | stops at the bad record | exits 1 |
-| `false` | unset | stops at the bad record | exits 0 |
-| `false` | `true` | stops at the bad record | exits 1 |
+| unset (default) | unset (default) | stops at the bad record | exits 0 |
+| unset (default) | `true` | stops at the bad record | exits 1 |
+| `true` | unset | continues, that record dropped | exits 0 |
+| `true` | `true` | continues, that record dropped | exits 0 |
+
+The last row is worth noting: an ignored error is never returned from the task, so there is
+nothing for `fail_on_error` to judge and the run still exits 0. Tolerating a bad record and
+reporting the run as failed cannot currently be combined — the `WARN` lines are the only
+signal that data was dropped.
 
 Note that a query with no output is not an error: a filter that matches nothing (for example
 `select(...)` rejecting the input) simply produces no record, with nothing reported.

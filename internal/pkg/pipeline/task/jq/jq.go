@@ -14,11 +14,11 @@ type jq struct {
 	Path        config.String `yaml:"path,omitempty" json:"path,omitempty"`
 	Explode     bool          `yaml:"explode,omitempty" json:"explode,omitempty"`
 	AsRaw       bool          `yaml:"as_raw,omitempty" json:"as_raw,omitempty"`
-	IgnoreError bool          `yaml:"ignore_error" json:"ignore_error"`
+	IgnoreError bool          `yaml:"ignore_error,omitempty" json:"ignore_error,omitempty"`
 }
 
 func New() (task.Task, error) {
-	return &jq{IgnoreError: true}, nil
+	return &jq{}, nil
 }
 
 func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
@@ -40,10 +40,10 @@ func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err
 			items, err := query.Execute(r.Data)
 			if err != nil {
 				// An ignored query error costs only its own record, since it describes
-				// that record rather than the pipeline. fail_on_error promotes it back to
-				// critical, where it ends the task and the run is attested as failed. It
-				// warns rather than errors precisely because the run is not failing.
-				if j.IgnoreError && !j.GetFailOnError() {
+				// that record rather than the pipeline, and warns because the run is not
+				// failing over it. Otherwise it is critical: return, and let fail_on_error
+				// judge the verdict as it does for every other task.
+				if j.IgnoreError {
 					fmt.Printf("WARN: %s: skipping record %d: %s\n", j.GetName(), r.ID, err)
 					continue
 				}

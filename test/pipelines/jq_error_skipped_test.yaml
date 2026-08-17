@@ -15,6 +15,7 @@ tasks:
     limit: 10
   - name: raise_on_match
     type: jq
+    ignore_error: true
     path: |
       if . == "Abby" then
         error("unexpected name: \(.)")

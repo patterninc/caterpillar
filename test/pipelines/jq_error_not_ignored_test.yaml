@@ -1,5 +1,5 @@
-# Covers ignore_error: false without fail_on_error -- the only combination where a bad
-# record ends the task while the run is still attested as successful.
+# Covers a critical query error with fail_on_error left off: the bad record ends the
+# task, yet the run is still attested as successful.
 tasks:
   - name: read_names
     type: file
