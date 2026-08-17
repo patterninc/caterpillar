@@ -108,11 +108,12 @@ A few tasks classify one specific condition as non-critical, skipping the offend
 continuing instead of returning. Which condition, and what promotes it back to critical, is
 per-task behavior documented in that task's README:
 
-- **`jq`** — a query error on a single record, when `ignore_error: true` is set.
+- **`jq`** — a query error on a single record; non-critical until `ignore_error: false`.
 - **`xpath`** — a container XPath matching nothing; non-critical until `ignore_missing: false`.
 
 An error a task ignores is never returned, so `fail_on_error` has nothing to judge and the run
-exits zero regardless.
+exits zero regardless. Failing a run on one of these takes both the task's field and
+`fail_on_error`.
 
 > **Backpressure caveat.** A task that stops reading is only safe while its upstream has
 > finished producing. If the upstream is still producing, the channel between them fills to

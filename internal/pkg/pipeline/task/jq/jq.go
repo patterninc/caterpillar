@@ -14,11 +14,11 @@ type jq struct {
 	Path        config.String `yaml:"path,omitempty" json:"path,omitempty"`
 	Explode     bool          `yaml:"explode,omitempty" json:"explode,omitempty"`
 	AsRaw       bool          `yaml:"as_raw,omitempty" json:"as_raw,omitempty"`
-	IgnoreError bool          `yaml:"ignore_error,omitempty" json:"ignore_error,omitempty"`
+	IgnoreError bool          `yaml:"ignore_error" json:"ignore_error"`
 }
 
 func New() (task.Task, error) {
-	return &jq{}, nil
+	return &jq{IgnoreError: true}, nil
 }
 
 func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
