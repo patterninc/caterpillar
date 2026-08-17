@@ -1,0 +1,24 @@
+# Companion to jq_error_test.yaml, covering the same error without fail_on_error.
+# Expected: exit 0, one `error in raise_on_match (record 5): ...` line, and the nine
+# names other than Abby echoed. Nine names but no error line means the failure went
+# silent again; four names means the error ended the task instead of skipping a record.
+tasks:
+  - name: read_names
+    type: file
+    path: test/pipelines/names.txt
+  - name: split_to_lines
+    type: split
+    delimiter: "\n"
+  - name: first_ten
+    type: sample
+    filter: head
+    limit: 10
+  - name: raise_on_match
+    type: jq
+    path: |
+      if . == "Abby" then
+        error("unexpected name: \(.)")
+      else . end
+  - name: echo
+    type: echo
+    only_data: true

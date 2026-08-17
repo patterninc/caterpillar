@@ -38,6 +38,13 @@ func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err
 			// Execute the JQ query
 			items, err := query.Execute(r.Data)
 			if err != nil {
+				// A query error is a property of this record, not of the pipeline, so
+				// without fail_on_error we report it and move to the next record rather
+				// than ending the task and starving everything downstream.
+				if !j.GetFailOnError() {
+					fmt.Printf("error in %s (record %d): %s\n", j.GetName(), r.ID, err)
+					continue
+				}
 				return err
 			}
 			if items == nil {

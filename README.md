@@ -74,17 +74,20 @@ Caterpillar is built around the concept of **tasks** that process **records** in
 
 ### Error Handling
 
-By default, an error is logged and the pipeline exits zero:
-- **The failing worker stops.** Returning an error ends that worker's read loop, so it stops
-  consuming records rather than skipping the offending record and carrying on. With the
-  default `task_concurrency: 1` that ends the task, and downstream receives nothing further;
-  with several workers, the others keep going.
-- **The error is printed** as `error in <task name>: <error>`, but is not recorded against
-  the pipeline unless `fail_on_error` is set on that task.
-- **The exit code stays zero**, which is why an unnoticed failure can look like a clean run
-  that simply produced fewer records than expected.
+Errors fall into two tiers, chosen per task by `fail_on_error`.
 
-Set `fail_on_error` on any task whose failure should fail the run:
+**Without `fail_on_error` (the default), an error is reported and the run still exits zero.**
+It prints as `error in <task name>: <error>` but is not recorded against the pipeline, so an
+unnoticed failure resembles a clean run that merely produced fewer records than expected. The
+line goes to stdout, interleaved with record output, rather than to stderr.
+
+How much work survives depends on the task. `jq` treats a query error as a property of the
+offending record: it reports the error, skips that record, and keeps consuming, so one bad
+record costs one record. Most other tasks instead end the worker's read loop, which at the
+default `task_concurrency: 1` ends the task and leaves downstream with nothing further.
+
+**With `fail_on_error: true`, the error fails the run.** Set it on any task whose failure
+should be fatal:
 ```yaml
 tasks:
   - name: critical_task
@@ -92,10 +95,11 @@ tasks:
     fail_on_error: true  # Failure here fails the run
 ```
 
-The error is then recorded against the pipeline, and the run exits non-zero with a
-`pipeline failed with errors:` summary naming each failed task. Remaining tasks still drain
-to completion first — `fail_on_error` determines how the run is *reported*, and does not
-cancel work already in flight.
+The error is recorded against the pipeline and the run exits non-zero with a
+`pipeline failed with errors:` summary naming each failed task. The failing worker stops, but
+other tasks are not cancelled — they drain to completion first, and the non-zero exit comes at
+the end. So `fail_on_error` decides whether the run is *reported* as failed; it is not a
+kill switch for work already in flight.
 
 ### DAG (Directed Acyclic Graph) Execution - EXPERIMENTAL
 
