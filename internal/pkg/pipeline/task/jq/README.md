@@ -19,20 +19,14 @@ The JQ task applies JQ queries to transform JSON data. It receives records from 
 | `path` | string | - | JQ query expression to apply |
 | `explode` | bool | `false` | If true, splits array results into individual records |
 | `as_raw` | bool | `false` | If true, outputs raw values instead of JSON |
-| `ignore_error` | bool | `true` | If true, a query error is non-critical: the record is skipped and the task continues (see [Query Errors](#query-errors)) |
+| `ignore_error` | bool | `true` | If false, a query error is critical and ends the task; if true, it is non-critical and only the offending record is skipped (see [Query Errors](#query-errors)) |
 | `fail_on_error` | bool | `false` | Whether a critical query error makes the run exit non-zero |
 
 ## Query Errors
 
-A query can fail on a single record — an explicit `error("...")`, or a runtime type error such
-as adding a number to a string. `ignore_error` classifies that failure:
-
-- **Non-critical** (the default) — the record is skipped and the task continues, so one bad
-  record costs one record. Each skip reports
-  `WARN: <task name>: skipping record <id>: <error>`.
-- **Critical** (`ignore_error: false`) — the error ends the task, records behind it are never
-  processed, and `fail_on_error` then decides the run's verdict exactly as it does for any other
-  task's error.
+A query can fail on a single record — an explicit `error("...")`, or a runtime type error such as
+adding a number to a string. `ignore_error` decides whether that ends the task, and
+`fail_on_error` decides the run's verdict, exactly as it does for any other task's error:
 
 | `ignore_error` | `fail_on_error` | task | run |
 |---|---|---|---|
@@ -41,18 +35,14 @@ as adding a number to a string. `ignore_error` classifies that failure:
 | `false` | unset | stops at the bad record | exits 0 |
 | `false` | `true` | stops at the bad record | exits 1 |
 
-Note the second row: an ignored error is never returned from the task, so `fail_on_error` has
-nothing to judge. Failing a run on a query error therefore takes **both** `ignore_error: false`
-and `fail_on_error: true`, and tolerating a bad record while still reporting the run as failed
-cannot be expressed. Under the defaults the `WARN` lines are the only signal that data was
-dropped.
+Each skipped record reports `WARN: <task name>: skipping record <id>: <error>`, which under the
+defaults is the only signal that data was dropped. An ignored error is never returned from the
+task, so `fail_on_error` has nothing to judge — hence the second row — and failing a run on a
+query error takes both fields. Tolerating a record while still reporting the run as failed
+cannot be expressed.
 
-Note that a query with no output is not an error: a filter that matches nothing (for example
+A query with no output is not an error: a filter that matches nothing (for example
 `select(...)` rejecting the input) simply produces no record, with nothing reported.
-
-Against the same failing query, `test/pipelines/jq_error_skipped_test.yaml` covers the defaults,
-`jq_error_not_ignored_test.yaml` the critical case that still exits 0, and
-`jq_error_test.yaml` the critical case that fails the run.
 
 ## JQ Query Examples
 
@@ -223,7 +213,9 @@ tasks:
 - `test/pipelines/context_test.yaml` - JQ with context variables
 - `test/pipelines/convert_industries.yaml` - Data transformation with JQ
 - `test/pipelines/hash_test.yaml` - Hashing with JQ
-- `test/pipelines/html2json.yaml` - HTML to JSON conversion
+- `test/pipelines/jq_error_not_ignored_test.yaml` - `ignore_error: false`, so the task stops while the run still exits 0
+- `test/pipelines/jq_error_skipped_test.yaml` - a query error skipped under the defaults
+- `test/pipelines/jq_error_test.yaml` - `ignore_error: false` with `fail_on_error`, failing the run
 - `test/pipelines/translate_test.yaml` - Text translation with JQ
 - `test/pipelines/uuid_test.yaml` - UUID generation with JQ
 

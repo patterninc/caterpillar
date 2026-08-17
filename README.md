@@ -75,9 +75,10 @@ Caterpillar is built around the concept of **tasks** that process **records** in
 ### Error Handling
 
 Almost every task treats **every** error as critical: it returns, which ends the worker's read
-loop and stops that task. There is no framework-wide tolerant tier — a task either returns or
-never hit an error at all. Errors are reported as `error in <task name>: <error>` on stdout,
-interleaved with record output rather than sent to stderr, which is why they are easy to miss.
+loop and stops that task. Tolerating an error is the exception, offered by a few individual
+tasks rather than by the pipeline — see [Non-critical errors](#non-critical-errors). Errors are
+reported as `error in <task name>: <error>` on stdout, interleaved with record output rather
+than sent to stderr, which is why they are easy to miss.
 
 What `fail_on_error` decides is the run's verdict — the exit status reported to whatever
 scheduled the pipeline:
@@ -90,37 +91,32 @@ tasks:
 ```
 
 - **Unset (the default)** — the error is printed, nothing is recorded against the pipeline, and
-  the run exits zero. This *attests the run as successful*: a caller reading the exit status is
-  told the pipeline succeeded, even though the error cost records. Such a run is
-  indistinguishable from a clean one that simply had less data to process.
+  the run exits zero, *attesting the run as successful*. Such a run is indistinguishable from a
+  clean one that simply had less data, so leaving it unset is a positive claim that errors on
+  that task are acceptable rather than a neutral default.
 - **`fail_on_error: true`** — the error is recorded and the run exits non-zero with a
   `pipeline failed with errors:` summary naming each failed task, attesting the run as failed.
-
-Leaving it unset is therefore a positive claim that errors on that task are acceptable, not a
-neutral default, and is worth choosing deliberately for every task that can fail.
 
 Either way the failing worker stops while other tasks are left to drain, so the non-zero exit
 arrives at the end of the run. `fail_on_error` is not a kill switch for work already in flight.
 
+> **Backpressure caveat.** A task stopping early is only safe while its upstream has finished
+> producing. If the upstream is still producing, the channel between them fills to
+> [`channel_size`](#channel-size) and the upstream blocks on send forever — its output channel
+> never closes, so the run neither completes nor exits, and no summary is printed. A pipeline
+> that can hold more records in flight than that cannot rely on `fail_on_error` to end the run.
+
 #### Non-critical errors
 
 A few tasks classify one specific condition as non-critical, skipping the offending record and
-continuing instead of returning. Which condition, and what promotes it back to critical, is
-per-task behavior documented in that task's README:
+continuing instead of returning. Each decides that from its own field, documented in that task's
+README:
 
 - **`jq`** — a query error on a single record; non-critical until `ignore_error: false`.
 - **`xpath`** — a container XPath matching nothing; non-critical until `ignore_missing: false`.
 
-An error a task ignores is never returned, so `fail_on_error` has nothing to judge and the run
-exits zero regardless. Failing a run on one of these takes both the task's field and
-`fail_on_error`.
-
-> **Backpressure caveat.** A task that stops reading is only safe while its upstream has
-> finished producing. If the upstream is still producing, the channel between them fills to
-> `channel_size` (default 10,000) and the upstream blocks on send forever — its own output
-> channel never closes, so the run neither completes nor exits, and no failure summary is
-> printed. A pipeline that can hold more than `channel_size` records in flight therefore
-> cannot rely on `fail_on_error` to terminate the run promptly.
+An ignored error is never returned, so `fail_on_error` has nothing to judge: failing a run on
+one of these takes the task's own field as well.
 
 ### DAG (Directed Acyclic Graph) Execution - EXPERIMENTAL
 
