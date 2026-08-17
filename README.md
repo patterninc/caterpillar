@@ -22,7 +22,7 @@ The system is particularly useful for:
 
 ### Prerequisites
 
-- Go 1.24.5 or later
+- Go 1.24.7 or later
 - AWS CLI configured (for AWS-related tasks)
 
 ### Building and Running
@@ -74,20 +74,49 @@ Caterpillar is built around the concept of **tasks** that process **records** in
 
 ### Error Handling
 
-By default, tasks handle errors gracefully:
-- **Non-critical errors** are logged but don't stop the pipeline
-- **Task failures** are recorded but processing continues
-- **Pipeline completion** returns a count of processed records
+Almost every task treats **every** error as critical: it returns, which ends the worker's read
+loop and stops that task. Tolerating an error is the exception, offered by a few individual
+tasks rather than by the pipeline — see [Non-critical errors](#non-critical-errors). Errors are
+reported as `error in <task name>: <error>` on stdout, interleaved with record output rather
+than sent to stderr, which is why they are easy to miss.
 
-However, you can configure tasks to fail the entire pipeline on error:
+What `fail_on_error` decides is the run's verdict — the exit status reported to whatever
+scheduled the pipeline:
+
 ```yaml
 tasks:
   - name: critical_task
     type: http
-    fail_on_error: true  # Pipeline stops if this task fails
+    fail_on_error: true  # Failure here fails the run
 ```
 
-When `fail_on_error` is set, the pipeline will return a non-zero exit code if any configured task encounters an error.
+- **Unset (the default)** — the error is printed, nothing is recorded against the pipeline, and
+  the run exits zero, *attesting the run as successful*. Such a run is indistinguishable from a
+  clean one that simply had less data, so leaving it unset is a positive claim that errors on
+  that task are acceptable rather than a neutral default.
+- **`fail_on_error: true`** — the error is recorded and the run exits non-zero with a
+  `pipeline failed with errors:` summary naming each failed task, attesting the run as failed.
+
+Either way the failing worker stops while other tasks are left to drain, so the non-zero exit
+arrives at the end of the run. `fail_on_error` is not a kill switch for work already in flight.
+
+> **Backpressure caveat.** A task stopping early is only safe while its upstream has finished
+> producing. If the upstream is still producing, the channel between them fills to
+> [`channel_size`](#channel-size) and the upstream blocks on send forever — its output channel
+> never closes, so the run neither completes nor exits, and no summary is printed. A pipeline
+> that can hold more records in flight than that cannot rely on `fail_on_error` to end the run.
+
+#### Non-critical errors
+
+A few tasks classify one specific condition as non-critical, skipping the offending record and
+continuing instead of returning. Each decides that from its own field, documented in that task's
+README:
+
+- **`jq`** — a query error on a single record; non-critical until `ignore_error: false`.
+- **`xpath`** — a container XPath matching nothing; non-critical until `ignore_missing: false`.
+
+An ignored error is never returned, so `fail_on_error` has nothing to judge: failing a run on
+one of these takes the task's own field as well.
 
 ### DAG (Directed Acyclic Graph) Execution - EXPERIMENTAL
 
@@ -224,6 +253,7 @@ tasks:
 
 Caterpillar supports the following tasks, each of which can serve different roles depending on their configuration:
 
+- **`archive`** - [Pack and unpack archives (tar, zip)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/archive/README.md)
 - **`aws_parameter_store`** - [Read parameters from AWS Systems Manager Parameter Store](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/aws/parameter_store/README.md)
 - **`compress`** - [Compress or decompress data using various algorithms](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/compress/README.md)
 - **`converter`** - [Convert data between different formats (CSV, HTML, JSON, XML, SST, Protobuf)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/converter/README.md)
@@ -322,25 +352,22 @@ Each task supports common configuration options:
 tasks:
   - name: my_task
     type: http
-    fail_on_error: true        # Stop pipeline on error
+    fail_on_error: true        # Fail the run if this task errors
     task_concurrency: 10       # Process with 10 concurrent workers
     context:
       extracted_value: .data.value  # Set context for downstream tasks
 ```
 
-### Error Handling
-Tasks can be configured to fail the entire pipeline on error:
-
-```yaml
-tasks:
-  - name: critical_task
-    type: http
-    fail_on_error: true  # Pipeline stops if this task fails
-```
+For what happens with and without `fail_on_error`, see [Error Handling](#error-handling)
+under Core Concepts.
 
 ## Examples
 
-See the `test/pipelines/` directory for comprehensive examples of different pipeline configurations and task combinations.
+See the `test/pipelines/` directory for comprehensive examples of different pipeline configurations and task combinations. Files named `*_test.yaml` there double as this project's tests — each exercises one feature end to end and is meant to be run directly:
+
+```bash
+./caterpillar -conf test/pipelines/hash_test.yaml
+```
 
 ## Credits
 
