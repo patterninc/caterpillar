@@ -1,0 +1,23 @@
+# Covers ignore_error: false without fail_on_error -- the only combination where a bad
+# record ends the task while the run is still attested as successful.
+tasks:
+  - name: read_names
+    type: file
+    path: test/pipelines/names.txt
+  - name: split_to_lines
+    type: split
+    delimiter: "\n"
+  - name: first_ten
+    type: sample
+    filter: head
+    limit: 10
+  - name: raise_on_match
+    type: jq
+    ignore_error: false
+    path: |
+      if . == "Abby" then
+        error("unexpected name: \(.)")
+      else . end
+  - name: echo
+    type: echo
+    only_data: true

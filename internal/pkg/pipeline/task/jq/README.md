@@ -19,27 +19,37 @@ The JQ task applies JQ queries to transform JSON data. It receives records from 
 | `path` | string | - | JQ query expression to apply |
 | `explode` | bool | `false` | If true, splits array results into individual records |
 | `as_raw` | bool | `false` | If true, outputs raw values instead of JSON |
-| `fail_on_error` | bool | `false` | If true, a query error fails the run. If false, the offending record is skipped (see [Query Errors](#query-errors)) |
+| `ignore_error` | bool | `true` | If true, a query error is non-critical: the record is skipped and the task continues (see [Query Errors](#query-errors)) |
+| `fail_on_error` | bool | `false` | Promotes an ignored query error back to critical, so it ends the task and the run exits non-zero |
 
 ## Query Errors
 
 A query can fail on a single record — an explicit `error("...")`, or a runtime type error such
-as adding a number to a string. This task treats that as a **non-critical** error, and
-`fail_on_error` promotes it to critical:
+as adding a number to a string. `ignore_error` classifies that failure and `fail_on_error`
+promotes it:
 
-- **`fail_on_error: false` (default)** — non-critical. A warning is reported as
-  `WARN: <task name>: skipping record <id>: <error>`, that record is skipped, and the task
-  carries on with the next one, so one bad record costs one record. It warns rather than errors
-  because the run is not failing over it — but since the run then exits zero, these lines are
-  the only signal that data was dropped.
-- **`fail_on_error: true`** — promoted to critical. The error ends the task and the pipeline
-  exits non-zero, so the same query error that would have cost one record ends the run.
+- **Non-critical** — `ignore_error: true`, the default. The record is skipped and the task
+  continues, so one bad record costs one record. Each skip reports
+  `WARN: <task name>: skipping record <id>: <error>`. The run exits zero, which makes those
+  lines the only signal that data was dropped.
+- **Critical** — `ignore_error: false`. The error ends the task, and records behind it are never
+  processed.
+- **Promoted** — `fail_on_error: true` turns an otherwise-ignored error critical *and* attests
+  the run as failed. It takes precedence, so it makes `ignore_error` moot.
+
+| `ignore_error` | `fail_on_error` | task | run |
+|---|---|---|---|
+| `true` (default) | unset (default) | continues, that record dropped | exits 0 |
+| `true` | `true` | stops at the bad record | exits 1 |
+| `false` | unset | stops at the bad record | exits 0 |
+| `false` | `true` | stops at the bad record | exits 1 |
 
 Note that a query with no output is not an error: a filter that matches nothing (for example
 `select(...)` rejecting the input) simply produces no record, with nothing reported.
 
-`test/pipelines/jq_error_test.yaml` and `test/pipelines/jq_error_skipped_test.yaml` demonstrate
-the two settings against the same failing query.
+`test/pipelines/jq_error_skipped_test.yaml`, `jq_error_test.yaml` and
+`jq_error_not_ignored_test.yaml` demonstrate the first three rows against the same failing
+query.
 
 ## JQ Query Examples
 
