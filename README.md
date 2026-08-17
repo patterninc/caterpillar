@@ -105,22 +105,11 @@ arrives at the end of the run. `fail_on_error` is not a kill switch for work alr
 #### Non-critical errors
 
 A few tasks classify one specific condition as non-critical, skipping the offending record and
-continuing instead of returning. This is per-task behavior, documented in that task's README,
-not something the pipeline provides:
+continuing instead of returning. Which condition, and what promotes it back to critical, is
+per-task behavior documented in that task's README:
 
-- **`jq`** — a query error on a single record, whether an explicit `error("...")` or a runtime
-  type error. Reported as `WARN: <task name>: skipping record <id>: <error>`.
-- **`xpath`** — a container XPath matching nothing. This one is non-critical by default;
-  setting `ignore_missing: false` makes the same condition critical.
-
-**`fail_on_error: true` promotes a non-critical error to critical**, making it able to
-terminate the pipeline. On a `jq` task it turns a skipped record into a stopped task and a
-failed run: the same query error that would have cost one record instead ends the run
-non-zero. Set it where a bad record means the output cannot be trusted, and leave it unset
-where dropping the occasional malformed record is the intended behavior.
-
-Note that promotion is itself per-task — `jq` consults `fail_on_error` for this, whereas
-`xpath` decides from `ignore_missing` alone and is unaffected by it.
+- **`jq`** — a query error on a single record; `fail_on_error: true` promotes it to critical.
+- **`xpath`** — a container XPath matching nothing; non-critical until `ignore_missing: false`.
 
 > **Backpressure caveat.** A task that stops reading is only safe while its upstream has
 > finished producing. If the upstream is still producing, the channel between them fills to
