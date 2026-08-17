@@ -74,32 +74,13 @@ Caterpillar is built around the concept of **tasks** that process **records** in
 
 ### Error Handling
 
-Errors fall into two tiers, chosen per task by `fail_on_error`.
+Almost every task treats **every** error as critical: it returns, which ends the worker's read
+loop and stops that task. There is no framework-wide tolerant tier — a task either returns or
+never hit an error at all. Errors are reported as `error in <task name>: <error>` on stdout,
+interleaved with record output rather than sent to stderr, which is why they are easy to miss.
 
-**Without `fail_on_error` (the default), a failure is reported and the run still exits zero.**
-Nothing is recorded against the pipeline, so an unnoticed failure resembles a clean run that
-merely produced fewer records than expected. Both forms below go to stdout, interleaved with
-record output, rather than to stderr — which is why they are easy to miss.
+What `fail_on_error` decides is whether a critical error fails the *run*:
 
-How much work survives, and which form you get, depends on the task:
-
-- `jq` treats a query error as a property of the offending record. It emits
-  `WARN: <task name>: skipping record <id>: <error>`, drops that record, and keeps consuming,
-  so one bad record costs one record.
-- Most tasks instead end the worker's read loop and report `error in <task name>: <error>`. At
-  the default `task_concurrency: 1` that ends the task. Records already buffered in its output
-  channel still reach downstream; that channel is then closed, and the rest of the pipeline
-  finishes normally.
-
-> **Backpressure caveat.** Ending a read loop early is only safe while the upstream task has
-> finished producing. If it is still producing, the channel between them fills to
-> `channel_size` (default 10,000) and the upstream blocks on send forever — its own output
-> channel never closes, so the run neither completes nor exits, with no failure summary. A
-> pipeline that can hold more than `channel_size` records in flight cannot rely on
-> `fail_on_error` to terminate the run promptly.
-
-**With `fail_on_error: true`, the error fails the run.** Set it on any task whose failure
-should be fatal:
 ```yaml
 tasks:
   - name: critical_task
@@ -107,11 +88,41 @@ tasks:
     fail_on_error: true  # Failure here fails the run
 ```
 
-The error is recorded against the pipeline and the run exits non-zero with a
-`pipeline failed with errors:` summary naming each failed task. The failing worker stops, but
-other tasks are not cancelled — they drain to completion first, and the non-zero exit comes at
-the end. So `fail_on_error` decides whether the run is *reported* as failed; it is not a
-kill switch for work already in flight.
+- **Unset (the default)** — the error is printed but not recorded against the pipeline, and the
+  run still exits zero. An unnoticed failure resembles a clean run that merely produced fewer
+  records than expected.
+- **`fail_on_error: true`** — the error is recorded and the run exits non-zero with a
+  `pipeline failed with errors:` summary naming each failed task.
+
+Either way the failing worker stops while other tasks are left to drain, so the non-zero exit
+arrives at the end of the run. `fail_on_error` is not a kill switch for work already in flight.
+
+#### Non-critical errors
+
+A few tasks classify one specific condition as non-critical, skipping the offending record and
+continuing instead of returning. This is per-task behavior, documented in that task's README,
+not something the pipeline provides:
+
+- **`jq`** — a query error on a single record, whether an explicit `error("...")` or a runtime
+  type error. Reported as `WARN: <task name>: skipping record <id>: <error>`.
+- **`xpath`** — a container XPath matching nothing. This one is non-critical by default;
+  setting `ignore_missing: false` makes the same condition critical.
+
+**`fail_on_error: true` promotes a non-critical error to critical**, making it able to
+terminate the pipeline. On a `jq` task it turns a skipped record into a stopped task and a
+failed run: the same query error that would have cost one record instead ends the run
+non-zero. Set it where a bad record means the output cannot be trusted, and leave it unset
+where dropping the occasional malformed record is the intended behavior.
+
+Note that promotion is itself per-task — `jq` consults `fail_on_error` for this, whereas
+`xpath` decides from `ignore_missing` alone and is unaffected by it.
+
+> **Backpressure caveat.** A task that stops reading is only safe while its upstream has
+> finished producing. If the upstream is still producing, the channel between them fills to
+> `channel_size` (default 10,000) and the upstream blocks on send forever — its own output
+> channel never closes, so the run neither completes nor exits, and no failure summary is
+> printed. A pipeline that can hold more than `channel_size` records in flight therefore
+> cannot rely on `fail_on_error` to terminate the run promptly.
 
 ### DAG (Directed Acyclic Graph) Execution - EXPERIMENTAL
 

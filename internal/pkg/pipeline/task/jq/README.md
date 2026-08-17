@@ -24,14 +24,16 @@ The JQ task applies JQ queries to transform JSON data. It receives records from 
 ## Query Errors
 
 A query can fail on a single record — an explicit `error("...")`, or a runtime type error such
-as adding a number to a string. What happens next depends on `fail_on_error`:
+as adding a number to a string. This task treats that as a **non-critical** error, and
+`fail_on_error` promotes it to critical:
 
-- **`fail_on_error: false` (default)** — a warning is reported as
+- **`fail_on_error: false` (default)** — non-critical. A warning is reported as
   `WARN: <task name>: skipping record <id>: <error>`, that record is skipped, and the task
-  carries on with the next one. One bad record costs one record. It warns rather than errors
+  carries on with the next one, so one bad record costs one record. It warns rather than errors
   because the run is not failing over it — but since the run then exits zero, these lines are
   the only signal that data was dropped.
-- **`fail_on_error: true`** — the error ends the task and the pipeline exits non-zero.
+- **`fail_on_error: true`** — promoted to critical. The error ends the task and the pipeline
+  exits non-zero, so the same query error that would have cost one record ends the run.
 
 Note that a query with no output is not an error: a filter that matches nothing (for example
 `select(...)` rejecting the input) simply produces no record, with nothing reported.
