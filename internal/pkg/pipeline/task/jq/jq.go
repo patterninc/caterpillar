@@ -11,14 +11,15 @@ import (
 )
 
 type jq struct {
-	task.Base `yaml:",inline" json:",inline"`
-	Path      config.String `yaml:"path,omitempty" json:"path,omitempty"`
-	Explode   bool          `yaml:"explode,omitempty" json:"explode,omitempty"`
-	AsRaw     bool          `yaml:"as_raw,omitempty" json:"as_raw,omitempty"`
+	task.Base   `yaml:",inline" json:",inline"`
+	Path        config.String `yaml:"path,omitempty" json:"path,omitempty"`
+	Explode     bool          `yaml:"explode,omitempty" json:"explode,omitempty"`
+	AsRaw       bool          `yaml:"as_raw,omitempty" json:"as_raw,omitempty"`
+	IgnoreError bool          `yaml:"ignore_error" json:"ignore_error"`
 }
 
 func New() (task.Task, error) {
-	return &jq{}, nil
+	return &jq{IgnoreError: true}, nil
 }
 
 func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
@@ -55,6 +56,15 @@ func (j *jq) Run(input <-chan *record.Record, output chan<- *record.Record) (err
 		// Execute the JQ query
 		items, err := query.Execute(r.Data)
 		if err != nil {
+			// An ignored query error costs only its own record, since it describes
+			// that record rather than the pipeline, and warns because the run is not
+			// failing over it. Otherwise it is critical: return, and let fail_on_error
+			// judge the verdict as it does for every other task.
+			if j.IgnoreError {
+				fmt.Printf("WARN: %s: skipping record %d: %s\n", j.GetName(), r.ID, err)
+				ack.Release(r.Context)
+				continue
+			}
 			return ack.Rejected(r.Context, err)
 		}
 		if items == nil {

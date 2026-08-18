@@ -82,8 +82,8 @@ func (q *Query) Execute(document []byte, inputs ...any) (any, error) {
 			break
 		}
 
-		if _, isError := v.(error); isError {
-			return nil, nil
+		if err, isError := v.(error); isError {
+			return nil, err
 		}
 
 		result = append(result, v)
