@@ -8,7 +8,7 @@ The join task collects multiple input records and combines them into a single ou
 
 ## Behavior
 
-The join task combines multiple records into a single record. It receives records from its input channel, buffers them, and sends joined records to its output channel when any of the configured limits are reached (size, number, or duration). The task flushes immediately when the first limit is satisfied, making it useful for flexible batch processing scenarios.
+The join task combines multiple records into a single record. It receives records from its input channel, buffers them, and sends joined records to its output channel when a configured limit is reached (size, number, or duration). With no limits set, it buffers everything and emits one record when the input closes. The buffer is always flushed when the input closes, so no records are lost.
 
 ## Configuration Fields
 
@@ -18,9 +18,16 @@ The join task combines multiple records into a single record. It receives record
 | `type` | string | `join` | Must be "join" |
 | `size` | int | - | Maximum total size (in bytes) before flushing joined records |
 | `number` | int | - | Maximum number of records before flushing joined records |
-| `duration` | string | - | Maximum time duration before flushing joined records |
+| `duration` | duration | - | Time-based flush interval — see the caveat below |
 | `delimiter` | string | `\n` | Delimiter used to separate joined records |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
+
+> **`duration` does not bound latency on an idle input.** The task waits for the next record
+> before it re-checks the timer, so a tick is only observed once another record arrives. On a
+> quiet input the buffer sits until the input closes, however long that takes. Use `duration`
+> to cap batch age on a *busy* stream; do not rely on it to flush a trickle promptly.
 
 ## Example Configurations
 

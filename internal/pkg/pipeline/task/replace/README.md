@@ -18,7 +18,11 @@ The replace task performs text replacement using regular expressions. It receive
 | `type` | string | `replace` | Must be "replace" |
 | `expression` | string | - | Regular expression pattern to match |
 | `replacement` | string | - | Replacement string (supports capture group references) |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
+
+This task cannot be last in a pipeline — with no output channel it silently drops every record.
 
 ## Regex Features
 
@@ -79,7 +83,6 @@ tasks:
 ## Sample Pipelines
 
 - `test/pipelines/hello_name.yaml` - Replace task with greeting format
-- `test/pipelines/convert_file.yaml` - Data format conversion
 
 ## Use Cases
 

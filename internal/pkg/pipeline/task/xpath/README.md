@@ -33,6 +33,8 @@ The `ignore_missing` configuration controls how the task handles missing element
 | `container` | string | - | XPath expression to select container elements |
 | `fields` | map[string]string | - | Map of field names to XPath expressions |
 | `ignore_missing` | bool | `true` | Whether to ignore missing fields |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
 ## Context Variables
@@ -101,7 +103,8 @@ tasks:
 
 - `test/pipelines/xpath.yaml` - XPath extraction examples
 - `test/pipelines/xpath_with_index.yaml` - Xpath extraction with node index example
-- `test/pipelines/html2json.yaml` - HTML to JSON conversion
+
+Both read the `test/pipelines/sample.html` fixture.
 
 ## Use Cases
 

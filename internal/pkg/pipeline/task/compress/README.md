@@ -22,17 +22,19 @@ The task receives records from its input channel, applies compression/decompress
 |-------|------|---------|-------------|
 | `name` | string | - | Task name for identification |
 | `type` | string | `compress` | Must be "compress" |
-| `format` | string | - | Compression format (gzip, snappy, etc.) |
-| `action` | string | - | Action type (compress or decompress) |
+| `format` | string | `gzip` | Compression format — `gzip` or `snappy` |
+| `action` | string | `compress` | `compress` or `decompress` |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
 ## Supported Formats
 
-The task supports various compression formats:
 - **gzip**: Standard gzip compression
 - **snappy**: Fast compression/decompression
-- **zlib**: Standard zlib compression
-- **deflate**: Deflate compression algorithm
+
+An unrecognized `format` fails at config load. `action`, by contrast, is not validated: any
+value other than `compress` decompresses, so a typo silently inverts the task.
 
 ## Example Configurations
 

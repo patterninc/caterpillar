@@ -50,7 +50,7 @@ The system is particularly useful for:
 Caterpillar is built around the concept of **tasks** that process **records** in a pipeline. Here's how it works:
 
 1. **Records**: Each piece of data in the pipeline is wrapped in a `Record` object containing:
-   - `Data`: The actual data string
+   - `Data`: The actual data, as raw bytes
    - `Origin`: The name of the task that created this record
    - `ID`: A unique identifier for the record
    - `Context`: Additional metadata that can be shared between tasks
@@ -254,7 +254,7 @@ tasks:
 Caterpillar supports the following tasks, each of which can serve different roles depending on their configuration:
 
 - **`archive`** - [Pack and unpack archives (tar, zip)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/archive/README.md)
-- **`aws_parameter_store`** - [Read parameters from AWS Systems Manager Parameter Store](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/aws/parameter_store/README.md)
+- **`aws_parameter_store`** - [Write to or look up parameters in AWS Systems Manager Parameter Store](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/aws/parameter_store/README.md)
 - **`compress`** - [Compress or decompress data using various algorithms](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/compress/README.md)
 - **`converter`** - [Convert data between different formats (CSV, HTML, JSON, XML, SST, Protobuf)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/converter/README.md)
 - **`delay`** - [Add controlled delays between record processing](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/delay/README.md)

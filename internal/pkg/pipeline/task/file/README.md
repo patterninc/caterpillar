@@ -35,10 +35,15 @@ In read mode, two values are stored in each record's context:
 | `region` | string | `us-west-2` | AWS region for S3 operations |
 | `storage_class` | string | `STANDARD` | S3 **write** only: on `PutObject`. Ignored for local paths. See [S3 storage class](#s3-storage-class). |
 | `tags` | map[string]string | - | S3 **write** only: object tags applied on `PutObject`. Ignored for local paths. Values support macros and context templates. See [S3 object tags](#s3-object-tags). |
-| `delimiter` | string | `\n` | Delimiter used to separate records when reading |
 | `success_file` | bool | `false` | Whether to create a success file after writing |
 | `success_file_name` | string | `_SUCCESS` | Name of the success file |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
+
+A read emits **one record per file**, holding the whole file — it does not split on lines. Put a
+[`split`](../split) task after it to get a record per line. A `delimiter` field is accepted and has
+no effect.
 
 ## S3 storage class
 
@@ -118,7 +123,6 @@ tasks:
   - name: read_data
     type: file
     path: /path/to/input.txt
-    delimiter: "\n"
 ```
 
 ### Writing to S3:
@@ -161,7 +165,7 @@ tasks:
 
   - name: write_mirrored
     type: file
-    path: s3://dest-bucket/ds={{ macro "date" }}/{{ context "CATERPILLAR_FILE_PATH_WRITE" }}
+    path: s3://dest-bucket/ds={{ macro "timestamp" }}/{{ context "CATERPILLAR_FILE_PATH_WRITE" }}
     region: us-east-1
 ```
 

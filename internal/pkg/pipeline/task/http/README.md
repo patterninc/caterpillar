@@ -18,7 +18,7 @@ In both modes, the task sends HTTP response data to its output channel and suppo
 
 ### Response Format and Headers
 
-The HTTP task outputs the response body as-is (maintains backward compatibility). Response headers are automatically stored in the record's context with the prefix `http-header-`, making them accessible to downstream tasks via context variables.
+The HTTP task outputs the response body as-is. Response headers are automatically stored in the record's context with the prefix `http-header-`, making them accessible to downstream tasks via context variables.
 
 For example, if the HTTP response includes a `Content-Type` header, it will be available as `{{ context "http-header-Content-Type" }}` in subsequent tasks. Note that HTTP header names are case-sensitive when used as context keys. Go's HTTP library canonicalizes header names (for example, `content-type` becomes `Content-Type`), so you must use the canonical form when accessing headers via context (for example, `http-header-Content-Type`, not `http-header-content-type`).
 
@@ -109,19 +109,24 @@ There is no cap on iterations: an expression that never returns `empty` loops fo
 | `endpoint` | string | - | Target URL for the request |
 | `headers` | map[string]string | - | HTTP headers to include |
 | `body` | string | - | Request body for POST/PUT requests |
-| `timeout` | int | `90` | Request timeout in seconds |
+| `timeout` | duration | `90s` | Request timeout |
 | `max_retries` | int | `3` | Maximum number of retry attempts |
-| `retry_delay` | int | `5` | Delay between retries in seconds |
-| `expected_statuses` | string | `200` | Comma-separated list of expected HTTP status codes |
+| `retry_delay` | duration | `1s` | Delay between retries |
+| `expected_statuses` | string | `200` | Comma-separated list of expected HTTP status codes; ranges are allowed, e.g. `200..299,304` |
 | `oauth` | object | - | OAuth configuration (see OAuth section) |
-| `proxy` | object | - | Proxy configuration |
-| `next_page` | string/object | - | JQ expression to extract next page URL (string) or pagination config (object with `endpoint`, `method`, `body`, `headers`, `context`) — see [Pagination](#pagination) |
+| `proxy` | object | - | Proxy configuration (see Proxy section) |
+| `next_page` | string | - | JQ expression driving pagination; its *result* may be a URL string or an object with `endpoint`, `method`, `body`, `headers`, `context` — see [Pagination](#pagination) |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
 | `context` | map[string]string | - | JQ expressions to extract values from the response and store in record context |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
+`timeout` and `retry_delay` take a string with a unit (`90s`, `500ms`, `2m`); a bare number
+fails to parse.
+
 ## OAuth Configuration
 
-The task supports both OAuth 1.0 and OAuth 2.0:
+The task supports both OAuth 1.0 and OAuth 2.0. `version` selects the flow and defaults to
+`1.0`, so the OAuth 2.0 path requires setting it explicitly.
 
 ### OAuth 1.0
 ```yaml
@@ -131,15 +136,42 @@ oauth:
   token: "your_token"
   token_secret: "your_token_secret"
   version: "1.0"
-  signature_method: "HMAC-SHA256"
+  realm: "optional-realm"
 ```
+
+The signature is always HMAC-SHA256. `signature_method` is copied into the Authorization header
+(default `HMAC-SHA256`) and does not select a different algorithm.
 
 ### OAuth 2.0
 ```yaml
 oauth:
+  version: "2.0"
   token_uri: "https://oauth2.googleapis.com/token"
   grant_type: "client_credentials"
   scope: ["https://www.googleapis.com/auth/cloud-platform"]
+  issuer: "service-account@project.iam.gserviceaccount.com"
+  subject: "user@example.com"
+  audience: "https://oauth2.googleapis.com/token"
+  private_key: "{{ secret \"/prod/api/private_key\" }}"
+```
+
+The 2.0 flow builds a signed JWT assertion, so `private_key`, `issuer`, `subject` and
+`audience` are all required for it.
+
+## Proxy Configuration
+
+`scheme` must be `http` or `https`. Under `https` a `ca_certificate` is mandatory and holds the
+**PEM text itself**, not a path to it — literal `\n` sequences in the value are expanded, so a
+one-line secret works.
+
+```yaml
+proxy:
+  scheme: https
+  host: proxy.internal:3128
+  username: "{{ env \"PROXY_USER\" }}"
+  password: "{{ env \"PROXY_PASSWORD\" }}"
+  ca_certificate: "{{ secret \"/prod/proxy/ca_certificate\" }}"
+  insecure_tls: false
 ```
 
 ## Example Configurations
@@ -166,8 +198,8 @@ tasks:
       Content-Type: application/json
     body: '{"name": "test", "value": 123}'
     oauth:
-      consumer_key: "{{ env 'OAUTH_KEY' }}"
-      consumer_secret: "{{ env 'OAUTH_SECRET' }}"
+      consumer_key: "{{ env \"OAUTH_KEY\" }}"
+      consumer_secret: "{{ env \"OAUTH_SECRET\" }}"
 ```
 
 ### Using context variables:
@@ -205,7 +237,7 @@ tasks:
 
 - `test/pipelines/convert_industries.yaml` - HTTP GET request to fetch CSV data
 - `test/pipelines/context_test.yaml` - JQ task forming HTTP request configuration passed to HTTP task
-- `test/pipelines/proxy_test.yaml` - HTTP with proxy configuration
+- `test/pipelines/next_page_context_test.yaml` - Paginated HTTP with `next_page` writing record context
 
 ## Use Cases
 

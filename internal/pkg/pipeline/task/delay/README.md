@@ -16,8 +16,12 @@ The delay task adds a specified delay between processing each record. It receive
 |-------|------|---------|-------------|
 | `name` | string | - | Task name for identification |
 | `type` | string | `delay` | Must be "delay" |
-| `duration` | string | - | Delay duration (e.g., "1s", "100ms", "2m") |
+| `duration` | duration | `100ms` | Delay duration (e.g., "1s", "100ms", "2m") |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
+
+Omitting `duration` still sleeps 100ms per record.
 
 ## Duration Format
 
@@ -52,10 +56,6 @@ tasks:
     type: delay
     duration: 5m
 ```
-
-## Sample Pipelines
-
-- `test/pipelines/delay_test.yaml` - Delay task examples
 
 ## Use Cases
 
