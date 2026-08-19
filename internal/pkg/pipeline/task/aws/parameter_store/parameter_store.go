@@ -126,7 +126,14 @@ func (p *parameterStore) Run(input <-chan *record.Record, output chan<- *record.
 			break
 		}
 
-		if err := p.processRecord(r); err != nil {
+		var err error
+		if len(p.Lookup) > 0 {
+			err = p.lookupParameters(r)
+		} else {
+			err = p.setParameters(r)
+		}
+
+		if err != nil {
 			// a missing parameter is the one failure the pipeline author can route,
 			// so a single misconfigured tenant need not stop every other one
 			if errors.Is(err, errParameterNotFound) && p.OnMissing == onMissingSkip {
@@ -143,16 +150,6 @@ func (p *parameterStore) Run(input <-chan *record.Record, output chan<- *record.
 
 }
 
-func (p *parameterStore) processRecord(r *record.Record) error {
-
-	if len(p.Lookup) > 0 {
-		return p.lookupParameters(r)
-	}
-
-	return p.setParameters(r)
-
-}
-
 func (p *parameterStore) setParameters(r *record.Record) error {
 
 	for parameterName, parameterQuery := range p.SetParameters {
@@ -166,7 +163,7 @@ func (p *parameterStore) setParameters(r *record.Record) error {
 			return fmt.Errorf("%s parameter value is not string", parameterName)
 		}
 
-		if err := p.setParameter(parameterName, parameterValueString); err != nil {
+		if err := p.putParameter(parameterName, parameterValueString); err != nil {
 			return err
 		}
 	}
@@ -175,7 +172,7 @@ func (p *parameterStore) setParameters(r *record.Record) error {
 
 }
 
-func (p *parameterStore) setParameter(name, value string) error {
+func (p *parameterStore) putParameter(name, value string) error {
 
 	putParameterInput := &ssm.PutParameterInput{
 		Name:      aws.String(name),
@@ -196,7 +193,7 @@ func (p *parameterStore) setParameter(name, value string) error {
 func (p *parameterStore) lookupParameters(r *record.Record) error {
 
 	for contextKey, parameterPath := range p.Lookup {
-		value, err := p.lookupValue(parameterPath, r)
+		value, err := p.getParameter(parameterPath, r)
 		if err != nil {
 			return err
 		}
@@ -208,7 +205,7 @@ func (p *parameterStore) lookupParameters(r *record.Record) error {
 
 }
 
-func (p *parameterStore) lookupValue(path cfg.String, r *record.Record) (string, error) {
+func (p *parameterStore) getParameter(path cfg.String, r *record.Record) (string, error) {
 
 	resolvedPath, err := path.Get(r)
 	if err != nil {
