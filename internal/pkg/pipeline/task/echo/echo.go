@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -40,9 +41,8 @@ func (e *echo) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 		// fmt.Println(r.GetContextValue(`names`))
 		fmt.Println(time.Now().Format(timeNowFormat), `-`, e.Name, `-`, string(item))
 
-		if output != nil {
-			e.SendRecord(r, output)
-		}
+		e.SendRecord(r, output)
+		ack.Release(r.Context)
 	}
 
 	return

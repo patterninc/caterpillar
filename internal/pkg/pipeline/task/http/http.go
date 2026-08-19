@@ -14,6 +14,7 @@ import (
 
 	"github.com/patterninc/caterpillar/internal/pkg/config"
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/http/status"
@@ -158,11 +159,15 @@ func (h *httpCore) Run(input <-chan *record.Record, output chan<- *record.Record
 			// let's get our http object
 			newHttp, err := h.newFromInput(rc.Data)
 			if err != nil {
-				return err
+				return ack.Rejected(rc.Context, err)
 			}
 			if err := newHttp.processItem(rc, output); err != nil {
-				return err
+				return ack.Rejected(rc.Context, err)
 			}
+
+			// one release per input record, however many pages it produced: each
+			// page's send registered its own branch.
+			ack.Release(rc.Context)
 		}
 	}
 

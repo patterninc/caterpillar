@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -14,16 +13,16 @@ import (
 	qs "github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
 
 const (
-	defaultConcurrency      = 10
-	defaultMaxMessages      = 10
-	defaultWaitTimeSeconds  = 10
-	receiptsQueueMultiplier = 1000
-	defaultRegion           = "us-west-2"
+	defaultConcurrency     = 10
+	defaultMaxMessages     = 10
+	defaultWaitTimeSeconds = 10
+	defaultRegion          = "us-west-2"
 )
 
 var (
@@ -40,7 +39,8 @@ type sqs struct {
 	ExitOnEmpty     bool   `yaml:"exit_on_empty,omitempty" json:"exit_on_empty,omitempty"`
 	MessageGroupId  string `yaml:"message_group_id,omitempty" json:"message_group_id,omitempty"` // used for FIFO queues
 
-	client *qs.Client
+	client  *qs.Client
+	tracker *ack.Tracker
 }
 
 func New() (task.Task, error) {
@@ -67,6 +67,8 @@ func (s *sqs) Init() error {
 	}
 
 	s.client = qs.NewFromConfig(awsConfig)
+	s.tracker = ack.NewTracker(s.Concurrency)
+
 	return nil
 }
 
@@ -88,33 +90,34 @@ func (s *sqs) extractRegionFromQueueURL() string {
 
 func (s *sqs) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	// Client is already initialized in RunPreHook - just use it
+	// Client is already initialized in Init - just use it
 	if input != nil {
 		return s.sendMessages(input)
 	}
 
-	// If input is nil, act as a source: start getMessages and receipt workers
-	// let's create channel to which getMessages function will communicate messages receipts
-	receipts := make(chan *string, s.Concurrency*receiptsQueueMultiplier)
-
-	// we set a pool of workers that will delete messages from the queue
-	var wg sync.WaitGroup
-	wg.Add(s.Concurrency)
-	for i := 0; i < s.Concurrency; i++ {
-		go s.processReceipts(receipts, &wg)
-	}
-
-	err := s.getMessages(ctx, output, receipts)
-
-	wg.Wait()
-
-	return err
+	// If input is nil, act as a source: read messages and hand each receipt to
+	// the tracker, which deletes it once every downstream task has finished
+	// with the record it produced. Finish, not Run, waits for those deletions.
+	return s.getMessages(ctx, output)
 
 }
 
-func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record, receipts chan *string) error {
+// Finish waits for every deferred deletion before the pipeline treats this
+// task as complete, so a shutdown never abandons in-flight acknowledgements.
+// It can't happen in Run: downstream tasks that emit only once their input
+// closes can't finish with a record until this task's output channel is
+// closed, which the pipeline does only after Run returns.
+func (s *sqs) Finish() error {
 
-	defer close(receipts)
+	if s.tracker != nil {
+		s.tracker.Wait()
+	}
+
+	return nil
+
+}
+
+func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) error {
 
 	// do we need to stop pipeline after a while?
 	if s.EndAfter > 0 {
@@ -156,34 +159,59 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record, rec
 			}
 
 			for _, m := range receiveMessageOutput.Messages {
-				// create new record and send it downstream
 
-				if output != nil {
-					s.SendData(ctx, []byte(*m.Body), output)
+				// nothing to forward to, so there's no downstream ack to wait
+				// for: delete the receipt right away.
+				if output == nil {
+					s.deleteMessage(m.MessageId, m.ReceiptHandle)
+					continue
 				}
 
-				// send receipt to receipts channel for deletion
-				receipts <- m.ReceiptHandle
+				msgAck := ack.New()
+				s.SendData(ack.WithContext(ctx, msgAck), []byte(*m.Body), output)
+
+				s.tracker.Track(msgAck, &messageAck{
+					sqs:           s,
+					messageId:     m.MessageId,
+					receiptHandle: m.ReceiptHandle,
+				})
 			}
 		}
 	}
 
 }
 
-func (s *sqs) processReceipts(receipts <-chan *string, wg *sync.WaitGroup) error {
+// messageAck acknowledges one received message on behalf of ack.Tracker.
+type messageAck struct {
+	sqs           *sqs
+	messageId     *string
+	receiptHandle *string
+}
 
-	defer wg.Done()
+// Ack deletes the message's receipt so SQS doesn't redeliver it. On a
+// downstream failure it does nothing: leaving the receipt alone lets SQS
+// redeliver the message once the visibility timeout expires.
+func (m *messageAck) Ack(failed bool) {
 
-	for receipt := range receipts {
-		if _, err := s.client.DeleteMessage(ctx, &qs.DeleteMessageInput{
-			QueueUrl:      &s.QueueURL,
-			ReceiptHandle: receipt,
-		}); err != nil {
-			return err
-		}
+	if failed {
+		return
 	}
 
-	return nil
+	m.sqs.deleteMessage(m.messageId, m.receiptHandle)
+
+}
+
+// deleteMessage acknowledges a message by deleting its receipt. A failure is
+// logged rather than returned: the message has already been processed, so the
+// worst case is a redelivery after the visibility timeout.
+func (s *sqs) deleteMessage(messageId, receiptHandle *string) {
+
+	if _, err := s.client.DeleteMessage(ctx, &qs.DeleteMessageInput{
+		QueueUrl:      &s.QueueURL,
+		ReceiptHandle: receiptHandle,
+	}); err != nil {
+		fmt.Printf("failed to delete message %s from queue %s: %v\n", aws.ToString(messageId), s.QueueURL, err)
+	}
 
 }
 
@@ -203,8 +231,10 @@ func (s *sqs) sendMessages(input <-chan *record.Record) error {
 			MessageGroupId: s.getMessageGroupID(),
 		})
 		if err != nil {
-			return err
+			return ack.Rejected(r.Context, err)
 		}
+
+		ack.Release(r.Context)
 	}
 	return nil
 }

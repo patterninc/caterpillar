@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -144,15 +145,57 @@ func (k *kafka) write(input <-chan *record.Record) error {
 		wg               sync.WaitGroup
 		firstDeliveryErr error
 	)
+
+	// acks for records the producer has taken but not yet confirmed. A message that
+	// never produces a delivery report — a flush timeout, typically — would
+	// otherwise leave its source record unsettled and the pipeline waiting on it
+	// forever, so whatever is left here at the end is failed explicitly.
+	var (
+		pendingMu sync.Mutex
+		pending   = make(map[*ack.Ack]struct{})
+	)
+
+	settle := func(a *ack.Ack, deliveryErr error) {
+
+		if a == nil {
+			return
+		}
+
+		pendingMu.Lock()
+		delete(pending, a)
+		pendingMu.Unlock()
+
+		if deliveryErr != nil {
+			a.Fail()
+			return
+		}
+
+		a.Done()
+
+	}
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for e := range deliveryCh {
-			if m, ok := e.(*ckafka.Message); ok && m.TopicPartition.Error != nil && firstDeliveryErr == nil {
-				firstDeliveryErr = m.TopicPartition.Error
-				fmt.Printf("delivery failed for topic %s partition %d: %v\n",
-					k.Topic, m.TopicPartition.Partition, m.TopicPartition.Error)
+			m, ok := e.(*ckafka.Message)
+			if !ok {
+				continue
 			}
+			a, _ := m.Opaque.(*ack.Ack)
+			if m.TopicPartition.Error != nil {
+				if firstDeliveryErr == nil {
+					firstDeliveryErr = m.TopicPartition.Error
+					fmt.Printf("delivery failed for topic %s partition %d: %v\n",
+						k.Topic, m.TopicPartition.Partition, m.TopicPartition.Error)
+				}
+				// the source record never made it to the topic, so fail its
+				// ack: the source must leave it unacknowledged for retry.
+				settle(a, m.TopicPartition.Error)
+				continue
+			}
+			// settle only on broker-confirmed delivery, not on local enqueue.
+			settle(a, nil)
 		}
 	}()
 
@@ -166,14 +209,27 @@ func (k *kafka) write(input <-chan *record.Record) error {
 		msgBytes, err := codec.serialize(k.Topic, r.Data)
 		if err != nil {
 			produceErr = fmt.Errorf("failed to serialize record for topic %s: %w", k.Topic, err)
+			ack.Reject(r.Context)
 			break
+		}
+
+		var opaque any
+		a, tracked := ack.FromContext(r.Context)
+		if tracked {
+			opaque = a
+			pendingMu.Lock()
+			pending[a] = struct{}{}
+			pendingMu.Unlock()
 		}
 
 		if err = p.Produce(&ckafka.Message{
 			TopicPartition: ckafka.TopicPartition{Topic: &k.Topic, Partition: ckafka.PartitionAny},
 			Value:          msgBytes,
+			Opaque:         opaque,
 		}, deliveryCh); err != nil {
 			produceErr = fmt.Errorf("failed to enqueue message to topic %s: %w", k.Topic, err)
+			// the producer never took it, so no delivery report is coming
+			settle(a, produceErr)
 			break
 		}
 	}
@@ -186,6 +242,14 @@ func (k *kafka) write(input <-chan *record.Record) error {
 	p.Close()
 	close(deliveryCh)
 	wg.Wait()
+
+	// no delivery report ever arrived for these, so nothing else will settle them
+	pendingMu.Lock()
+	for a := range pending {
+		a.Fail()
+	}
+	pending = nil
+	pendingMu.Unlock()
 
 	if produceErr != nil {
 		return produceErr
