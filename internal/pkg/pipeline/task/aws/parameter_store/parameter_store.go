@@ -193,7 +193,12 @@ func (p *parameterStore) putParameter(name, value string) error {
 func (p *parameterStore) lookupParameters(r *record.Record) error {
 
 	for contextKey, parameterPath := range p.Lookup {
-		value, err := p.getParameter(parameterPath, r)
+		parameterName, err := parameterPath.Get(r)
+		if err != nil {
+			return err
+		}
+
+		value, err := p.getParameter(parameterName)
 		if err != nil {
 			return err
 		}
@@ -205,35 +210,30 @@ func (p *parameterStore) lookupParameters(r *record.Record) error {
 
 }
 
-func (p *parameterStore) getParameter(path cfg.String, r *record.Record) (string, error) {
+func (p *parameterStore) getParameter(name string) (string, error) {
 
-	resolvedPath, err := path.Get(r)
-	if err != nil {
-		return ``, err
-	}
-
-	if cached, ok := p.getCached(resolvedPath); ok {
+	if cached, ok := p.getCached(name); ok {
 		return cached, nil
 	}
 
 	parameter, err := p.client.GetParameter(ctx, &ssm.GetParameterInput{
-		Name:           aws.String(resolvedPath),
+		Name:           aws.String(name),
 		WithDecryption: awsTrue,
 	})
 	if err != nil {
 		var notFound *types.ParameterNotFound
 		if errors.As(err, &notFound) {
-			return ``, fmt.Errorf("%w: %s", errParameterNotFound, resolvedPath)
+			return ``, fmt.Errorf("%w: %s", errParameterNotFound, name)
 		}
 		return ``, err
 	}
 
 	if parameter == nil || parameter.Parameter == nil || parameter.Parameter.Value == nil {
-		return ``, fmt.Errorf("%w: %s", errParameterNotFound, resolvedPath)
+		return ``, fmt.Errorf("%w: %s", errParameterNotFound, name)
 	}
 
 	value := *parameter.Parameter.Value
-	p.setCached(resolvedPath, value)
+	p.setCached(name, value)
 
 	return value, nil
 
