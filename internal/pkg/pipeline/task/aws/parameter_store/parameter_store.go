@@ -214,10 +214,6 @@ func (p *parameterStore) lookupValue(path cfg.String, r *record.Record) (string,
 		return ``, err
 	}
 
-	if cfg.HasUnresolvedContextPlaceholders(resolvedPath) {
-		return ``, cfg.ErrUnresolvedContextPlaceholder("lookup path")
-	}
-
 	if cached, ok := p.getCached(resolvedPath); ok {
 		return cached, nil
 	}

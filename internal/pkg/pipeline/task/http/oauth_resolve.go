@@ -52,25 +52,12 @@ func (o *oauth) copy() *oauth {
 	return &cp
 }
 
-func resolveString(field string, value config.String, r *record.Record) (string, error) {
-	resolved, err := value.Get(r)
-	if err != nil {
-		return ``, err
-	}
-
-	if config.HasUnresolvedContextPlaceholders(resolved) {
-		return ``, config.ErrUnresolvedContextPlaceholder(field)
-	}
-
-	return resolved, nil
-}
-
 func (o *oauth) resolve(r *record.Record) (*resolvedOAuth, error) {
 	if o == nil {
 		return nil, nil
 	}
 
-	version, err := resolveString("oauth.version", o.Version, r)
+	version, err := o.Version.Get(r)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +65,7 @@ func (o *oauth) resolve(r *record.Record) (*resolvedOAuth, error) {
 		version = defaultOAuthVersion
 	}
 
-	signatureMethod, err := resolveString("oauth.signature_method", o.SignatureMethod, r)
+	signatureMethod, err := o.SignatureMethod.Get(r)
 	if err != nil {
 		return nil, err
 	}
@@ -86,64 +73,64 @@ func (o *oauth) resolve(r *record.Record) (*resolvedOAuth, error) {
 		signatureMethod = defaultSignatureMethod
 	}
 
-	consumerKey, err := resolveString("oauth.consumer_key", o.ConsumerKey, r)
+	consumerKey, err := o.ConsumerKey.Get(r)
 	if err != nil {
 		return nil, err
 	}
 
-	consumerSecret, err := resolveString("oauth.consumer_secret", o.ConsumerSecret, r)
+	consumerSecret, err := o.ConsumerSecret.Get(r)
 	if err != nil {
 		return nil, err
 	}
 
-	token, err := resolveString("oauth.token", o.Token, r)
+	token, err := o.Token.Get(r)
 	if err != nil {
 		return nil, err
 	}
 
-	tokenSecret, err := resolveString("oauth.token_secret", o.TokenSecret, r)
+	tokenSecret, err := o.TokenSecret.Get(r)
 	if err != nil {
 		return nil, err
 	}
 
-	realm, err := resolveString("oauth.realm", o.Realm, r)
+	realm, err := o.Realm.Get(r)
 	if err != nil {
 		return nil, err
 	}
 
-	privateKey, err := resolveString("oauth.private_key", o.PrivateKey, r)
+	privateKey, err := o.PrivateKey.Get(r)
 	if err != nil {
 		return nil, err
 	}
 
-	subject, err := resolveString("oauth.subject", o.Subject, r)
+	subject, err := o.Subject.Get(r)
 	if err != nil {
 		return nil, err
 	}
 
-	issuer, err := resolveString("oauth.issuer", o.Issuer, r)
+	issuer, err := o.Issuer.Get(r)
 	if err != nil {
 		return nil, err
 	}
 
-	audience, err := resolveString("oauth.audience", o.Audience, r)
+	audience, err := o.Audience.Get(r)
 	if err != nil {
 		return nil, err
 	}
 
-	tokenURI, err := resolveString("oauth.token_uri", o.TokenURI, r)
+	tokenURI, err := o.TokenURI.Get(r)
 	if err != nil {
 		return nil, err
 	}
 
-	grantType, err := resolveString("oauth.grant_type", o.GrantType, r)
+	grantType, err := o.GrantType.Get(r)
 	if err != nil {
 		return nil, err
 	}
 
 	scope := make([]string, 0, len(o.Scope))
 	for _, scopeValue := range o.Scope {
-		resolved, err := resolveString("oauth.scope", scopeValue, r)
+		resolved, err := scopeValue.Get(r)
 		if err != nil {
 			return nil, err
 		}

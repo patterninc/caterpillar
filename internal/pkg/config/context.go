@@ -23,19 +23,6 @@ func setContextPlaceholder(key string) (string, error) {
 	return fmt.Sprintf(contextPlaceholderString, key), nil
 }
 
-// HasUnresolvedContextPlaceholders reports whether s still contains a context
-// placeholder that was not substituted. Callers that invoke String.Get(nil) should
-// check this to fail fast rather than passing a literal placeholder downstream.
-func HasUnresolvedContextPlaceholders(s string) bool {
-	return contextTemplateRegex.MatchString(s)
-}
-
-// ErrUnresolvedContextPlaceholder names the field and explains that per-record
-// context values require an input record.
-func ErrUnresolvedContextPlaceholder(field string) error {
-	return fmt.Errorf("field %q contains unresolved context placeholder; per-record values require an input record", field)
-}
-
 func evaluateContext(data string, record *record.Record) (string, error) {
 
 	// Find all context template patterns
