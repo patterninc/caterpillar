@@ -32,10 +32,11 @@ var (
 	ctx     = context.Background()
 	awsTrue = aws.Bool(true)
 
-	errBothModes      = fmt.Errorf(`set and lookup are mutually exclusive`)
-	errLookupRequired = fmt.Errorf(`lookup must be set when task has an input channel`)
-	errSetRequired    = fmt.Errorf(`set must be set when task has an input channel`)
-	errInputRequired  = fmt.Errorf(`aws_parameter_store requires an input channel`)
+	errBothModes     = fmt.Errorf(`set and lookup are mutually exclusive`)
+	errNoMode        = fmt.Errorf(`either set or lookup must be configured`)
+	errInputRequired = fmt.Errorf(`aws_parameter_store requires an input channel`)
+
+	errParameterNotFound = fmt.Errorf(`parameter not found`)
 )
 
 type ssmAPI interface {
@@ -82,6 +83,10 @@ func (p *parameterStore) Init() error {
 		return errBothModes
 	}
 
+	if len(p.SetParameters) == 0 && len(p.Lookup) == 0 {
+		return errNoMode
+	}
+
 	if p.OnMissing == `` {
 		p.OnMissing = onMissingError
 	}
@@ -109,103 +114,99 @@ func (p *parameterStore) Init() error {
 
 func (p *parameterStore) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
+	// GetRecord treats a nil channel as an immediately closed one, so without this
+	// a source-positioned task would exit successfully having done nothing
 	if input == nil {
 		return errInputRequired
 	}
 
+	for {
+		r, ok := p.GetRecord(input)
+		if !ok {
+			break
+		}
+
+		if err := p.processRecord(r); err != nil {
+			// a missing parameter is the one failure the pipeline author can route,
+			// so a single misconfigured tenant need not stop every other one
+			if errors.Is(err, errParameterNotFound) && p.OnMissing == onMissingSkip {
+				fmt.Printf("WARN: skipping record: %s\n", err)
+				continue
+			}
+			return err
+		}
+
+		p.SendRecord(r, output)
+	}
+
+	return nil
+
+}
+
+func (p *parameterStore) processRecord(r *record.Record) error {
+
 	if len(p.Lookup) > 0 {
-		return p.lookupParameters(input, output)
+		return p.lookupParameters(r)
 	}
 
-	return p.setParameters(input, output)
+	return p.setParameters(r)
 
 }
 
-func (p *parameterStore) setParameters(input <-chan *record.Record, output chan<- *record.Record) error {
+func (p *parameterStore) setParameters(r *record.Record) error {
 
-	if len(p.SetParameters) == 0 {
-		return errSetRequired
-	}
-
-	for {
-		r, ok := p.GetRecord(input)
-		if !ok {
-			break
+	for parameterName, parameterQuery := range p.SetParameters {
+		parameterValue, err := parameterQuery.Execute(r.Data)
+		if err != nil {
+			return err
 		}
 
-		for parameterName, parameterQuery := range p.SetParameters {
-			parameterValue, err := parameterQuery.Execute(r.Data)
-			if err != nil {
-				return err
-			}
-
-			parameterValueString, isString := parameterValue.(string)
-			if !isString {
-				return fmt.Errorf("%s parameter value is not string", parameterName)
-			}
-
-			putParameterInput := &ssm.PutParameterInput{
-				Name:      aws.String(parameterName),
-				Value:     aws.String(parameterValueString),
-				Overwrite: p.Overwrite,
-			}
-
-			if p.Secure {
-				putParameterInput.Type = types.ParameterTypeSecureString
-			}
-
-			if _, err := p.client.PutParameter(ctx, putParameterInput); err != nil {
-				return err
-			}
+		parameterValueString, isString := parameterValue.(string)
+		if !isString {
+			return fmt.Errorf("%s parameter value is not string", parameterName)
 		}
 
-		p.SendRecord(r, output)
+		if err := p.setParameter(parameterName, parameterValueString); err != nil {
+			return err
+		}
 	}
 
 	return nil
 
 }
 
-func (p *parameterStore) lookupParameters(input <-chan *record.Record, output chan<- *record.Record) error {
+func (p *parameterStore) setParameter(name, value string) error {
 
-	if len(p.Lookup) == 0 {
-		return errLookupRequired
+	putParameterInput := &ssm.PutParameterInput{
+		Name:      aws.String(name),
+		Value:     aws.String(value),
+		Overwrite: p.Overwrite,
 	}
 
-	for {
-		r, ok := p.GetRecord(input)
-		if !ok {
-			break
+	if p.Secure {
+		putParameterInput.Type = types.ParameterTypeSecureString
+	}
+
+	_, err := p.client.PutParameter(ctx, putParameterInput)
+
+	return err
+
+}
+
+func (p *parameterStore) lookupParameters(r *record.Record) error {
+
+	for contextKey, parameterPath := range p.Lookup {
+		value, err := p.lookupValue(parameterPath, r)
+		if err != nil {
+			return err
 		}
 
-		skipRecord := false
-	lookupKeys:
-		for contextKey, parameterPath := range p.Lookup {
-			value, err := p.lookupValue(parameterPath, r)
-			if err != nil {
-				if errors.Is(err, errParameterNotFound) && p.OnMissing == onMissingSkip {
-					fmt.Printf("WARN: skipping record: %s\n", err)
-					skipRecord = true
-					break lookupKeys
-				}
-				return err
-			}
-
-			r.SetContextValue(contextKey, value)
-		}
-
-		if skipRecord {
-			continue
-		}
-
-		p.SendRecord(r, output)
+		r.SetContextValue(contextKey, value)
 	}
 
 	return nil
 
 }
-
-var errParameterNotFound = fmt.Errorf("parameter not found")
 
 func (p *parameterStore) lookupValue(path cfg.String, r *record.Record) (string, error) {
 
