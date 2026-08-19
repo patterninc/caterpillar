@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/ssm/types"
 
-	cfg "github.com/patterninc/caterpillar/internal/pkg/config"
+	"github.com/patterninc/caterpillar/internal/pkg/config"
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
 	"github.com/patterninc/caterpillar/internal/pkg/jq"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
@@ -51,12 +51,12 @@ type cacheEntry struct {
 
 type parameterStore struct {
 	task.Base     `yaml:",inline" json:",inline"`
-	SetParameters map[string]*jq.Query  `yaml:"set,omitempty" json:"set,omitempty"`
-	Lookup        map[string]cfg.String `yaml:"lookup,omitempty" json:"lookup,omitempty"`
-	CacheTTL      duration.Duration     `yaml:"cache_ttl,omitempty" json:"cache_ttl,omitempty"`
-	OnMissing     onMissingBehavior     `yaml:"on_missing,omitempty" json:"on_missing,omitempty"`
-	Secure        bool                  `yaml:"secure,omitempty" json:"secure,omitempty"`
-	Overwrite     *bool                 `yaml:"overwrite,omitempty" json:"overwrite,omitempty"`
+	SetParameters map[string]*jq.Query     `yaml:"set,omitempty" json:"set,omitempty"`
+	Lookup        map[string]config.String `yaml:"lookup,omitempty" json:"lookup,omitempty"`
+	CacheTTL      duration.Duration        `yaml:"cache_ttl,omitempty" json:"cache_ttl,omitempty"`
+	OnMissing     onMissingBehavior        `yaml:"on_missing,omitempty" json:"on_missing,omitempty"`
+	Secure        bool                     `yaml:"secure,omitempty" json:"secure,omitempty"`
+	Overwrite     *bool                    `yaml:"overwrite,omitempty" json:"overwrite,omitempty"`
 	client        ssmAPI
 	cache         map[string]cacheEntry
 	cacheMu       sync.RWMutex
@@ -103,12 +103,12 @@ func (p *parameterStore) Init() error {
 		p.cache = make(map[string]cacheEntry)
 	}
 
-	awsConfig, err := config.LoadDefaultConfig(ctx)
+	cfg, err := awsconfig.LoadDefaultConfig(ctx)
 	if err != nil {
 		return err
 	}
 
-	p.client = ssm.NewFromConfig(awsConfig)
+	p.client = ssm.NewFromConfig(cfg)
 	return nil
 }
 
@@ -152,18 +152,18 @@ func (p *parameterStore) Run(input <-chan *record.Record, output chan<- *record.
 
 func (p *parameterStore) setParameters(r *record.Record) error {
 
-	for parameterName, parameterQuery := range p.SetParameters {
-		parameterValue, err := parameterQuery.Execute(r.Data)
+	for name, query := range p.SetParameters {
+		result, err := query.Execute(r.Data)
 		if err != nil {
 			return err
 		}
 
-		parameterValueString, isString := parameterValue.(string)
-		if !isString {
-			return fmt.Errorf("%s parameter value is not string", parameterName)
+		value, ok := result.(string)
+		if !ok {
+			return fmt.Errorf("%s parameter value is not string", name)
 		}
 
-		if err := p.putParameter(parameterName, parameterValueString); err != nil {
+		if err := p.putParameter(name, value); err != nil {
 			return err
 		}
 	}
@@ -174,17 +174,17 @@ func (p *parameterStore) setParameters(r *record.Record) error {
 
 func (p *parameterStore) putParameter(name, value string) error {
 
-	putParameterInput := &ssm.PutParameterInput{
+	input := &ssm.PutParameterInput{
 		Name:      aws.String(name),
 		Value:     aws.String(value),
 		Overwrite: p.Overwrite,
 	}
 
 	if p.Secure {
-		putParameterInput.Type = types.ParameterTypeSecureString
+		input.Type = types.ParameterTypeSecureString
 	}
 
-	_, err := p.client.PutParameter(ctx, putParameterInput)
+	_, err := p.client.PutParameter(ctx, input)
 
 	return err
 
@@ -192,18 +192,18 @@ func (p *parameterStore) putParameter(name, value string) error {
 
 func (p *parameterStore) lookupParameters(r *record.Record) error {
 
-	for contextKey, parameterPath := range p.Lookup {
-		parameterName, err := parameterPath.Get(r)
+	for key, path := range p.Lookup {
+		name, err := path.Get(r)
 		if err != nil {
 			return err
 		}
 
-		value, err := p.getParameter(parameterName)
+		value, err := p.getParameter(name)
 		if err != nil {
 			return err
 		}
 
-		r.SetContextValue(contextKey, value)
+		r.SetContextValue(key, value)
 	}
 
 	return nil
@@ -216,7 +216,7 @@ func (p *parameterStore) getParameter(name string) (string, error) {
 		return cached, nil
 	}
 
-	parameter, err := p.client.GetParameter(ctx, &ssm.GetParameterInput{
+	out, err := p.client.GetParameter(ctx, &ssm.GetParameterInput{
 		Name:           aws.String(name),
 		WithDecryption: awsTrue,
 	})
@@ -228,18 +228,18 @@ func (p *parameterStore) getParameter(name string) (string, error) {
 		return ``, err
 	}
 
-	if parameter == nil || parameter.Parameter == nil || parameter.Parameter.Value == nil {
+	if out == nil || out.Parameter == nil || out.Parameter.Value == nil {
 		return ``, fmt.Errorf("%w: %s", errParameterNotFound, name)
 	}
 
-	value := *parameter.Parameter.Value
+	value := *out.Parameter.Value
 	p.setCached(name, value)
 
 	return value, nil
 
 }
 
-func (p *parameterStore) getCached(path string) (string, bool) {
+func (p *parameterStore) getCached(name string) (string, bool) {
 	if time.Duration(p.CacheTTL) == 0 {
 		return ``, false
 	}
@@ -247,7 +247,7 @@ func (p *parameterStore) getCached(path string) (string, bool) {
 	p.cacheMu.RLock()
 	defer p.cacheMu.RUnlock()
 
-	entry, ok := p.cache[path]
+	entry, ok := p.cache[name]
 	if !ok {
 		return ``, false
 	}
@@ -259,7 +259,7 @@ func (p *parameterStore) getCached(path string) (string, bool) {
 	return entry.value, true
 }
 
-func (p *parameterStore) setCached(path, value string) {
+func (p *parameterStore) setCached(name, value string) {
 	if time.Duration(p.CacheTTL) == 0 {
 		return
 	}
@@ -267,7 +267,7 @@ func (p *parameterStore) setCached(path, value string) {
 	p.cacheMu.Lock()
 	defer p.cacheMu.Unlock()
 
-	p.cache[path] = cacheEntry{
+	p.cache[name] = cacheEntry{
 		value:     value,
 		fetchedAt: time.Now(),
 	}
