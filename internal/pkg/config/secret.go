@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -13,7 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
-const dataPlatformCaterpillarSSMRole = `arn:aws:iam::842676014003:role/heimdall-caterpillar-ssm-read`
+const ssmAssumeRoleEnv = `CATERPILLAR_SSM_ASSUME_ROLE_ARN`
 
 var (
 	awsTrue = aws.Bool(true)
@@ -21,10 +22,10 @@ var (
 )
 
 func assumeRoleARN(path string) string {
-	if strings.HasPrefix(path, `/caterpillar/`) {
-		return dataPlatformCaterpillarSSMRole
+	if !strings.HasPrefix(path, `/caterpillar/`) {
+		return ``
 	}
-	return ``
+	return os.Getenv(ssmAssumeRoleEnv)
 }
 
 func getSecret(path string) (string, error) {
