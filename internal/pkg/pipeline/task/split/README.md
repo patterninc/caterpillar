@@ -17,7 +17,11 @@ The split task divides data into multiple records based on a delimiter. It recei
 | `name` | string | - | Task name for identification |
 | `type` | string | `split` | Must be "split" |
 | `delimiter` | string | `\n` | Character or string used to split the data |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
+
+One trailing delimiter is trimmed before splitting, so a file ending in a newline does not yield an empty final record.
 
 ## Example Configurations
 

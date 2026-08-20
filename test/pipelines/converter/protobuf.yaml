@@ -1,0 +1,13 @@
+tasks:
+  - name: read_protobuf
+    type: file
+    path: test/pipelines/converter/person.bin
+  - name: convert_from_protobuf
+    type: converter
+    format: protobuf
+    descriptor_path: test/pipelines/converter/person.desc
+    message_name: caterpillar.test.v1.Person
+    use_proto_names: true
+  - name: write_json
+    type: file
+    path: ./test/pipelines/converter/protobuf_test_results.json

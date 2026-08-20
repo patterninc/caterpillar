@@ -25,6 +25,7 @@ type contextKeyFile string
 
 const (
 	CtxKeyFileNameWrite        contextKeyFile = "CATERPILLAR_FILE_NAME_WRITE"
+	CtxKeyFilePathWrite        contextKeyFile = "CATERPILLAR_FILE_PATH_WRITE"
 	CtxKeyArchiveFileNameWrite contextKeyFile = "CATERPILLAR_ARCHIVE_FILE_NAME_WRITE"
 )
 

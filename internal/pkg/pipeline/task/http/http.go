@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"strings"
 	"sync"
 	"time"
@@ -32,23 +33,6 @@ const (
 var (
 	ctx = context.Background()
 )
-
-type oauth struct {
-	ConsumerKey     string   `yaml:"consumer_key" json:"consumer_key"`
-	ConsumerSecret  string   `yaml:"consumer_secret" json:"consumer_secret"`
-	Token           string   `yaml:"token" json:"token"`
-	TokenSecret     string   `yaml:"token_secret" json:"token_secret"`
-	Version         string   `yaml:"version,omitempty" json:"version,omitempty"`
-	SignatureMethod string   `yaml:"signature_method,omitempty" json:"signature_method,omitempty"`
-	Realm           string   `yaml:"realm,omitempty" json:"realm,omitempty"`
-	PrivateKey      string   `yaml:"private_key,omitempty" json:"private_key,omitempty"`
-	Subject         string   `yaml:"subject,omitempty" json:"subject,omitempty"`
-	Issuer          string   `yaml:"issuer,omitempty" json:"issuer,omitempty"`
-	Audience        string   `yaml:"audience,omitempty" json:"audience,omitempty"`
-	TokenURI        string   `yaml:"token_uri,omitempty" json:"token_uri,omitempty"`
-	GrantType       string   `yaml:"grant_type,omitempty" json:"grant_type,omitempty"`
-	Scope           []string `yaml:"scope,omitempty" json:"scope,omitempty"`
-}
 
 type httpCore struct {
 	task.Base        `yaml:",inline" json:",inline"`
@@ -94,9 +78,11 @@ func (h *httpCore) getClient() *http.Client {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.MaxConnsPerHost = defaultMaxConnsPerHost
 		transport.MaxIdleConnsPerHost = defaultMaxConnsPerHost
+		jar, _ := cookiejar.New(nil)
 		h.client = &http.Client{
 			Timeout:   time.Duration(h.Timeout),
 			Transport: transport,
+			Jar:       jar,
 		}
 	})
 	return h.client
@@ -115,7 +101,7 @@ func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 		ExpectedStatuses: h.ExpectedStatuses,
 		Body:             h.Body,
 		NextPage:         h.NextPage,
-		Oauth:            h.Oauth,
+		Oauth:            h.Oauth.copy(),
 		Proxy:            h.Proxy,
 		Timeout:          h.Timeout,
 		MaxRetries:       h.MaxRetries,
@@ -123,7 +109,7 @@ func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 	}
 
 	if err := json.Unmarshal(data, newHttp); err != nil {
-		return nil, fmt.Errorf("cannot parse http payload [%s]: %s", err, string(data))
+		return nil, fmt.Errorf("cannot parse http payload: %w", err)
 	}
 
 	// we only append headers that are present in the current task (h) and missing in the new one
@@ -188,7 +174,7 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 
 	// we have infinite loop to account for potential pagination
 	for {
-		result, err := h.call(endpoint)
+		result, err := h.call(endpoint, rc)
 
 		if err != nil {
 			return err
@@ -262,6 +248,19 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 					}
 				}
 			}
+
+			// Applied before the next iteration renders its templates, so pagination
+			// can carry state a single response doesn't contain. JSON-encoded to
+			// match task.Base, so `{{ context }}` renders the same either way.
+			if contextVal, ok := nextPageMap["context"].(map[string]interface{}); ok {
+				for name, value := range contextVal {
+					encoded, err := json.Marshal(value)
+					if err != nil {
+						return fmt.Errorf("cannot set context value %s: %s", name, err)
+					}
+					rc.SetContextValue(name, string(encoded))
+				}
+			}
 		} else {
 			break
 		}
@@ -272,7 +271,7 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 
 }
 
-func (h *httpCore) call(endpoint string) (*result, error) {
+func (h *httpCore) call(endpoint string, rc *record.Record) (*result, error) {
 
 	var lastErr error
 	for attempt := 1; attempt <= h.MaxRetries; attempt++ {
@@ -294,14 +293,7 @@ func (h *httpCore) call(endpoint string) (*result, error) {
 
 		// TODO: support multiple "behaviors" for oauth support
 		if h.Oauth != nil {
-			// apply default values if version and hash method are missing
-			if h.Oauth.Version == `` {
-				h.Oauth.Version = defaultOAuthVersion
-			}
-			if h.Oauth.SignatureMethod == `` {
-				h.Oauth.SignatureMethod = defaultSignatureMethod
-			}
-			if err := h.oauth(endpoint, request); err != nil {
+			if err := h.oauth(endpoint, request, rc); err != nil {
 				lastErr = err
 				if attempt < h.MaxRetries {
 					continue
@@ -320,9 +312,11 @@ func (h *httpCore) call(endpoint string) (*result, error) {
 				}
 				break
 			}
+			jar, _ := cookiejar.New(nil)
 			client = &http.Client{
 				Timeout:   time.Duration(h.Timeout),
 				Transport: transport,
+				Jar:       jar,
 			}
 		}
 
