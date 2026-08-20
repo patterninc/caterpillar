@@ -18,6 +18,10 @@ The task receives records from its input channel, applies the archiving operatio
 
 During **unpack**, the sanitized base filename of each extracted entry is stored in the record context under the key `CATERPILLAR_ARCHIVE_FILE_NAME_WRITE`. The stem is lowercased with non-alphanumeric characters replaced by underscores, while the extension is preserved and lowercased (e.g. `"Report 1.CSV"` → `"report_1.csv"`).
 
+**Pack** requires every incoming record to already carry `CATERPILLAR_FILE_NAME_WRITE` in its
+context — that value becomes the entry's name inside the archive. A `file` read upstream sets
+the key for you; any other source has to set it via a `context:` block.
+
 ## Configuration Fields
 
 | Field | Type | Default | Description |
@@ -26,6 +30,9 @@ During **unpack**, the sanitized base filename of each extracted entry is stored
 | `type` | string | `archive` | Must be "archive" |
 | `format` | string | `zip` | Archive format (zip, tar) |
 | `action` | string | `pack` | Action type (pack or unpack) |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
+| `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
 ## Supported Formats
 
