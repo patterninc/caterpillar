@@ -22,8 +22,6 @@ The replace task performs text replacement using regular expressions. It receive
 | `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
-This task cannot be last in a pipeline — with no output channel it silently drops every record.
-
 ## Regex Features
 
 The replace task supports standard regex features including:

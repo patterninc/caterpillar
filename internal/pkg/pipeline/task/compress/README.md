@@ -33,9 +33,6 @@ The task receives records from its input channel, applies compression/decompress
 - **gzip**: Standard gzip compression
 - **snappy**: Fast compression/decompression
 
-An unrecognized `format` fails at config load. `action`, by contrast, is not validated: any
-value other than `compress` decompresses, so a typo silently inverts the task.
-
 ## Example Configurations
 
 ### Compress data with gzip:

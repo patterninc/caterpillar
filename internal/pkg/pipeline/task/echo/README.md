@@ -21,7 +21,7 @@ The echo task prints data to the console for debugging and monitoring. It receiv
 | `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
-Each line is printed as `<timestamp> - <task name> - <payload>`. The field is `only_data`; `data_only` is silently ignored.
+Each line is printed as `<timestamp> - <task name> - <payload>`.
 
 ## Example Configuration
 

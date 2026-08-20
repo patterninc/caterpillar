@@ -23,11 +23,7 @@ The converter task transforms data between different formats. It receives record
 | `name` | string | - | Task name for identification |
 | `type` | string | `converter` | Must be "converter" |
 | `format` | string | - | Format to convert to (csv, html, sst, xlsx, xls, eml, protobuf) |
-| `delimiter` | string | - | SST only: splits key from value. No default — an empty value takes the first character as the key. |
-
-`fail_on_error`, `task_concurrency` and `context` are accepted on a `converter` task but
-silently discarded; only `name`, `type`, `format`, `delimiter` and the per-format options below
-are read.
+| `delimiter` | string | - | SST only: separator between key and value |
 
 ### CSV Format Options
 

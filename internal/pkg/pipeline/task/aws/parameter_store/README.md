@@ -36,7 +36,7 @@ In lookup mode, each input record is forwarded after its context is populated. `
 | `type` | string | `aws_parameter_store` | Must be "aws_parameter_store" |
 | `set` | map[string]string | - | Parameters to set, keyed by parameter name, valued by a JQ expression over the record |
 | `lookup` | map[string]string | - | Parameters to retrieve per record, keyed by context field name, valued by parameter path |
-| `cache_ttl` | duration | `5m` | How long successful lookups are cached. Omitted or `0` uses `5m`. |
+| `cache_ttl` | duration | `5m` | How long successful lookups are cached. |
 | `on_missing` | string | `error` | Lookup-mode behaviour when a parameter does not exist: `error` stops the task; `skip` logs and drops the record |
 | `secure` | bool | `true` | Whether to store parameters as SecureString (write mode only) |
 | `overwrite` | bool | `true` | Whether to overwrite existing parameters (write mode only) |

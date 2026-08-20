@@ -19,9 +19,8 @@ The task receives records from its input channel, applies the archiving operatio
 During **unpack**, the sanitized base filename of each extracted entry is stored in the record context under the key `CATERPILLAR_ARCHIVE_FILE_NAME_WRITE`. The stem is lowercased with non-alphanumeric characters replaced by underscores, while the extension is preserved and lowercased (e.g. `"Report 1.CSV"` → `"report_1.csv"`).
 
 **Pack** requires every incoming record to already carry `CATERPILLAR_FILE_NAME_WRITE` in its
-context — that value becomes the entry's name inside the archive. A record without it aborts the
-process. A `file` read upstream sets the key for you; any other source has to set it via a
-`context:` block.
+context — that value becomes the entry's name inside the archive. A `file` read upstream sets
+the key for you; any other source has to set it via a `context:` block.
 
 ## Configuration Fields
 
@@ -40,9 +39,6 @@ process. A `file` read upstream sets the key for you; any other source has to se
 The task supports the following archive formats:
 - **zip**: Standard ZIP format, widely compatible
 - **tar**: TAR format, commonly used in Unix/Linux environments
-
-An invalid `action` is rejected at config load. An unrecognized `format`, however, is not
-validated and panics at run time.
 
 ## Example Configurations
 

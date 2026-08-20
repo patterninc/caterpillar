@@ -42,8 +42,7 @@ In read mode, two values are stored in each record's context:
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
 A read emits **one record per file**, holding the whole file — it does not split on lines. Put a
-[`split`](../split) task after it to get a record per line. A `delimiter` field is accepted and has
-no effect.
+[`split`](../split) task after it to get a record per line.
 
 ## S3 storage class
 

@@ -139,9 +139,6 @@ oauth:
   realm: "optional-realm"
 ```
 
-The signature is always HMAC-SHA256. `signature_method` is copied into the Authorization header
-(default `HMAC-SHA256`) and does not select a different algorithm.
-
 ### OAuth 2.0
 ```yaml
 oauth:
