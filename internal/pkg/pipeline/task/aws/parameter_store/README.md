@@ -59,7 +59,7 @@ tasks:
     overwrite: true
 ```
 
-### Lookup mode - Fetch per-record values into context:
+### Lookup mode - Fetch per-record credentials into context:
 ```yaml
 tasks:
   - name: extract_slug
@@ -74,10 +74,15 @@ tasks:
       private_key: /caterpillar/kms_google_drive_ingestion/accounts/{{ context "slug" }}/private_key
     cache_ttl: 5m
     on_missing: skip
+  - name: call_api
+    type: http
+    endpoint: https://www.googleapis.com/drive/v3/files
+    oauth:
+      version: "2.0"
+      issuer: "{{ context \"client_email\" }}"
+      subject: "{{ context \"client_email\" }}"
+      private_key: "{{ context \"private_key\" }}"
 ```
-
-Each downstream task reads the values with `{{ context "client_email" }}`, in any
-field whose type is `config.String`.
 
 ## Use Cases
 
