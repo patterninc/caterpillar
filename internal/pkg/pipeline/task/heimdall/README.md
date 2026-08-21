@@ -33,7 +33,7 @@ When used with an input channel, the task acts as a destination. It processes ea
 | `poll_interval` | duration | `5s` | Polling interval for async jobs |
 | `timeout` | duration | `5m` | Job timeout |
 | `get_result` | bool | `true` | Whether to fetch results from the `/result` endpoint after job completion.
-| `job` | object | - | Job configuration (see Job Configuration) |
+| `job` | object | - | Job configuration, **required** (see Job Configuration) |
 | `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
 | `fail_on_error` | bool | `false` | Whether to mark the overall pipeline run as failed if this task encounters an error |
 | `skip_on_error` | bool | `false` | Destination mode only. On a per-record job failure, log a warning and move on to the next record instead of aborting this worker. Overrides `fail_on_error` for per-record failures - the task never reports failed while this is set |
