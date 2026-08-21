@@ -82,8 +82,8 @@ func (q *Query) Execute(document []byte, inputs ...any) (any, error) {
 			break
 		}
 
-		if _, isError := v.(error); isError {
-			return nil, nil
+		if err, isError := v.(error); isError {
+			return nil, err
 		}
 
 		result = append(result, v)
@@ -108,6 +108,7 @@ func customFunctionsOptions() []gojq.CompilerOption {
 	options = append(options, signOptions()...)
 	options = append(options, uuidOptions()...)
 	options = append(options, messageAuthOptions()...)
+	options = append(options, bcryptOptions()...)
 	options = append(options, shuffleOptions()...)
 	options = append(options, sleepOptions()...)
 	options = append(options, translateOption()...)

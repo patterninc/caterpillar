@@ -46,8 +46,10 @@ type kafka struct {
 	Timeout            duration.Duration    `yaml:"timeout,omitempty" json:"timeout,omitempty"`                                                                // connection, read, write, commit timeout
 	BatchFlushInterval duration.Duration    `yaml:"batch_flush_interval,omitempty" json:"batch_flush_interval,omitempty"`                                      // interval to flush incomplete batches
 	GroupID            string               `yaml:"group_id,omitempty" json:"group_id,omitempty"`                                                              // the consumer group id (optional)
+	ClientRack         string               `yaml:"client_rack,omitempty" json:"client_rack,omitempty"`                                                        // rack id for enabling rack-aware features
 	AutoOffsetReset    string               `yaml:"auto_offset_reset,omitempty" json:"auto_offset_reset,omitempty" validate:"omitempty,oneof=earliest latest"` // group-mode reset policy when stored offset is out of range; "earliest" (default) or "latest"
 	BatchSize          int                  `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`                                                          // max messages per producer batch (maps to batch.num.messages); defaults to 100
+	MaxRecords         int                  `yaml:"max_records,omitempty" json:"max_records,omitempty" validate:"omitempty,gte=0"`                             // stop reading after this many records (0 = unlimited); negative values are rejected at validation
 	RetryLimit         *int                 `yaml:"retry_limit,omitempty" json:"retry_limit,omitempty"`                                                        // number of retries for read errors
 	Idempotent         bool                 `yaml:"idempotent,omitempty" json:"idempotent,omitempty"`                                                          // enable idempotent producer
 	Format             string               `yaml:"format,omitempty" json:"format,omitempty"`                                                                  // message format: "json" (default) or "avro"
@@ -246,6 +248,7 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 
 	timeout := time.Duration(k.Timeout)
 	retriesNumber := 0
+	recordsRead := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -287,6 +290,12 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 				fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
 					k.Topic, msg.TopicPartition.Partition, err)
 			}
+		}
+
+		recordsRead++
+		if k.MaxRecords > 0 && recordsRead >= k.MaxRecords {
+			fmt.Printf("kafka max_records (%d) reached for topic %s, stopping reader\n", k.MaxRecords, k.Topic)
+			return nil
 		}
 	}
 }
@@ -398,6 +407,10 @@ func (k *kafka) buildConsumerConfig() (*ckafka.ConfigMap, error) {
 	_ = cfg.SetKey("isolation.level", "read_committed")
 	_ = cfg.SetKey("group.id", k.GroupID)
 
+	if k.ClientRack != "" {
+		_ = cfg.SetKey("client.rack", k.ClientRack)
+	}
+
 	return cfg, nil
 }
 
@@ -412,6 +425,10 @@ func (k *kafka) buildStandaloneConsumerConfig() (*ckafka.ConfigMap, error) {
 	_ = cfg.SetKey("enable.auto.commit", false)
 	_ = cfg.SetKey("auto.offset.reset", "earliest")
 	_ = cfg.SetKey("isolation.level", "read_committed")
+
+	if k.ClientRack != "" {
+		_ = cfg.SetKey("client.rack", k.ClientRack)
+	}
 
 	return cfg, nil
 }

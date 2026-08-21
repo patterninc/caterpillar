@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"fmt"
 	"github.com/bmatcuk/doublestar"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 )
@@ -40,6 +41,10 @@ func (r *localReader) parse(glob string) ([]string, error) {
 	paths, err := doublestar.Glob(glob)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("no files found at %s", glob)
 	}
 
 	return paths, nil

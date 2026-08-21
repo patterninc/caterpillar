@@ -1,0 +1,17 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: caterpillar
+  description: 'A Onboard an Existing Repo to Backstage created via Backstage'
+  annotations:
+    repo: patterninc/caterpillar
+  labels:
+    CostCenter: DATA
+    Environment: stage
+    Name: caterpillar
+    Owner: dev-data-acquisition
+    Department: DATA
+    CreatedBy: Backstage
+spec:
+  type: service
+  system: data

@@ -1,0 +1,8 @@
+tasks:
+  - name: read_nested_json
+    type: file
+    path: test/pipelines/**/*.json
+
+  - name: write_mirrored
+    type: file
+    path: /tmp/caterpillar/file_path_write_test/{{ context "CATERPILLAR_FILE_PATH_WRITE" }}

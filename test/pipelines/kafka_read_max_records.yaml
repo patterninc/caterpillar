@@ -1,0 +1,19 @@
+tasks:
+  - name: kafka_read
+    type: kafka
+    bootstrap_server: '{{ secret "/kafka/server" }}:9094'
+    topic: test-caterpillar-topic
+    user_auth_type: scram
+    username: test-caterpillar
+    password: {{ secret "/kafka/test-caterpillar/secret" }}
+    server_auth_type: tls
+    timeout: 2s
+    max_records: 10            # stop after 10 records have been forwarded downstream
+    end_after: 30s             # safety net: stop after 30s even if max_records is not reached
+    auto_offset_reset: latest
+    cert: |
+      {{ indent 6 (secret "/kafka/ca-cert") }}
+
+  - name: echo_results
+    type: echo
+    only_data: true

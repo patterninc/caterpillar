@@ -19,7 +19,30 @@ The JQ task applies JQ queries to transform JSON data. It receives records from 
 | `path` | string | - | JQ query expression to apply |
 | `explode` | bool | `false` | If true, splits array results into individual records |
 | `as_raw` | bool | `false` | If true, outputs raw values instead of JSON |
-| `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
+| `ignore_error` | bool | `true` | If false, a query error is critical and ends the task; if true, it is non-critical and only the offending record is skipped (see [Query Errors](#query-errors)) |
+| `fail_on_error` | bool | `false` | Whether a critical query error makes the run exit non-zero |
+
+## Query Errors
+
+A query can fail on a single record — an explicit `error("...")`, or a runtime type error such as
+adding a number to a string. `ignore_error` decides whether that ends the task, and
+`fail_on_error` decides the run's verdict, exactly as it does for any other task's error:
+
+| `ignore_error` | `fail_on_error` | task | run |
+|---|---|---|---|
+| unset (default) | unset (default) | continues, that record dropped | exits 0 |
+| unset (default) | `true` | continues, that record dropped | exits 0 |
+| `false` | unset | stops at the bad record | exits 0 |
+| `false` | `true` | stops at the bad record | exits 1 |
+
+Each skipped record reports `WARN: <task name>: skipping record <id>: <error>`, which under the
+defaults is the only signal that data was dropped. An ignored error is never returned from the
+task, so `fail_on_error` has nothing to judge — hence the second row — and failing a run on a
+query error takes both fields. Tolerating a record while still reporting the run as failed
+cannot be expressed.
+
+A query with no output is not an error: a filter that matches nothing (for example
+`select(...)` rejecting the input) simply produces no record, with nothing reported.
 
 ## JQ Query Examples
 
@@ -60,7 +83,7 @@ tasks:
     type: jq
     path: |
       {
-        "endpoint": "https://api.example.com/users/{{ context 'user_id' }}"
+        "endpoint": "https://api.example.com/users/{{ context \"user_id\" }}"
       }
 ```
 
@@ -103,7 +126,75 @@ tasks:
 
 ## Custom JQ Functions
 
-In addition to standard JQ functions, Caterpillar provides custom functions to extend JQ capabilities:
+In addition to standard JQ functions, Caterpillar provides custom functions to extend JQ
+capabilities. `bcrypt` and `translate` are described in detail below; the rest are:
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `md5` | `<string> \| md5` | Hex-encoded MD5 of the piped string |
+| `sha256` | `<string> \| sha256` | Hex-encoded SHA-256 of the piped string |
+| `sha512` | `<string> \| sha512` | Hex-encoded SHA-512 of the piped string |
+| `hmac_md5` | `hmac_md5(data; key)` or `hmac_md5(data; key; prefix)` | Hex-encoded HMAC-MD5 of `data` under `key`; the optional `prefix` bytes are placed ahead of the digest before hex-encoding |
+| `hmac_sha256` | `hmac_sha256(data; key)` or `hmac_sha256(data; key; prefix)` | Hex-encoded HMAC-SHA-256, same argument shape |
+| `hmac_sha512` | `hmac_sha512(data; key)` or `hmac_sha512(data; key; prefix)` | Hex-encoded HMAC-SHA-512, same argument shape |
+| `rsa_sha256` | `rsa_sha256(hex_digest; private_key)` | Base64 RSA PKCS#1 v1.5 signature. `hex_digest` is an already-hashed, hex-encoded SHA-256 digest, not the raw message; `private_key` is PEM text |
+| `rsa_sha512` | `rsa_sha512(hex_digest; private_key)` | As above, over SHA-512 |
+| `uuid` | `uuid` | A new random UUID; ignores its input |
+| `shuffle` | `<array> \| shuffle` | The piped array in random order |
+| `sleep` | `sleep("1s")` | Pauses for a duration string, then passes the input through unchanged |
+
+`test/pipelines/hash_test.yaml` and `test/pipelines/uuid_test.yaml` exercise these.
+
+### bcrypt
+
+Hashes the piped value with bcrypt using a salt you supply. Go's standard bcrypt always generates
+its own random salt, so this function exists for schemes that derive a value from a *fixed* salt —
+for example an API that signs requests with `bcrypt(client_id + "_" + timestamp)` using the client
+secret as the salt.
+
+**Signature:** `bcrypt(data; salt)`
+
+**Parameters:**
+- `data` (string): The value to hash. Maximum 72 bytes — bcrypt reads no further, so longer input is rejected rather than silently truncated.
+- `salt` (string): Either a bare 22-character salt or a full modular-crypt string such as `$2a$04$abcdefghijklmnopqrstuu`. A complete hash is also accepted, in which case its salt is reused.
+
+To select a version or cost, supply the salt in modular-crypt form — `$2b$10$abcdefghijklmnopqrstuu`
+uses version `2b` at cost 10. A bare salt defaults to version `2a` at cost 4. Supported versions are
+`2`, `2a`, `2b` and `2y`; `2x` is not supported. Cost ranges from 4 to 31.
+
+The salt uses bcrypt's own base64 alphabet (`./A-Za-z0-9`), which orders characters differently from
+standard base64, so a salt produced by `@base64` will not round-trip.
+
+**Returns:** A modular-crypt string, `$<version>$<cost>$<salt><checksum>`
+
+**Example:**
+```yaml
+tasks:
+  - name: sign_token_request
+    type: jq
+    path: |
+      {
+        "signature": bcrypt(
+          .client_id + "_" + (.timestamp | tostring);
+          "{{ env \"CLIENT_SECRET\" }}"
+        )
+      }
+```
+
+Both arguments are evaluated against the record, so a salt carried on the record needs no binding:
+
+```yaml
+tasks:
+  - name: sign_with_per_record_salt
+    type: jq
+    path: |
+      {
+        "signature": bcrypt(.payload; .salt)
+      }
+```
+
+**Note:** The default cost of 4 is the lowest bcrypt permits. It suits reproducing a signature, but
+choose a substantially higher cost when hashing anything that needs to resist offline attack.
 
 ### translate
 
@@ -135,10 +226,15 @@ tasks:
 
 ## Sample Pipelines
 
+- `test/pipelines/bcrypt_test.yaml` - bcrypt hashing against known-answer vectors
 - `test/pipelines/context_test.yaml` - JQ with context variables
 - `test/pipelines/convert_industries.yaml` - Data transformation with JQ
-- `test/pipelines/html2json.yaml` - HTML to JSON conversion
+- `test/pipelines/hash_test.yaml` - Hashing with JQ
+- `test/pipelines/jq_error_not_ignored_test.yaml` - `ignore_error: false`, so the task stops while the run still exits 0
+- `test/pipelines/jq_error_skipped_test.yaml` - a query error skipped under the defaults
+- `test/pipelines/jq_error_test.yaml` - `ignore_error: false` with `fail_on_error`, failing the run
 - `test/pipelines/translate_test.yaml` - Text translation with JQ
+- `test/pipelines/uuid_test.yaml` - UUID generation with JQ
 
 ## Use Cases
 

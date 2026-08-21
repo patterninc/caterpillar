@@ -17,7 +17,11 @@ The echo task prints data to the console for debugging and monitoring. It receiv
 | `name` | string | - | Task name for identification |
 | `type` | string | `echo` | Must be "echo" |
 | `only_data` | bool | `false` | If true, prints only the data field. If false, prints the full record as JSON |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
+
+Each line is printed as `<timestamp> - <task name> - <payload>`.
 
 ## Example Configuration
 

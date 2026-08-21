@@ -20,10 +20,16 @@ The task automatically determines its mode based on the presence of input/output
 | `queue_url` | string | - | SQS queue URL (required) |
 | `concurrency` | int | `10` | Number of concurrent message processors |
 | `max_messages` | int | `10` | Maximum number of messages to receive per batch |
-| `wait_time` | int | `10` | Long polling wait time in seconds |
+| `wait_time_seconds` | int | `10` | Long polling wait time in seconds |
 | `exit_on_empty` | bool | `false` | Exit when queue is empty |
+| `end_after` | duration | - | Stop polling after this much time (read mode); e.g. `5m` |
 | `message_group_id` | string | - | Message group ID for FIFO queues |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
+
+In read mode the task polls until the queue drains (`exit_on_empty`) or `end_after` elapses;
+with neither set it polls indefinitely.
 
 ## Example Configurations
 
@@ -34,7 +40,7 @@ tasks:
     type: sqs
     queue_url: https://sqs.us-west-2.amazonaws.com/123456789012/my-queue
     max_messages: 10
-    wait_time: 10
+    wait_time_seconds: 10
     concurrency: 5
 ```
 
@@ -66,7 +72,7 @@ tasks:
 
 ## Sample Pipelines
 
-- `test/pipelines/sqs_reader.yaml` - SQS message reading example
+- `test/pipelines/sqs_with_context_concurrency.yaml` - SQS read with context variables and concurrency
 
 ## Use Cases
 

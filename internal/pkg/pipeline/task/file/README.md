@@ -20,7 +20,10 @@ The file task operates in two modes depending on whether an input channel is pro
 
 The task automatically determines its mode based on the presence of input/output channels.
 
-In read mode, the sanitized base filename is stored in the record context under the key `CATERPILLAR_FILE_NAME_WRITE`. The stem is lowercased with non-alphanumeric characters replaced by underscores, while the extension is preserved and lowercased (e.g. `"Report 1.CSV"` → `"report_1.csv"`).
+In read mode, two values are stored in each record's context:
+
+- `CATERPILLAR_FILE_NAME_WRITE` — the sanitized base filename. The stem is lowercased with non-alphanumeric characters replaced by underscores, while the extension is preserved and lowercased (e.g. `"Report 1.CSV"` → `"report_1.csv"`).
+- `CATERPILLAR_FILE_PATH_WRITE` — the sanitized full source path with directory hierarchy preserved. Each segment is slugified the same way; the final segment keeps its extension; URL schemes such as `s3://bucket/` are stripped (e.g. `s3://my-bucket/ReportType=A/Folder 1/data.CSV` → `reporttype_a/folder_1/data.csv`). Reference it in the destination of a downstream write task to avoid collisions when reading nested directories with a recursive glob.
 
 ## Configuration Fields
 
@@ -32,10 +35,14 @@ In read mode, the sanitized base filename is stored in the record context under 
 | `region` | string | `us-west-2` | AWS region for S3 operations |
 | `storage_class` | string | `STANDARD` | S3 **write** only: on `PutObject`. Ignored for local paths. See [S3 storage class](#s3-storage-class). |
 | `tags` | map[string]string | - | S3 **write** only: object tags applied on `PutObject`. Ignored for local paths. Values support macros and context templates. See [S3 object tags](#s3-object-tags). |
-| `delimiter` | string | `\n` | Delimiter used to separate records when reading |
 | `success_file` | bool | `false` | Whether to create a success file after writing |
 | `success_file_name` | string | `_SUCCESS` | Name of the success file |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
+
+A read emits **one record per file**, holding the whole file — it does not split on lines. Put a
+[`split`](../split) task after it to get a record per line.
 
 ## S3 storage class
 
@@ -115,7 +122,6 @@ tasks:
   - name: read_data
     type: file
     path: /path/to/input.txt
-    delimiter: "\n"
 ```
 
 ### Writing to S3:
@@ -145,6 +151,26 @@ tasks:
     type: file
     path: output/data_{{ macro "timestamp" }}.txt
 ```
+
+### Preserving source hierarchy when reading nested directories:
+
+When reading from a recursive glob, two files in different subdirectories can share the same base name (e.g. `reportType=X/subA/data.tsv` and `reportType=X/subB/data.tsv`). Referencing `CATERPILLAR_FILE_NAME_WRITE` alone in the destination would collide; `CATERPILLAR_FILE_PATH_WRITE` preserves the source folder hierarchy so the writes stay distinct.
+
+```yaml
+tasks:
+  - name: read_nested
+    type: file
+    path: s3://source-bucket/reportType=X/**/*.tsv
+
+  - name: write_mirrored
+    type: file
+    path: s3://dest-bucket/ds={{ macro "timestamp" }}/{{ context "CATERPILLAR_FILE_PATH_WRITE" }}
+    region: us-east-1
+```
+
+With the inputs above, the writes land at:
+- `s3://dest-bucket/ds=.../reporttype_x/suba/data.tsv`
+- `s3://dest-bucket/ds=.../reporttype_x/subb/data.tsv`
 
 ## Sample Pipelines
 
