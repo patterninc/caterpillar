@@ -32,14 +32,14 @@ const (
 )
 
 type heimdall struct {
-	task.Base         `yaml:",inline" json:",inline"`
-	Endpoint          string            `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
-	Headers           map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
-	PollInterval      duration.Duration `yaml:"poll_interval,omitempty" json:"poll_interval,omitempty"`
-	Timeout           duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
-	GetResult         bool              `yaml:"get_result" json:"get_result"`
-	SkipRecordOnError bool              `yaml:"skip_record_on_error,omitempty" json:"skip_record_on_error,omitempty"`
-	JobRequest        *jobRequest       `yaml:"job,omitempty" json:"job,omitempty" validate:"required"`
+	task.Base    `yaml:",inline" json:",inline"`
+	Endpoint     string            `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
+	Headers      map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	PollInterval duration.Duration `yaml:"poll_interval,omitempty" json:"poll_interval,omitempty"`
+	Timeout      duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	GetResult    bool              `yaml:"get_result" json:"get_result"`
+	SkipOnError  bool              `yaml:"skip_on_error,omitempty" json:"skip_on_error,omitempty"`
+	JobRequest   *jobRequest       `yaml:"job,omitempty" json:"job,omitempty" validate:"required"`
 }
 
 func New() (task.Task, error) {
@@ -75,10 +75,10 @@ func (h *heimdall) Run(input <-chan *record.Record, output chan<- *record.Record
 			// Create a job request with the dynamic context
 			jobReq := h.buildJobRequest(jobContext)
 			if err := h.submitJob(jobReq, output); err != nil {
-				if !h.SkipRecordOnError {
+				if !h.SkipOnError {
 					return err
 				}
-				fmt.Printf("error in %s: %s\n", h.GetName(), err)
+				fmt.Printf("WARN: skipping failed record in %s: %s\n", h.GetName(), err)
 				continue
 			}
 		}
