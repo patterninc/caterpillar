@@ -35,7 +35,7 @@ When used with an input channel, the task acts as a destination. It processes ea
 | `get_result` | bool | `true` | Whether to fetch results from the `/result` endpoint after job completion.
 | `job` | object | - | Job configuration (see Job Configuration) |
 | `fail_on_error` | bool | `false` | Whether to mark the overall pipeline run as failed if this task encounters an error |
-| `skip_record_on_error` | bool | `false` | Destination mode only. When a per-record job submission fails, log the error and move on to the next record instead of aborting this worker for the rest of the run. Off by default - a failure still stops this worker's remaining backlog unless explicitly enabled. Use this when a record that is doomed to always fail (e.g. a job whose target no longer exists) must not silently drop every other record still queued behind it on the same worker under `task_concurrency` |
+| `skip_record_on_error` | bool | `false` | Destination mode only. When a per-record job submission fails, log the error and move on to the next record instead of aborting this worker for the rest of the run. Off by default - a failure still permanently removes this worker from the shared pool under `task_concurrency` unless explicitly enabled. Use this when a record can be doomed to always fail (e.g. a job whose target no longer exists) independently of the others, so that record's failure never costs the run one of its workers |
 
 ## Job Configuration
 
@@ -156,4 +156,4 @@ The task supports both synchronous and asynchronous job execution:
 - **Job criteria**: Set correct command and cluster criteria
 - **Timeout configuration**: Set appropriate timeouts for job types
 - **Error handling**: Handle job failures and timeouts gracefully
-- **Worker isolation**: In destination mode with `task_concurrency` > 1, each worker pulls records from a shared channel - by default a single record's job failure stops that worker for the rest of the run, which can silently drop other unrelated records still queued behind it. Set `skip_record_on_error: true` if a task's records can independently fail (rather than indicating a systemic problem) and each one should be handled on its own.
+- **Worker isolation**: In destination mode with `task_concurrency` > 1, each worker pulls records from a shared channel - by default a record's job failure stops that worker for the rest of the run, permanently reducing how many workers are left to drain the channel. A single such failure alone causes no data loss (the remaining workers keep draining the shared channel), but if independent failures accumulate until every worker has died, whatever is still unconsumed in the channel at that point is silently never processed. Set `skip_record_on_error: true` if a task's records can independently fail (rather than indicating a systemic problem) and each one should be handled on its own, so no worker is ever lost to a set of bad records.
