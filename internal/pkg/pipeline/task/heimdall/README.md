@@ -34,7 +34,8 @@ When used with an input channel, the task acts as a destination. It processes ea
 | `timeout` | int | `300` | Job timeout in seconds |
 | `get_result` | bool | `true` | Whether to fetch results from the `/result` endpoint after job completion.
 | `job` | object | - | Job configuration (see Job Configuration) |
-| `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
+| `fail_on_error` | bool | `false` | Whether to mark the overall pipeline run as failed if this task encounters an error |
+| `skip_record_on_error` | bool | `false` | Destination mode only. When a per-record job submission fails, log the error and move on to the next record instead of aborting this worker for the rest of the run. Off by default - a failure still stops this worker's remaining backlog unless explicitly enabled. Use this when a record that is doomed to always fail (e.g. a job whose target no longer exists) must not silently drop every other record still queued behind it on the same worker under `task_concurrency` |
 
 ## Job Configuration
 
@@ -155,3 +156,4 @@ The task supports both synchronous and asynchronous job execution:
 - **Job criteria**: Set correct command and cluster criteria
 - **Timeout configuration**: Set appropriate timeouts for job types
 - **Error handling**: Handle job failures and timeouts gracefully
+- **Worker isolation**: In destination mode with `task_concurrency` > 1, each worker pulls records from a shared channel - by default a single record's job failure stops that worker for the rest of the run, which can silently drop other unrelated records still queued behind it. Set `skip_record_on_error: true` if a task's records can independently fail (rather than indicating a systemic problem) and each one should be handled on its own.
