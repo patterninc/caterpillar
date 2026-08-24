@@ -21,8 +21,9 @@ type Acknowledger interface {
 // Nothing here gates the source's receive loop: a cap on unacknowledged
 // messages would deadlock against any fan-in task that must accumulate records
 // before it can emit, since freeing a slot depends on the very completion the
-// fan-in is waiting to produce. Messages in flight are bounded by the
-// pipeline's channel capacity, which applies backpressure already.
+// fan-in is waiting to produce. Pipeline occupancy is already bounded by
+// channel capacity; acks that have settled but not yet been deleted wait only
+// on the concurrency slots around Ack, so a slow broker can accumulate them.
 //
 // A Tracker must be created with NewTracker; the zero value is not usable.
 type Tracker struct {

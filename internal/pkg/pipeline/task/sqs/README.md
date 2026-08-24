@@ -74,11 +74,14 @@ zero times.
 
 Two consequences worth tuning for:
 
-- **`channel_size` bounds how many messages can be unacknowledged at once** (see the root
-  README). A message waiting in a deep channel can exceed the queue's visibility timeout,
-  at which point SQS redelivers it while the first copy is still in flight and the eventual
-  delete fails on a stale receipt handle. Keep `channel_size` in proportion to how long a
-  record takes to traverse the pipeline, relative to the queue's visibility timeout.
+- **`channel_size` bounds how many messages can sit inside the pipeline at once** (see the
+  root README). A message waiting in a deep channel can exceed the queue's visibility
+  timeout, at which point SQS redelivers it while the first copy is still in flight and
+  the eventual delete fails on a stale receipt handle. Keep `channel_size` in proportion
+  to how long a record takes to traverse the pipeline, relative to the queue's visibility
+  timeout. Messages that have finished the pipeline but whose delete has not yet returned
+  are bounded only by `concurrency` (how many `DeleteMessage` calls run at once), not by
+  `channel_size`.
 - **SQS caps in-flight messages** at 120,000 per standard queue and 20,000 per FIFO queue.
   A large `channel_size` on a long pipeline can approach that; on a breach `ReceiveMessage`
   returns `OverLimit` and the task stops. FIFO queues are stricter still, since
