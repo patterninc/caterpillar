@@ -15,6 +15,7 @@ import (
 	"github.com/patterninc/caterpillar/internal/pkg/config"
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
 	"github.com/patterninc/caterpillar/internal/pkg/jq"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -138,12 +139,14 @@ func (p *parameterStore) Run(input <-chan *record.Record, output chan<- *record.
 			// so a single misconfigured tenant need not stop every other one
 			if errors.Is(err, errParameterNotFound) && p.OnMissing == onMissingSkip {
 				fmt.Printf("WARN: skipping record: %s\n", err)
+				ack.Release(r.Context)
 				continue
 			}
-			return err
+			return ack.Rejected(r.Context, err)
 		}
 
 		p.SendRecord(r, output)
+		ack.Release(r.Context)
 	}
 
 	return nil

@@ -9,6 +9,7 @@ import (
 	"github.com/antchfx/htmlquery"
 	"golang.org/x/net/html"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/converter"
@@ -37,7 +38,7 @@ func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) e
 
 		document, err := htmlquery.Parse(bytes.NewReader(r.Data))
 		if err != nil {
-			return err
+			return ack.Rejected(r.Context, err)
 		}
 
 		containerNodes := []*html.Node{document}
@@ -45,9 +46,10 @@ func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) e
 			containerNodes = htmlquery.Find(document, x.Container)
 			if len(containerNodes) == 0 {
 				if !x.IgnoreMissing {
-					return fmt.Errorf("no nodes found for XPath: %s", x.Container)
+					return ack.Rejected(r.Context, fmt.Errorf("no nodes found for XPath: %s", x.Container))
 				}
 				fmt.Println("container is missing - ", x.Container)
+				ack.Release(r.Context)
 				continue
 			}
 		}
@@ -55,7 +57,7 @@ func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) e
 		for i, container := range containerNodes {
 			data, err := x.queryFields(container)
 			if err != nil {
-				return err
+				return ack.Rejected(r.Context, err)
 			}
 
 			if len(data) != 0 {
@@ -64,6 +66,8 @@ func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) e
 				x.SendData(r.Context, data, output)
 			}
 		}
+
+		ack.Release(r.Context)
 	}
 
 	return nil

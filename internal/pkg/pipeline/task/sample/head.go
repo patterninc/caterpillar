@@ -1,6 +1,7 @@
 package sample
 
 import (
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 )
 
@@ -25,6 +26,8 @@ func (h *head) filter(r *record.Record, output chan<- *record.Record) error {
 		h.sendRecord(r, output)
 		h.index++
 	}
+
+	ack.Release(r.Context)
 
 	return nil
 

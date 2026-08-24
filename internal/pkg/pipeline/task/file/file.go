@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/patterninc/caterpillar/internal/pkg/config"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 	"github.com/patterninc/caterpillar/internal/pkg/textutil"
@@ -158,6 +159,21 @@ func (f *file) readFile(output chan<- *record.Record) error {
 
 }
 
+// abort settles rc as failed, then returns err, so a source deferring
+// acknowledgement redelivers the record rather than waiting forever for a
+// write that will never happen.
+//
+// Only rc is rejected, never the records queued behind it: sibling workers are
+// still running and will write those, and the pipeline rejects whatever is
+// genuinely left over once every worker has returned.
+func (f *file) abort(rc *record.Record, err error) error {
+
+	ack.Reject(rc.Context)
+
+	return err
+
+}
+
 func (f *file) writeFile(input <-chan *record.Record) error {
 
 	for {
@@ -169,13 +185,13 @@ func (f *file) writeFile(input <-chan *record.Record) error {
 		// Evaluate the path with the record context
 		path, err := f.Path.Get(rc)
 		if err != nil {
-			return err
+			return f.abort(rc, err)
 		}
 
 		// Determine the scheme from the evaluated path
 		parsedURL, err := url.Parse(path)
 		if err != nil {
-			return err
+			return f.abort(rc, err)
 		}
 		pathScheme := parsedURL.Scheme
 		if pathScheme == `` {
@@ -198,11 +214,13 @@ func (f *file) writeFile(input <-chan *record.Record) error {
 
 		writerFunction, found := writers[pathScheme]
 		if !found {
-			return unknownSchemeError(pathScheme)
+			return f.abort(rc, unknownSchemeError(pathScheme))
 		}
 		if err := writerFunction(&fs, rc, bytes.NewReader(rc.Data)); err != nil {
-			return err
+			return f.abort(rc, err)
 		}
+
+		ack.Release(rc.Context)
 	}
 
 	return nil

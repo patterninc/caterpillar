@@ -3,11 +3,13 @@ package archive
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"io"
 	"log"
 	"path/filepath"
 	"strings"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 	"github.com/patterninc/caterpillar/internal/pkg/textutil"
@@ -27,6 +29,7 @@ func (t *tarArchive) Read() {
 		}
 
 		if len(rc.Data) == 0 {
+			ack.Release(rc.Context)
 			continue
 		}
 
@@ -44,16 +47,20 @@ func (t *tarArchive) Read() {
 			}
 
 			// check the file type is regular file
-			if header.Typeflag == tar.TypeReg {
-				buf := make([]byte, header.Size)
-				if _, err := io.ReadFull(r, buf); err != nil && err != io.EOF {
-					log.Fatal(err)
-				}
-				rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), textutil.SlugifyFileName(filepath.Base(header.Name)))
-				t.SendData(rc.Context, buf, t.OutputChan)
+			if header.Typeflag != tar.TypeReg {
+				continue
 			}
 
+			buf := make([]byte, header.Size)
+			if _, err := io.ReadFull(r, buf); err != nil && err != io.EOF {
+				log.Fatal(err)
+			}
+
+			rc.SetContextValue(string(task.CtxKeyArchiveFileNameWrite), textutil.SlugifyFileName(filepath.Base(header.Name)))
+			t.SendData(rc.Context, buf, t.OutputChan)
 		}
+
+		ack.Release(rc.Context)
 	}
 }
 
@@ -62,12 +69,15 @@ func (t *tarArchive) Write() {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	var rc record.Record
+	var ctxs []context.Context
 
 	for {
 		rec, ok := t.GetRecord(t.InputChan)
 		if !ok {
 			break
 		}
+		ctxs = append(ctxs, rec.Context)
+
 		b := rec.Data
 
 		if len(b) == 0 {
@@ -105,5 +115,9 @@ func (t *tarArchive) Write() {
 		log.Fatal(err)
 	}
 
-	t.SendData(rc.Context, buf.Bytes(), t.OutputChan)
+	// fan-in: the archive record is produced from every input consumed above,
+	// so its ack must transitively complete all of theirs.
+	joinedAck := ack.Joined(ctxs...)
+
+	t.SendData(ack.WithContext(rc.Context, joinedAck), buf.Bytes(), t.OutputChan)
 }

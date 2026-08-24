@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -61,6 +62,7 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 
 		// skip empty records
 		if len(r.Data) == 0 {
+			ack.Release(r.Context)
 			continue
 		}
 
@@ -68,22 +70,22 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) (e
 		var err error
 		if c.Action == defaultAction {
 			if transformedData, err = c.compress(r); err != nil {
-				return err
+				return ack.Rejected(r.Context, err)
 			}
 		} else {
 			if transformedData, err = c.decompress(r); err != nil {
-				return err
+				return ack.Rejected(r.Context, err)
 			}
 		}
 
 		// skip empty transformed data
 		if len(transformedData) == 0 {
+			ack.Release(r.Context)
 			continue
 		}
 
-		if output != nil {
-			c.SendData(r.Context, transformedData, output)
-		}
+		c.SendData(r.Context, transformedData, output)
+		ack.Release(r.Context)
 	}
 
 	return nil

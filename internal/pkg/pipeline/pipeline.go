@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 	"gopkg.in/yaml.v3"
@@ -190,11 +191,26 @@ func (p *Pipeline) distributeToChannels(input <-chan *record.Record, outputs []c
 	}()
 
 	for rec := range input {
+
+		// this duplication doesn't go through Base.SendRecord, so it registers each
+		// branch itself. The branch the record arrived with is released only once
+		// every copy has been handed over, so a branch that completes early cannot
+		// settle the record while later ones are still being dispatched.
+		a, tracked := ack.FromContext(rec.Context)
+
 		for _, ch := range outputs {
 			if ch != nil {
+				if tracked {
+					a.AddBranch(1)
+				}
 				ch <- rec
 			}
 		}
+
+		if tracked {
+			a.Done()
+		}
+
 	}
 }
 
@@ -251,11 +267,39 @@ func (p *Pipeline) runTaskConcurrently(t task.Task, input <-chan *record.Record,
 		}(t, input, output)
 	}
 
-	go func(wg *sync.WaitGroup, out chan<- *record.Record) {
+	go func(t task.Task, wg *sync.WaitGroup, in <-chan *record.Record, out chan<- *record.Record) {
+
 		wg.Wait()
+
+		// a worker that bailed out early can leave records in this task's
+		// input with nobody left to consume them, blocking upstream writers.
+		// Reject them so a source deferring acknowledgement redelivers them
+		// rather than waiting forever.
+		if in != nil {
+			for r := range in {
+				ack.Reject(r.Context)
+			}
+		}
+
 		if out != nil {
 			close(out)
 		}
+
+		// the output channel is closed, so downstream tasks can now drain to
+		// completion: the only safe point at which a source can wait for its
+		// deferred acknowledgements.
+		if f, ok := t.(task.Finisher); ok {
+			if err := f.Finish(); err != nil {
+				fmt.Printf("error finishing %s: %s\n", t.GetName(), err)
+				if t.GetFailOnError() {
+					p.locker.Lock()
+					p.errors[t.GetName()] = err
+					p.locker.Unlock()
+				}
+			}
+		}
+
 		p.wg.Done()
-	}(&taskWg, output)
+
+	}(t, &taskWg, input, output)
 }
