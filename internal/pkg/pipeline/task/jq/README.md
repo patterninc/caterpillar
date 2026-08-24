@@ -83,7 +83,7 @@ tasks:
     type: jq
     path: |
       {
-        "endpoint": "https://api.example.com/users/{{ context 'user_id' }}"
+        "endpoint": "https://api.example.com/users/{{ context \"user_id\" }}"
       }
 ```
 
@@ -126,7 +126,24 @@ tasks:
 
 ## Custom JQ Functions
 
-In addition to standard JQ functions, Caterpillar provides custom functions to extend JQ capabilities:
+In addition to standard JQ functions, Caterpillar provides custom functions to extend JQ
+capabilities. `bcrypt` and `translate` are described in detail below; the rest are:
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `md5` | `<string> \| md5` | Hex-encoded MD5 of the piped string |
+| `sha256` | `<string> \| sha256` | Hex-encoded SHA-256 of the piped string |
+| `sha512` | `<string> \| sha512` | Hex-encoded SHA-512 of the piped string |
+| `hmac_md5` | `hmac_md5(data; key)` or `hmac_md5(data; key; prefix)` | Hex-encoded HMAC-MD5 of `data` under `key`; the optional `prefix` bytes are placed ahead of the digest before hex-encoding |
+| `hmac_sha256` | `hmac_sha256(data; key)` or `hmac_sha256(data; key; prefix)` | Hex-encoded HMAC-SHA-256, same argument shape |
+| `hmac_sha512` | `hmac_sha512(data; key)` or `hmac_sha512(data; key; prefix)` | Hex-encoded HMAC-SHA-512, same argument shape |
+| `rsa_sha256` | `rsa_sha256(hex_digest; private_key)` | Base64 RSA PKCS#1 v1.5 signature. `hex_digest` is an already-hashed, hex-encoded SHA-256 digest, not the raw message; `private_key` is PEM text |
+| `rsa_sha512` | `rsa_sha512(hex_digest; private_key)` | As above, over SHA-512 |
+| `uuid` | `uuid` | A new random UUID; ignores its input |
+| `shuffle` | `<array> \| shuffle` | The piped array in random order |
+| `sleep` | `sleep("1s")` | Pauses for a duration string, then passes the input through unchanged |
+
+`test/pipelines/hash_test.yaml` and `test/pipelines/uuid_test.yaml` exercise these.
 
 ### bcrypt
 

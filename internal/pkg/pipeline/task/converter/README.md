@@ -12,7 +12,7 @@ The converter task transforms data between different formats. It receives record
 
 - If skip_first is True and no columns are provided, then the column names in the output will be the values in the first row of the CSV file, normalized: non-alphanumeric characters are replaced by underscores, leading/trailing underscores are trimmed, and the result is lowercased.
 - If skip_first is True and columns are provided, then the column names in the output will be the values provided (i.e., Provided column names supersede names from first row).
-- If skip_first is False, and no columns are provided, then the column names in the output will be named Col1, Col2, Col3, etc.
+- If skip_first is False, and no columns are provided, then the column names in the output will be named col1, col2, col3, etc.
 - If skip_first is False, and columns are provided, then the column names in the output will be the values provided.
 - A leading UTF-8 BOM is stripped from the first record, so it neither breaks parsing nor leaks into a column name or value.
 
@@ -23,7 +23,7 @@ The converter task transforms data between different formats. It receives record
 | `name` | string | - | Task name for identification |
 | `type` | string | `converter` | Must be "converter" |
 | `format` | string | - | Format to convert to (csv, html, sst, xlsx, xls, eml, protobuf) |
-| `delimiter` | string| \t | Used only in sst converter for spliting key and value| 
+| `delimiter` | string | - | SST only: separator between key and value |
 
 ### CSV Format Options
 
@@ -140,6 +140,7 @@ tasks:
     type: converter
     format: html
     container: "//div[@class='content']"
+```
 
 ### EML processing:
 ```yaml
@@ -151,7 +152,6 @@ tasks:
     type: converter
     format: eml
   # Output will correspond to body parts and attachments
-```
 ```
 
 ### Excel to CSV conversion (all sheets):
@@ -241,7 +241,8 @@ tasks:
 - `test/pipelines/convert_file.yaml` - File format conversion
 - `test/pipelines/convert_industries.yaml` - Data format transformation
 - `test/pipelines/converter/convert_xls.yaml` - Excel to CSV conversion
-- `test/pipelines/html2json.yaml` - HTML to JSON conversion
+- `test/pipelines/converter/eml.yaml` - MIME/EML email parsing
+- `test/pipelines/converter/protobuf.yaml` - Protobuf decoding
 
 ## Use Cases
 

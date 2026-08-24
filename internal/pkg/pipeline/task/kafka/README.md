@@ -17,7 +17,7 @@ There are two read modes, controlled by whether `group_id` is set:
 - **Standalone** (no `group_id`): assigns all partitions directly at `OffsetBeginning` and reads without committing offsets. Every run re-reads from the start of the topic. Useful for one-shot batch reads or testing.
 - **Group consumer** (`group_id` set): subscribes via the Kafka consumer group protocol, reads from committed offsets, and commits new offsets periodically. Multiple instances with the same `group_id` split partitions and each message is delivered once to the group. The `auto_offset_reset` field controls behavior when no committed offset is found or the stored offset is out of range (e.g., aged out by retention) — `latest` (default) skips to the tail, `earliest` starts from the beginning of the available log.
 
-> **Broker ACL requirement for standalone mode**: confluent-kafka-go requires a non-empty `group.id` even for direct-assign reads. Standalone mode uses the group ID `caterpillar-standalone-<topic>`. The Kafka principal used by this task must have `READ` permission on `GROUP` resource `caterpillar-standalone-` with `PREFIXED` pattern type. Without this ACL, standalone reads will fail with a group authorization error.
+> **Broker ACL requirement for standalone mode**: confluent-kafka-go requires a non-empty `group.id` even for direct-assign reads. Standalone mode builds one per run as `caterpillar-standalone-<topic>-<uuid>`. Grant `READ` on `GROUP` resource `caterpillar-standalone-` with `PREFIXED` pattern type. Without this ACL, standalone reads fail with a group authorization error.
 
 ## Configuration Fields
 
@@ -29,6 +29,9 @@ There are two read modes, controlled by whether `group_id` is set:
 | `topic` | string | - | Topic to read from or write to (required) |
 | `timeout` | duration string | `15s` | Read polling timeout and producer delivery/flush timeout. Uses Go duration format (e.g. `25s`, `1m`). |
 | `batch_flush_interval` | duration string | `2s` | Producer linger interval (`linger.ms`) for batching queued writes |
+| `batch_size` | int | `100` | Producer batch size (`batch.num.messages`) — messages per batch, alongside the `batch_flush_interval` time trigger |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 | `retry_limit` | int | `5` | Read retry threshold; reading stops when consecutive retryable errors or timeouts exceed this value |
 | `end_after` | duration string | - | Wall-clock deadline for read mode. When set, the reader stops cleanly after this duration regardless of message traffic. Worst-case overshoot is one `timeout` window. |
 | `max_records` | int | `0` (unlimited) | Read-mode cap on records forwarded downstream. The reader stops cleanly once this many messages have been sent. In group mode, offsets up to the last forwarded record are committed on shutdown. Must be `>= 0`; negative values are rejected at validation. |
@@ -38,11 +41,11 @@ There are two read modes, controlled by whether `group_id` is set:
 | `server_auth_type` | string | `none` | `none` or `tls` — server certificate verification mode |
 | `cert` | string | - | CA certificate PEM/CRT content used when `server_auth_type: tls` (alternatively use `cert_path`) |
 | `cert_path` | string | - | Path to CA certificate (PEM/CRT) |
-| `user_auth_type` | string | `none` | `none`, `sasl`, `scram`, or `mtls` — `mtls` is currently not implemented and returns an error |
+| `user_auth_type` | string | `none` | `none`, `sasl`, `scram`, or `mtls` — `mtls` is not implemented and returns an error |
 | `username` | string | - | Username for SASL/SCRAM authentication |
 | `password` | string | - | Password for SASL/SCRAM authentication |
 | `idempotent` | bool | `false` | Enables the idempotent producer (`enable.idempotence=true`, `max.in.flight.requests.per.connection=5`) |
-| `format` | string | `json` | Message serialization format. `json` passes raw bytes through unchanged (default, backward compatible). `avro` serializes JSON→Avro on write and Avro→JSON on read using Confluent Schema Registry. |
+| `format` | string | `json` | Message serialization format. `json` passes raw bytes through unchanged. `avro` serializes JSON→Avro on write and Avro→JSON on read using Confluent Schema Registry. |
 | `schema_registry_url` | string | - | Schema Registry URL. Required when `format: avro`. Schemas must be pre-registered; auto-registration is disabled. |
 | `schema_registry_username` | string | - | Schema Registry basic auth username |
 | `schema_registry_password` | string | - | Schema Registry basic auth password |
@@ -52,7 +55,7 @@ There are two read modes, controlled by whether `group_id` is set:
 - `server_auth_type: tls` enables server certificate verification using the CA at `cert` or, if absent, the CA file at `cert_path`.
 - `user_auth_type: sasl` uses SASL Plain authentication (requires `username` and `password`).
 - `user_auth_type: scram` uses SCRAM-SHA-512 authentication (requires `username` and `password`).
-- `user_auth_type: mtls` is reserved for mTLS (client cert) but is not implemented in this task yet and will return an error if configured.
+- `user_auth_type: mtls` is reserved for mTLS (client cert) but is not implemented and returns an error if configured.
 
 If you choose SASL/SCRAM and `server_auth_type: tls`, the task configures Confluent's `security.protocol` as `SASL_SSL`. Without TLS, SASL uses `SASL_PLAINTEXT`.
 
@@ -215,7 +218,7 @@ tasks:
 ```
 
 ## Notes and Limitations
- - **Standalone mode** reads all partitions from `OffsetBeginning` on every run and never commits offsets. It requires a broker PREFIXED ACL on group `caterpillar-standalone-` (see Reading Modes above).
+ - **Standalone mode** reads all partitions from `OffsetBeginning` on every run and never commits offsets. The PREFIXED group ACL is covered under Reading Modes above.
  - **Group consumer mode** resumes from committed offsets. `auto_offset_reset` fires only if the group has no prior committed offsets or the stored offset is out of range (e.g., aged out by retention). To re-read from the beginning, reset group offsets via `kafka-consumer-groups.sh --reset-offsets --to-earliest`.
  - **Out-of-range stored offset:** librdkafka logs a `%4|OFFSET ... offset reset` warning when this happens. It's informational — the consumer self-recovers to the position implied by `auto_offset_reset`. The warning persists across restarts until a successful read commits a new valid offset (or until you manually reset the group offsets at the broker).
  - **`end_after`** sets a wall-clock read deadline distinct from `retry_limit` (which is idle-based). Use `end_after` when you want a guaranteed stop time even on a busy topic. Worst-case shutdown latency is one `timeout` window because in-flight `ReadMessage` polls cannot be canceled mid-flight.

@@ -23,7 +23,10 @@ The SNS task acts as a sink, receiving records from the input channel and publis
 | `subject` | string | - | Optional subject line for the published message |
 | `attributes` | list | - | Optional list of message attributes (name, type, value) |
 | `message_group_id` | string | - | Required for FIFO topics. If not provided for a FIFO topic, a UUID is generated. |
-| `message_deduplication_id` | string | - | Optional for FIFO topics. |
+| `message_deduplication_id` | string | - | Optional for FIFO topics. If not provided, a UUID is generated per message — which makes every message unique and so disables SNS deduplication. Set it to a stable value derived from the payload if you want dedup. |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
+| `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
 
 ## Example Configurations
@@ -70,3 +73,7 @@ tasks:
     topic_arn: "arn:aws:sns:us-west-2:123456789012:my-topic.fifo"
     message_group_id: "group1"
 ```
+
+## Sample Pipelines
+
+- `test/pipelines/sns_test.yaml` - Publishing records to an SNS topic
