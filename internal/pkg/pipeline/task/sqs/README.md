@@ -91,7 +91,9 @@ Two consequences worth tuning for:
 - **SQS caps in-flight messages** at 120,000 per standard queue and 20,000 per FIFO queue.
   A large `channel_size` on a long pipeline can approach that; on a breach `ReceiveMessage`
   returns `OverLimit` and the task stops. FIFO queues are stricter still, since
-  unacknowledged messages block their message group.
+  unacknowledged messages block their message group. An unbounded `join` downstream of
+  read mode is a common cause: set `duration:` on that join so records flush mid-run and
+  messages can be deleted (see the join task README).
 
 ## Sample Pipelines
 
