@@ -73,17 +73,24 @@ tasks:
 ## Message Acknowledgment
 
 When reading from a queue, a message's receipt is deleted only once every downstream task
-has finished with the record produced from it. A downstream failure leaves the receipt
-alone, so SQS redelivers the message after the visibility timeout rather than losing it.
-Delivery is therefore at-least-once: a pipeline may see a message more than once, but never
-zero times.
+has finished with the record produced from it. A task that returns an error while holding a
+record leaves the receipt alone, so SQS redelivers the message after the visibility timeout
+rather than losing it. Delivery is therefore at-least-once: a pipeline may see a message
+more than once.
+
+That covers failures, not drops. A task configured to skip a bad record counts it as
+finished, so the receipt is deleted and the message does not come back — and `jq`'s
+`ignore_error` and `xpath`'s `ignore_missing` both default to skipping. See
+[Non-critical errors](../../../../../README.md#non-critical-errors) for the full set of
+fields that behave this way.
 
 Two consequences worth tuning for:
 
-- **`channel_size` bounds how many messages can sit inside the pipeline at once** (see the
-  root README). A message waiting in a deep channel can exceed the queue's visibility
-  timeout, at which point SQS redelivers it while the first copy is still in flight and
-  the eventual delete fails on a stale receipt handle. Keep `channel_size` in proportion
+- **`channel_size` bounds how many messages can sit inside the pipeline at once** (see
+  [Channel Size](../../../../../README.md#channel-size)). A message waiting in a deep channel
+  can exceed the queue's visibility timeout, at which point SQS redelivers it while the first
+  copy is still in flight and the eventual delete fails on a stale receipt handle. Keep
+  `channel_size` in proportion
   to how long a record takes to traverse the pipeline, relative to the queue's visibility
   timeout. Messages that have finished the pipeline but whose delete has not yet returned
   are bounded only by `concurrency` (how many `DeleteMessage` calls run at once), not by
