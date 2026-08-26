@@ -114,9 +114,20 @@ README:
 
 - **`jq`** — a query error on a single record; non-critical until `ignore_error: false`.
 - **`xpath`** — a container XPath matching nothing; non-critical until `ignore_missing: false`.
+- **`heimdall`** — a per-record job failure in destination mode; non-critical from
+  `skip_on_error: true`.
+- **`parameter_store`** — a parameter that does not exist in lookup mode; non-critical from
+  `on_missing: skip`.
 
 An ignored error is never returned, so `fail_on_error` has nothing to judge: failing a run on
 one of these takes the task's own field as well.
+
+A skipped record also counts as *processed* for acknowledgment. On a pipeline whose source
+defers acknowledgment — see
+[Message Acknowledgment](internal/pkg/pipeline/task/sqs/README.md#message-acknowledgment) —
+the source record is settled as done and will not be redelivered, so the data is dropped for
+good. At-least-once delivery covers errors that are returned, not conditions a task is
+configured to ignore. Note that `jq` and `xpath` default to ignoring theirs.
 
 ### DAG (Directed Acyclic Graph) Execution - EXPERIMENTAL
 
@@ -288,6 +299,12 @@ tasks:
   - name: task1
     type: echo
 ```
+
+Depth is also latency: a record can wait in a full channel for as long as it takes the
+downstream task to work through everything ahead of it. Where the source defers
+acknowledgment, that wait is time the source record stays unacknowledged, which is why
+`channel_size` needs tuning against the broker's own limits rather than set high by default —
+see [Message Acknowledgment](internal/pkg/pipeline/task/sqs/README.md#message-acknowledgment).
 
 ### Task Concurrency
 
