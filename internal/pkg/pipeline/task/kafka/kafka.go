@@ -3,11 +3,11 @@ package kafka
 import (
 	"context"
 	"fmt"
-	"slices"
 	"sync"
 	"time"
 
 	ckafka "github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/google/uuid"
 
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
@@ -125,61 +125,422 @@ func (k *kafka) Run(input <-chan *record.Record, output chan<- *record.Record) e
 	return k.read(context.Background(), output)
 }
 
-// Finish, not Run, waits for deferred stores: a join that emits on input close
-// cannot settle until this task's output channel is closed, which happens only
-// after Run returns.
-func (k *kafka) Finish() error {
-	if k.tracker != nil {
-		k.tracker.Wait()
+// write produces records to the Kafka topic using the codec selected by the format field.
+func (k *kafka) write(input <-chan *record.Record) error {
+	cfg, err := k.buildProducerConfig()
+	if err != nil {
+		return fmt.Errorf("failed to build producer config: %w", err)
 	}
 
-	k.readersMu.Lock()
-	readers := slices.Clone(k.readers)
-	k.readers = nil
-	k.readersMu.Unlock()
+	p, err := ckafka.NewProducer(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create producer: %w", err)
+	}
+	defer p.Close()
 
-	var capped []int32
-	for _, r := range readers {
-		for partition, offset := range r.offsets.commitPositions() {
-			if err := r.storeOffset(partition, offset); err != nil {
-				fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
-					k.Topic, partition, err)
+	codec, err := k.newCodec()
+	if err != nil {
+		return err
+	}
+
+	// deliveryCh is drained by a goroutine; closed after Flush so wg.Wait() guarantees no race on firstDeliveryErr.
+	deliveryCh := make(chan ckafka.Event, 100)
+	var (
+		wg               sync.WaitGroup
+		firstDeliveryErr error
+	)
+
+	// acks for records the producer has taken but not yet confirmed. A message that
+	// never produces a delivery report — a flush timeout, typically — would
+	// otherwise leave its source record unsettled and the pipeline waiting on it
+	// forever, so whatever is left here at the end is failed explicitly.
+	var (
+		pendingMu sync.Mutex
+		pending   = make(map[*ack.Ack]struct{})
+	)
+
+	settle := func(a *ack.Ack, deliveryErr error) {
+
+		if a == nil {
+			return
+		}
+
+		pendingMu.Lock()
+		delete(pending, a)
+		pendingMu.Unlock()
+
+		if deliveryErr != nil {
+			a.Fail()
+			return
+		}
+
+		a.Done()
+
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for e := range deliveryCh {
+			m, ok := e.(*ckafka.Message)
+			if !ok {
+				continue
 			}
+			a, _ := m.Opaque.(*ack.Ack)
+			if m.TopicPartition.Error != nil {
+				if firstDeliveryErr == nil {
+					firstDeliveryErr = m.TopicPartition.Error
+					fmt.Printf("delivery failed for topic %s partition %d: %v\n",
+						k.Topic, m.TopicPartition.Partition, m.TopicPartition.Error)
+				}
+				// the source record never made it to the topic, so fail its
+				// ack: the source must leave it unacknowledged for retry.
+				settle(a, m.TopicPartition.Error)
+				continue
+			}
+			// settle only on broker-confirmed delivery, not on local enqueue.
+			settle(a, nil)
+		}
+	}()
+
+	var produceErr error
+	for {
+		r, ok := k.GetRecord(input)
+		if !ok {
+			break
 		}
 
-		capped = append(capped, r.offsets.cappedPartitions()...)
-
-		if err := r.commit(); err != nil {
-			fmt.Printf("warning: failed to commit offsets for topic %s: %v\n", k.Topic, err)
+		msgBytes, err := codec.serialize(k.Topic, r.Data)
+		if err != nil {
+			produceErr = fmt.Errorf("failed to serialize record for topic %s: %w", k.Topic, err)
+			ack.Reject(r.Context)
+			break
 		}
-		if err := r.close(); err != nil {
-			fmt.Printf("warning: error closing kafka consumer: %v\n", err)
+
+		var opaque any
+		a, tracked := ack.FromContext(r.Context)
+		if tracked {
+			opaque = a
+			pendingMu.Lock()
+			pending[a] = struct{}{}
+			pendingMu.Unlock()
+		}
+
+		if err = p.Produce(&ckafka.Message{
+			TopicPartition: ckafka.TopicPartition{Topic: &k.Topic, Partition: ckafka.PartitionAny},
+			Value:          msgBytes,
+			Opaque:         opaque,
+		}, deliveryCh); err != nil {
+			produceErr = fmt.Errorf("failed to enqueue message to topic %s: %w", k.Topic, err)
+			// the producer never took it, so no delivery report is coming
+			settle(a, produceErr)
+			break
 		}
 	}
 
-	if len(capped) > 0 {
-		slices.Sort(capped)
-		return fmt.Errorf("kafka reader paused partitions with failed records: %v", capped)
-	}
+	// Always flush so enqueued messages get delivery reports and the goroutine exits cleanly.
+	timeout := time.Duration(k.Timeout)
+	remaining := p.Flush(int(timeout.Milliseconds()))
 
+	// Close the producer BEFORE closing deliveryCh:
+	p.Close()
+	close(deliveryCh)
+	wg.Wait()
+
+	// no delivery report ever arrived for these, so nothing else will settle them
+	pendingMu.Lock()
+	for a := range pending {
+		a.Fail()
+	}
+	pending = nil
+	pendingMu.Unlock()
+
+	if produceErr != nil {
+		return produceErr
+	}
+	if firstDeliveryErr != nil {
+		return fmt.Errorf("delivery failed for topic %s: %w", k.Topic, firstDeliveryErr)
+	}
+	if remaining > 0 {
+		return fmt.Errorf("%d messages failed to deliver to topic %s within %s", remaining, k.Topic, timeout)
+	}
 	return nil
 }
 
-func (k *kafka) ensureReadTracker() {
-	k.readersMu.Lock()
-	defer k.readersMu.Unlock()
-	if k.tracker == nil {
-		// StoreOffsets is local; the watermark already serializes
-		k.tracker = ack.NewTracker(1)
+// read polls messages from the topic, standalone mode reads from beginning on every run, group mode resumes from committed offsets.
+func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
+	if k.EndAfter > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(k.EndAfter))
+		defer cancel()
 	}
-}
 
-func (k *kafka) registerReader(r *reader) {
-	k.readersMu.Lock()
-	defer k.readersMu.Unlock()
-	k.readers = append(k.readers, r)
+	standalone := k.GroupID == ""
+
+	var cfg *ckafka.ConfigMap
+	var err error
+	if standalone {
+		cfg, err = k.buildStandaloneConsumerConfig()
+	} else {
+		cfg, err = k.buildConsumerConfig()
+	}
+	if err != nil {
+		return fmt.Errorf("failed to build consumer config: %w", err)
+	}
+
+	c, err := ckafka.NewConsumer(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create consumer: %w", err)
+	}
+
+	var r *reader
+	if standalone {
+		// standalone never stores offsets, so the consumer need not outlive Run
+		defer func() {
+			if err := c.Close(); err != nil {
+				fmt.Printf("warning: error closing kafka consumer: %v\n", err)
+			}
+		}()
+	} else {
+		r = k.newGroupReader(c)
+	}
+
+	if standalone {
+		fmt.Printf("no group_id set — standalone read from beginning of topic %s\n", k.Topic)
+		if err := k.assignAllPartitions(c); err != nil {
+			return fmt.Errorf("failed to assign partitions: %w", err)
+		}
+	} else {
+		if err := c.SubscribeTopics([]string{k.Topic}, nil); err != nil {
+			return fmt.Errorf("failed to subscribe to topic %s: %w", k.Topic, err)
+		}
+	}
+
+	codec, err := k.newCodec()
+	if err != nil {
+		return err
+	}
+
+	timeout := time.Duration(k.Timeout)
+	retriesNumber := 0
+	recordsRead := 0
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Printf("kafka end_after duration reached for topic %s, stopping reader\n", k.Topic)
+			return nil
+		default:
+		}
+
+		if r != nil {
+			if paused, err := r.allAssignedPaused(); err != nil {
+				fmt.Printf("warning: failed to check kafka assignment for topic %s: %v\n", k.Topic, err)
+			} else if paused {
+				fmt.Printf("all assigned partitions paused for topic %s, stopping reader\n", k.Topic)
+				return nil
+			}
+		}
+
+		var msg *ckafka.Message
+		if r != nil {
+			msg, err = r.readMessage(timeout)
+		} else {
+			msg, err = c.ReadMessage(timeout)
+		}
+		if err != nil {
+			if kafkaErr, ok := err.(ckafka.Error); ok && kafkaErr.Code() == ckafka.ErrTimedOut {
+				retriesNumber++
+				fmt.Printf("kafka read timeout for attempt #%d on topic %s\n", retriesNumber, k.Topic)
+			} else if !k.shouldRetry(err) {
+				return err
+			} else {
+				retriesNumber++
+				fmt.Printf("kafka error reading message attempt #%d: %v\n", retriesNumber, err)
+			}
+
+			if retriesNumber > *k.RetryLimit {
+				fmt.Printf("kafka error while reading message, reached retry limit (%d), stopping reader\n", *k.RetryLimit)
+				return nil
+			}
+			continue
+		}
+		retriesNumber = 0
+
+		data, err := codec.deserialize(k.Topic, msg.Value)
+		if err != nil {
+			return fmt.Errorf("failed to deserialize message from topic %s: %w", k.Topic, err)
+		}
+
+		if standalone {
+			k.SendData(ctx, data, output)
+		} else {
+			r.handleRecord(ctx, data, output, msg)
+		}
+
+		recordsRead++
+		if k.MaxRecords > 0 && recordsRead >= k.MaxRecords {
+			fmt.Printf("kafka max_records (%d) reached for topic %s, stopping reader\n", k.MaxRecords, k.Topic)
+			return nil
+		}
+	}
 }
 
 func (k *kafka) newCodec() (messageCodec, error) {
 	return newCodecForFormat(k.Format, k.SchemaRegistry)
+}
+
+// assignAllPartitions assigns all topic partitions at OffsetBeginning, bypassing the consumer group protocol.
+func (k *kafka) assignAllPartitions(c *ckafka.Consumer) error {
+	initTimeoutMs := int(time.Duration(defaultTimeout).Milliseconds())
+	meta, err := c.GetMetadata(&k.Topic, false, initTimeoutMs)
+	if err != nil {
+		return fmt.Errorf("failed to get metadata for topic %s: %w", k.Topic, err)
+	}
+
+	topicMeta, ok := meta.Topics[k.Topic]
+	if !ok || len(topicMeta.Partitions) == 0 {
+		return fmt.Errorf("topic %s not found or has no partitions", k.Topic)
+	}
+
+	partitions := make([]ckafka.TopicPartition, len(topicMeta.Partitions))
+	for i, p := range topicMeta.Partitions {
+		partitions[i] = ckafka.TopicPartition{
+			Topic:     &k.Topic,
+			Partition: p.ID,
+			Offset:    ckafka.OffsetBeginning,
+		}
+	}
+	return c.Assign(partitions)
+}
+
+// buildBaseConfig builds the ConfigMap entries shared by both producers and consumers.
+func (k *kafka) buildBaseConfig() (*ckafka.ConfigMap, error) {
+	cfg := &ckafka.ConfigMap{
+		"bootstrap.servers": k.BootstrapServer,
+		"security.protocol": k.securityProtocol(),
+	}
+
+	if k.ServerAuthType == "tls" {
+		switch {
+		case k.Cert != "":
+			_ = cfg.SetKey("ssl.ca.pem", k.Cert)
+		case k.CertPath != "":
+			_ = cfg.SetKey("ssl.ca.location", k.CertPath)
+		default:
+			return nil, fmt.Errorf("cert or cert_path is required when server_auth_type is tls")
+		}
+	}
+
+	switch k.UserAuthType {
+	case "scram":
+		if k.Username == "" || k.Password == "" {
+			return nil, fmt.Errorf("username and password are required for scram authentication")
+		}
+		_ = cfg.SetKey("sasl.mechanisms", "SCRAM-SHA-512")
+		_ = cfg.SetKey("sasl.username", k.Username)
+		_ = cfg.SetKey("sasl.password", k.Password)
+	case "sasl":
+		if k.Username == "" || k.Password == "" {
+			return nil, fmt.Errorf("username and password are required for sasl authentication")
+		}
+		_ = cfg.SetKey("sasl.mechanisms", "PLAIN")
+		_ = cfg.SetKey("sasl.username", k.Username)
+		_ = cfg.SetKey("sasl.password", k.Password)
+	case "mtls":
+		return nil, fmt.Errorf("mtls user authentication is not implemented")
+	case "none":
+	default:
+		return nil, fmt.Errorf("unknown user_auth_type: %s", k.UserAuthType)
+	}
+
+	return cfg, nil
+}
+
+func (k *kafka) buildProducerConfig() (*ckafka.ConfigMap, error) {
+	cfg, err := k.buildBaseConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	_ = cfg.SetKey("linger.ms", int(time.Duration(k.BatchFlushInterval).Milliseconds()))
+	_ = cfg.SetKey("batch.num.messages", k.BatchSize)
+	_ = cfg.SetKey("message.timeout.ms", int(time.Duration(k.Timeout).Milliseconds()))
+	_ = cfg.SetKey("acks", "all")
+
+	if k.Idempotent {
+		// idempotent producer requires acks=all and max.in.flight ≤ 5
+		_ = cfg.SetKey("enable.idempotence", true)
+		_ = cfg.SetKey("max.in.flight.requests.per.connection", 5)
+	}
+
+	return cfg, nil
+}
+
+// auto.offset.store is off so the watermark, not librdkafka, chooses the commit position.
+func (k *kafka) buildConsumerConfig() (*ckafka.ConfigMap, error) {
+	cfg, err := k.buildBaseConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	_ = cfg.SetKey("auto.offset.reset", k.AutoOffsetReset)
+	_ = cfg.SetKey("session.timeout.ms", 30000)
+	_ = cfg.SetKey("heartbeat.interval.ms", 3000)
+	_ = cfg.SetKey("enable.auto.offset.store", false)
+	_ = cfg.SetKey("enable.auto.commit", true)
+	_ = cfg.SetKey("auto.commit.interval.ms", defaultCommitIntervalMs)
+	_ = cfg.SetKey("isolation.level", "read_committed")
+	_ = cfg.SetKey("group.id", k.GroupID)
+
+	if k.ClientRack != "" {
+		_ = cfg.SetKey("client.rack", k.ClientRack)
+	}
+
+	return cfg, nil
+}
+
+// buildStandaloneConsumerConfig builds config for standalone read mode; never commits offsets, always reads from OffsetBeginning.
+func (k *kafka) buildStandaloneConsumerConfig() (*ckafka.ConfigMap, error) {
+	cfg, err := k.buildBaseConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	_ = cfg.SetKey("group.id", standaloneGroupPrefix+k.Topic+"-"+uuid.New().String())
+	_ = cfg.SetKey("enable.auto.commit", false)
+	_ = cfg.SetKey("auto.offset.reset", "earliest")
+	_ = cfg.SetKey("isolation.level", "read_committed")
+
+	if k.ClientRack != "" {
+		_ = cfg.SetKey("client.rack", k.ClientRack)
+	}
+
+	return cfg, nil
+}
+
+// securityProtocol returns the Confluent security.protocol value based on TLS and auth settings.
+func (k *kafka) securityProtocol() string {
+	hasTLS := k.ServerAuthType == "tls"
+	hasSASL := k.UserAuthType == "sasl" || k.UserAuthType == "scram"
+	switch {
+	case hasTLS && hasSASL:
+		return "SASL_SSL"
+	case hasTLS:
+		return "SSL"
+	case hasSASL:
+		return "SASL_PLAINTEXT"
+	default:
+		return "PLAINTEXT"
+	}
+}
+
+func (k *kafka) shouldRetry(err error) bool {
+	if kafkaErr, ok := err.(ckafka.Error); ok {
+		switch kafkaErr.Code() {
+		case ckafka.ErrUnknownTopicOrPart, ckafka.ErrTopicException,
+			ckafka.ErrGroupAuthorizationFailed, ckafka.ErrTopicAuthorizationFailed:
+			return false
+		}
+	}
+	return true
 }

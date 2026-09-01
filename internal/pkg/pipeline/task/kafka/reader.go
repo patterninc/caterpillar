@@ -1,11 +1,16 @@
 package kafka
 
 import (
+	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
 	ckafka "github.com/confluentinc/confluent-kafka-go/v2/kafka"
+
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 )
 
 // one consumer per worker: sharing one would race under task_concurrency > 1.
@@ -20,6 +25,95 @@ type messageAck struct {
 	reader    *reader
 	partition int32
 	offset    int64
+}
+
+func (k *kafka) newGroupReader(c *ckafka.Consumer) *reader {
+	k.ensureReadTracker()
+	r := &reader{
+		k:        k,
+		consumer: c,
+		offsets:  newOffsetTracker(),
+	}
+	k.registerReader(r)
+	return r
+}
+
+func (k *kafka) ensureReadTracker() {
+	k.readersMu.Lock()
+	defer k.readersMu.Unlock()
+	if k.tracker == nil {
+		// StoreOffsets is local; the watermark already serializes
+		k.tracker = ack.NewTracker(1)
+	}
+}
+
+func (k *kafka) registerReader(r *reader) {
+	k.readersMu.Lock()
+	defer k.readersMu.Unlock()
+	k.readers = append(k.readers, r)
+}
+
+// Finish, not Run, waits for deferred stores: a join that emits on input close
+// cannot settle until this task's output channel is closed, which happens only
+// after Run returns.
+func (k *kafka) Finish() error {
+	if k.tracker != nil {
+		k.tracker.Wait()
+	}
+
+	k.readersMu.Lock()
+	readers := slices.Clone(k.readers)
+	k.readers = nil
+	k.readersMu.Unlock()
+
+	var capped []int32
+	for _, r := range readers {
+		for partition, offset := range r.offsets.commitPositions() {
+			if err := r.storeOffset(partition, offset); err != nil {
+				fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
+					k.Topic, partition, err)
+			}
+		}
+
+		capped = append(capped, r.offsets.cappedPartitions()...)
+
+		if err := r.commit(); err != nil {
+			fmt.Printf("warning: failed to commit offsets for topic %s: %v\n", k.Topic, err)
+		}
+		if err := r.close(); err != nil {
+			fmt.Printf("warning: error closing kafka consumer: %v\n", err)
+		}
+	}
+
+	if len(capped) > 0 {
+		slices.Sort(capped)
+		return fmt.Errorf("kafka reader paused partitions with failed records: %v", capped)
+	}
+
+	return nil
+}
+
+func (r *reader) handleRecord(ctx context.Context, data []byte, output chan<- *record.Record, msg *ckafka.Message) {
+	partition := msg.TopicPartition.Partition
+	offset := int64(msg.TopicPartition.Offset)
+	r.offsets.observe(partition, offset)
+
+	if output == nil {
+		// no downstream branch to settle: Track would hang Finish on Wait
+		if err := r.storeOffset(partition, offset+1); err != nil {
+			fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
+				r.k.Topic, partition, err)
+		}
+		return
+	}
+
+	msgAck := ack.New()
+	r.k.SendData(ack.WithContext(ctx, msgAck), data, output)
+	r.k.tracker.Track(msgAck, &messageAck{
+		reader:    r,
+		partition: partition,
+		offset:    offset,
+	})
 }
 
 // Pause on failure so later offsets in this partition stay uncommitted and are
