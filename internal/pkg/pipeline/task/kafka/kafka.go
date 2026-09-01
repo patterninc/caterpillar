@@ -435,6 +435,12 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 
 		if standalone {
 			k.SendData(ctx, data, output)
+		} else if output == nil {
+			// no downstream branch to settle: Track would hang Finish on Wait
+			if err := r.storeOffset(msg.TopicPartition.Partition, int64(msg.TopicPartition.Offset)+1); err != nil {
+				fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
+					k.Topic, msg.TopicPartition.Partition, err)
+			}
 		} else {
 			msgAck := ack.New()
 			k.SendData(ack.WithContext(ctx, msgAck), data, output)
