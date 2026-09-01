@@ -293,27 +293,9 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 		return fmt.Errorf("failed to create consumer: %w", err)
 	}
 
-	var r *reader
-	if standalone {
-		// standalone never stores offsets, so the consumer need not outlive Run
-		defer func() {
-			if err := c.Close(); err != nil {
-				fmt.Printf("warning: error closing kafka consumer: %v\n", err)
-			}
-		}()
-	} else {
-		r = k.newGroupReader(c)
-	}
-
-	if standalone {
-		fmt.Printf("no group_id set — standalone read from beginning of topic %s\n", k.Topic)
-		if err := k.assignAllPartitions(c); err != nil {
-			return fmt.Errorf("failed to assign partitions: %w", err)
-		}
-	} else {
-		if err := c.SubscribeTopics([]string{k.Topic}, nil); err != nil {
-			return fmt.Errorf("failed to subscribe to topic %s: %w", k.Topic, err)
-		}
+	r, err := k.openReader(c, standalone)
+	if err != nil {
+		return err
 	}
 
 	codec, err := k.newCodec()
@@ -332,21 +314,14 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 		default:
 		}
 
-		if r != nil {
-			if paused, err := r.allAssignedPaused(); err != nil {
-				fmt.Printf("warning: failed to check kafka assignment for topic %s: %v\n", k.Topic, err)
-			} else if paused {
-				fmt.Printf("all assigned partitions paused for topic %s, stopping reader\n", k.Topic)
-				return nil
-			}
+		if stop, err := r.shouldStop(); err != nil {
+			fmt.Printf("warning: failed to check kafka assignment for topic %s: %v\n", k.Topic, err)
+		} else if stop {
+			fmt.Printf("all assigned partitions paused for topic %s, stopping reader\n", k.Topic)
+			return nil
 		}
 
-		var msg *ckafka.Message
-		if r != nil {
-			msg, err = r.readMessage(timeout)
-		} else {
-			msg, err = c.ReadMessage(timeout)
-		}
+		msg, err := r.readMessage(timeout)
 		if err != nil {
 			if kafkaErr, ok := err.(ckafka.Error); ok && kafkaErr.Code() == ckafka.ErrTimedOut {
 				retriesNumber++
@@ -371,11 +346,7 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 			return fmt.Errorf("failed to deserialize message from topic %s: %w", k.Topic, err)
 		}
 
-		if standalone {
-			k.SendData(ctx, data, output)
-		} else {
-			r.handleRecord(ctx, data, output, msg)
-		}
+		r.emit(ctx, data, output, msg)
 
 		recordsRead++
 		if k.MaxRecords > 0 && recordsRead >= k.MaxRecords {

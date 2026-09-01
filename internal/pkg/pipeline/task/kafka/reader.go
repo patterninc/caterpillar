@@ -19,6 +19,7 @@ type reader struct {
 	consumer   *ckafka.Consumer
 	offsets    *offsetTracker
 	consumerMu sync.Mutex
+	group      bool
 }
 
 type messageAck struct {
@@ -27,15 +28,30 @@ type messageAck struct {
 	offset    int64
 }
 
-func (k *kafka) newGroupReader(c *ckafka.Consumer) *reader {
-	k.ensureReadTracker()
+func (k *kafka) openReader(c *ckafka.Consumer, standalone bool) (*reader, error) {
 	r := &reader{
 		k:        k,
 		consumer: c,
 		offsets:  newOffsetTracker(),
+		group:    !standalone,
 	}
+
+	if standalone {
+		fmt.Printf("no group_id set — standalone read from beginning of topic %s\n", k.Topic)
+		if err := r.assignBeginning(); err != nil {
+			_ = r.close()
+			return nil, fmt.Errorf("failed to assign partitions: %w", err)
+		}
+	} else {
+		if err := r.subscribe(); err != nil {
+			_ = r.close()
+			return nil, fmt.Errorf("failed to subscribe to topic %s: %w", k.Topic, err)
+		}
+		k.ensureReadTracker()
+	}
+
 	k.registerReader(r)
-	return r
+	return r, nil
 }
 
 func (k *kafka) ensureReadTracker() {
@@ -68,18 +84,21 @@ func (k *kafka) Finish() error {
 
 	var capped []int32
 	for _, r := range readers {
-		for partition, offset := range r.offsets.commitPositions() {
-			if err := r.storeOffset(partition, offset); err != nil {
-				fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
-					k.Topic, partition, err)
+		if r.group {
+			for partition, offset := range r.offsets.commitPositions() {
+				if err := r.storeOffset(partition, offset); err != nil {
+					fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
+						k.Topic, partition, err)
+				}
+			}
+
+			capped = append(capped, r.offsets.cappedPartitions()...)
+
+			if err := r.commit(); err != nil {
+				fmt.Printf("warning: failed to commit offsets for topic %s: %v\n", k.Topic, err)
 			}
 		}
 
-		capped = append(capped, r.offsets.cappedPartitions()...)
-
-		if err := r.commit(); err != nil {
-			fmt.Printf("warning: failed to commit offsets for topic %s: %v\n", k.Topic, err)
-		}
 		if err := r.close(); err != nil {
 			fmt.Printf("warning: error closing kafka consumer: %v\n", err)
 		}
@@ -91,6 +110,33 @@ func (k *kafka) Finish() error {
 	}
 
 	return nil
+}
+
+func (r *reader) emit(ctx context.Context, data []byte, output chan<- *record.Record, msg *ckafka.Message) {
+	if !r.group {
+		r.k.SendData(ctx, data, output)
+		return
+	}
+	r.handleRecord(ctx, data, output, msg)
+}
+
+func (r *reader) shouldStop() (bool, error) {
+	if !r.group {
+		return false, nil
+	}
+	return r.allAssignedPaused()
+}
+
+func (r *reader) subscribe() error {
+	r.consumerMu.Lock()
+	defer r.consumerMu.Unlock()
+	return r.consumer.SubscribeTopics([]string{r.k.Topic}, nil)
+}
+
+func (r *reader) assignBeginning() error {
+	r.consumerMu.Lock()
+	defer r.consumerMu.Unlock()
+	return r.k.assignAllPartitions(r.consumer)
 }
 
 func (r *reader) handleRecord(ctx context.Context, data []byte, output chan<- *record.Record, msg *ckafka.Message) {
