@@ -34,7 +34,7 @@ There are two read modes, controlled by whether `group_id` is set:
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 | `retry_limit` | int | `5` | Read retry threshold; reading stops when consecutive retryable errors or timeouts exceed this value |
 | `end_after` | duration string | - | Wall-clock deadline for read mode. When set, the reader stops cleanly after this duration regardless of message traffic. Worst-case overshoot is one `timeout` window. |
-| `max_records` | int | `0` (unlimited) | Read-mode cap on records forwarded downstream. The reader stops cleanly once this many messages have been sent. In group mode, offsets up to the last forwarded record are committed on shutdown. Must be `>= 0`; negative values are rejected at validation. |
+| `max_records` | int | `0` (unlimited) | Read-mode cap on records forwarded downstream. The reader stops cleanly once this many messages have been sent. In group mode, offsets through the last settled record are committed on shutdown. Must be `>= 0`; negative values are rejected at validation. |
 | `group_id` | string | - | Consumer group id. If omitted, standalone mode is used (reads from beginning, no offset commits). |
 | `auto_offset_reset` | string | `latest` | Group-mode reset policy when no committed offset exists or the stored offset is out of range. `latest` skips to the tail; `earliest` reads from the beginning of the available log. Ignored in standalone mode. |
 | `client_rack` | string | - | Read-mode rack id, set as librdkafka `client.rack`. Lets the consumer use Kafka's rack-aware features to cut cross-AZ data transfers. Applies to standalone and group consumer modes; ignored for producers. |
@@ -217,14 +217,25 @@ tasks:
     auto_offset_reset: earliest
 ```
 
+## Message acknowledgment (group read mode)
+
+In group consumer mode, an offset is stored only after every downstream task has finished with the record produced from it. A task that returns an error while holding a record leaves the offset alone, so the message is re-read on the next run rather than lost. Delivery is therefore at-least-once: a pipeline may see a message more than once.
+
+That covers failures, not drops. A task configured to skip a bad record counts it as finished, so the offset advances and the message does not come back. See [Non-critical errors](../../../../../README.md#non-critical-errors) for the fields that behave this way.
+
+Kafka commits are positional: storing offset N means every offset below N is done. The reader tracks a contiguous completed prefix per partition and can only store up to the first gap. If offset 100 fails while 101 and 102 succeed, the stored offset stays at 100 and those later messages are re-read next run. The reader pauses that partition for the rest of the run so duplicates stay confined to what was already in flight; other partitions keep reading. `Finish` reports which partitions were paused when `fail_on_error` is set.
+
+Standalone mode (no `group_id`) never stores offsets and re-reads from the beginning every run, so it is already at-least-once without deferred commits. With `task_concurrency` above 1 in standalone mode, every worker reads every partition from the start, multiplying the work.
+
+See `test/pipelines/kafka_acking.yaml` for a fixture that exercises deferred commits through a fan-in join whose batch size does not divide the record count. Seed `input-topic` with `{"items":[1,2,3,4,5]}` records before running it.
+
 ## Notes and Limitations
  - **Standalone mode** reads all partitions from `OffsetBeginning` on every run and never commits offsets. The PREFIXED group ACL is covered under Reading Modes above.
  - **Group consumer mode** resumes from committed offsets. `auto_offset_reset` fires only if the group has no prior committed offsets or the stored offset is out of range (e.g., aged out by retention). To re-read from the beginning, reset group offsets via `kafka-consumer-groups.sh --reset-offsets --to-earliest`.
  - **Out-of-range stored offset:** librdkafka logs a `%4|OFFSET ... offset reset` warning when this happens. It's informational — the consumer self-recovers to the position implied by `auto_offset_reset`. The warning persists across restarts until a successful read commits a new valid offset (or until you manually reset the group offsets at the broker).
  - **`end_after`** sets a wall-clock read deadline distinct from `retry_limit` (which is idle-based). Use `end_after` when you want a guaranteed stop time even on a busy topic. Worst-case shutdown latency is one `timeout` window because in-flight `ReadMessage` polls cannot be canceled mid-flight.
  - **`max_records`** is count-based and independent of `end_after`/`retry_limit`. The counter increments after each record is forwarded downstream, so the cap is exact for delivered records. If the topic has fewer than `max_records` available, the reader keeps polling until `retry_limit` or `end_after` fires.
- - **Group commits** use Kafka auto-commit every 5000ms. Auto offset store is disabled, so offsets are stored only after a message is sent downstream.
- - **Read mode does not defer offset commits until downstream completion.** An offset is stored once the record is handed to the next task, not once that task has finished with it, so a failure further down the pipeline does not hold the offset back and the record is not re-read on the next run. Where a source must not lose records to a mid-pipeline failure, see [Message Acknowledgment](../sqs/README.md#message-acknowledgment) for the deferred model the SQS source uses. Write mode is unaffected: the producer settles each record on its delivery report, so an upstream source that defers acknowledgment is held until the broker confirms the write.
+ - **Group commits** use Kafka auto-commit every 5000ms. Auto offset store is disabled, so offsets are stored only after downstream completion (see [Message acknowledgment](#message-acknowledgment-group-read-mode) above). Write mode is unaffected: the producer settles each record on its delivery report, so an upstream source that defers acknowledgment is held until the broker confirms the write.
  - **Read isolation** is set to `read_committed` for both standalone and group consumers — this is the consumer-side complement to `idempotent: true` on the producer and ensures consumers never read uncommitted or aborted messages.
  - The init broker probe always uses the 15s default timeout regardless of the configured `timeout` to allow for SCRAM+TLS handshake round trips.
  - **Message format** defaults to `json` (raw bytes pass through). Set `format: avro` to enable Confluent Avro serialization; this requires `schema_registry_url` and a pre-registered schema. The `schema_registry_url` field alone does **not** activate Avro — `format: avro` must be set explicitly.

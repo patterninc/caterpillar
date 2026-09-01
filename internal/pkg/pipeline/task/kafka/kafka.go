@@ -3,6 +3,7 @@ package kafka
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -55,6 +56,18 @@ type kafka struct {
 	Idempotent         bool                 `yaml:"idempotent,omitempty" json:"idempotent,omitempty"`                                                          // enable idempotent producer
 	Format             string               `yaml:"format,omitempty" json:"format,omitempty"`                                                                  // message format: "json" (default) or "avro"
 	SchemaRegistry     schemaRegistryConfig `yaml:",inline" json:",inline"`                                                                                    // Schema Registry connection — required when format is "avro"
+
+	tracker   *ack.Tracker
+	readersMu sync.Mutex
+	readers   []*reader
+}
+
+// reader holds one group-mode consumer worker. task_concurrency above 1 puts
+// several consumers in the same group, each taking a subset of partitions.
+type reader struct {
+	k        *kafka
+	consumer *ckafka.Consumer
+	offsets  *offsetTracker
 }
 
 func New() (task.Task, error) {
@@ -119,6 +132,61 @@ func (k *kafka) Run(input <-chan *record.Record, output chan<- *record.Record) e
 	}
 
 	return k.read(context.Background(), output)
+}
+
+// Finish waits for every deferred offset store before the pipeline treats this
+// task as complete. It can't happen in Run: downstream tasks that emit only
+// once their input closes can't finish with a record until this task's output
+// channel is closed, which the pipeline does only after Run returns.
+func (k *kafka) Finish() error {
+	if k.tracker != nil {
+		k.tracker.Wait()
+	}
+
+	k.readersMu.Lock()
+	readers := slices.Clone(k.readers)
+	k.readers = nil
+	k.readersMu.Unlock()
+
+	var capped []int32
+	for _, r := range readers {
+		for partition, offset := range r.offsets.commitPositions() {
+			if err := r.storeOffset(partition, offset); err != nil {
+				fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
+					k.Topic, partition, err)
+			}
+		}
+
+		capped = append(capped, r.offsets.cappedPartitions()...)
+
+		if _, err := r.consumer.Commit(); err != nil {
+			fmt.Printf("warning: failed to commit offsets for topic %s: %v\n", k.Topic, err)
+		}
+		if err := r.consumer.Close(); err != nil {
+			fmt.Printf("warning: error closing kafka consumer: %v\n", err)
+		}
+	}
+
+	if len(capped) > 0 {
+		slices.Sort(capped)
+		return fmt.Errorf("kafka reader paused partitions with failed records: %v", capped)
+	}
+
+	return nil
+}
+
+func (k *kafka) ensureReadTracker() {
+	k.readersMu.Lock()
+	defer k.readersMu.Unlock()
+	if k.tracker == nil {
+		k.tracker = ack.NewTracker(1)
+	}
+}
+
+func (k *kafka) registerReader(r *reader) {
+	k.readersMu.Lock()
+	defer k.readersMu.Unlock()
+	k.readers = append(k.readers, r)
 }
 
 // write produces records to the Kafka topic using the codec selected by the format field.
@@ -288,21 +356,31 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 	if err != nil {
 		return fmt.Errorf("failed to create consumer: %w", err)
 	}
-	defer func() {
-		if err := c.Close(); err != nil {
-			fmt.Printf("warning: error closing kafka consumer: %v\n", err)
+
+	var r *reader
+	if !standalone {
+		k.ensureReadTracker()
+		r = &reader{
+			k:        k,
+			consumer: c,
+			offsets:  newOffsetTracker(),
 		}
-	}()
+		k.registerReader(r)
+	} else {
+		defer func() {
+			if err := c.Close(); err != nil {
+				fmt.Printf("warning: error closing kafka consumer: %v\n", err)
+			}
+		}()
+	}
 
 	if standalone {
 		fmt.Printf("no group_id set — standalone read from beginning of topic %s\n", k.Topic)
 		if err := k.assignAllPartitions(c); err != nil {
 			return fmt.Errorf("failed to assign partitions: %w", err)
 		}
-	} else {
-		if err := c.SubscribeTopics([]string{k.Topic}, nil); err != nil {
-			return fmt.Errorf("failed to subscribe to topic %s: %w", k.Topic, err)
-		}
+	} else if err := c.SubscribeTopics([]string{k.Topic}, nil); err != nil {
+		return fmt.Errorf("failed to subscribe to topic %s: %w", k.Topic, err)
 	}
 
 	codec, err := k.newCodec()
@@ -319,6 +397,15 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 			fmt.Printf("kafka end_after duration reached for topic %s, stopping reader\n", k.Topic)
 			return nil
 		default:
+		}
+
+		if r != nil {
+			if paused, err := r.allAssignedPaused(); err != nil {
+				fmt.Printf("warning: failed to check kafka assignment for topic %s: %v\n", k.Topic, err)
+			} else if paused {
+				fmt.Printf("all assigned partitions paused for topic %s, stopping reader\n", k.Topic)
+				return nil
+			}
 		}
 
 		msg, err := c.ReadMessage(timeout)
@@ -346,14 +433,16 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 			return fmt.Errorf("failed to deserialize message from topic %s: %w", k.Topic, err)
 		}
 
-		k.SendData(ctx, data, output)
-
-		// Only store offsets for group consumers — standalone reads never commit.
-		if !standalone {
-			if _, err := c.StoreMessage(msg); err != nil {
-				fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
-					k.Topic, msg.TopicPartition.Partition, err)
-			}
+		if standalone {
+			k.SendData(ctx, data, output)
+		} else {
+			msgAck := ack.New()
+			k.SendData(ack.WithContext(ctx, msgAck), data, output)
+			k.tracker.Track(msgAck, &messageAck{
+				reader:    r,
+				partition: msg.TopicPartition.Partition,
+				offset:    int64(msg.TopicPartition.Offset),
+			})
 		}
 
 		recordsRead++
@@ -362,6 +451,65 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 			return nil
 		}
 	}
+}
+
+type messageAck struct {
+	reader    *reader
+	partition int32
+	offset    int64
+}
+
+// Ack stores the partition offset once every downstream branch has finished with
+// the record. On failure the partition is paused so duplicates stay confined to
+// what was already in flight.
+func (m *messageAck) Ack(failed bool) {
+	if m.reader == nil {
+		return
+	}
+
+	commitTo, shouldStore, pause := m.reader.offsets.settle(m.partition, m.offset, failed)
+	if shouldStore {
+		if err := m.reader.storeOffset(m.partition, commitTo); err != nil {
+			fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
+				m.reader.k.Topic, m.partition, err)
+		}
+	}
+
+	if pause {
+		topic := m.reader.k.Topic
+		tp := ckafka.TopicPartition{
+			Topic:     &topic,
+			Partition: m.partition,
+		}
+		if err := m.reader.consumer.Pause([]ckafka.TopicPartition{tp}); err != nil {
+			fmt.Printf("warning: failed to pause topic %s partition %d: %v\n",
+				m.reader.k.Topic, m.partition, err)
+		}
+	}
+}
+
+func (r *reader) storeOffset(partition int32, offset int64) error {
+	topic := r.k.Topic
+	_, err := r.consumer.StoreOffsets([]ckafka.TopicPartition{{
+		Topic:     &topic,
+		Partition: partition,
+		Offset:    ckafka.Offset(offset),
+	}})
+	return err
+}
+
+func (r *reader) allAssignedPaused() (bool, error) {
+	assignment, err := r.consumer.Assignment()
+	if err != nil {
+		return false, err
+	}
+
+	partitions := make([]int32, 0, len(assignment))
+	for _, tp := range assignment {
+		partitions = append(partitions, tp.Partition)
+	}
+
+	return r.offsets.allAssignedPaused(partitions), nil
 }
 
 func (k *kafka) newCodec() (messageCodec, error) {
@@ -455,7 +603,7 @@ func (k *kafka) buildProducerConfig() (*ckafka.ConfigMap, error) {
 	return cfg, nil
 }
 
-// buildConsumerConfig builds config for group consumer mode; auto-commits every 5s, offsets stored only after downstream delivery.
+// buildConsumerConfig builds config for group consumer mode; auto-commits every 5s, offsets stored only after downstream completion.
 func (k *kafka) buildConsumerConfig() (*ckafka.ConfigMap, error) {
 	cfg, err := k.buildBaseConfig()
 	if err != nil {

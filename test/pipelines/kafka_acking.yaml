@@ -1,0 +1,26 @@
+# Offsets stay uncommitted while join still holds records; number 7 leaves a remainder until input close.
+
+tasks:
+  - name: read_topic
+    type: kafka
+    bootstrap_server: kafka.local:9092
+    topic: input-topic
+    group_id: acking-example-group
+    user_auth_type: none
+    retry_limit: 1
+
+  - name: explode_items
+    type: jq
+    path: '.items'
+    explode: true
+
+  - name: batch
+    type: join
+    number: 7
+    delimiter: "\n"
+
+  - name: save
+    type: file
+    path: ./output/kafka_acking/{{ macro "uuid" }}.json
+
+dag: read_topic >> explode_items >> batch >> save
