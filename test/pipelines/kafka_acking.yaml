@@ -1,4 +1,4 @@
-# Offsets stay uncommitted while join still holds records; number 7 leaves a remainder until input close.
+# number: 7 is not a divisor of exploded record counts, so a remainder is still buffered when the reader stops.
 
 tasks:
   - name: read_topic

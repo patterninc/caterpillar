@@ -62,8 +62,7 @@ type kafka struct {
 	readers   []*reader
 }
 
-// reader holds one group-mode consumer worker. task_concurrency above 1 puts
-// several consumers in the same group, each taking a subset of partitions.
+// one consumer per worker: sharing one would race under task_concurrency > 1.
 type reader struct {
 	k        *kafka
 	consumer *ckafka.Consumer
@@ -134,10 +133,9 @@ func (k *kafka) Run(input <-chan *record.Record, output chan<- *record.Record) e
 	return k.read(context.Background(), output)
 }
 
-// Finish waits for every deferred offset store before the pipeline treats this
-// task as complete. It can't happen in Run: downstream tasks that emit only
-// once their input closes can't finish with a record until this task's output
-// channel is closed, which the pipeline does only after Run returns.
+// Finish, not Run, waits for deferred stores: a join that emits on input close
+// cannot settle until this task's output channel is closed, which happens only
+// after Run returns.
 func (k *kafka) Finish() error {
 	if k.tracker != nil {
 		k.tracker.Wait()
@@ -179,6 +177,7 @@ func (k *kafka) ensureReadTracker() {
 	k.readersMu.Lock()
 	defer k.readersMu.Unlock()
 	if k.tracker == nil {
+		// StoreOffsets is local; the watermark already serializes
 		k.tracker = ack.NewTracker(1)
 	}
 }
@@ -367,6 +366,7 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 		}
 		k.registerReader(r)
 	} else {
+		// standalone never stores offsets, so the consumer need not outlive Run
 		defer func() {
 			if err := c.Close(); err != nil {
 				fmt.Printf("warning: error closing kafka consumer: %v\n", err)
@@ -459,9 +459,8 @@ type messageAck struct {
 	offset    int64
 }
 
-// Ack stores the partition offset once every downstream branch has finished with
-// the record. On failure the partition is paused so duplicates stay confined to
-// what was already in flight.
+// Pause on failure so later offsets in this partition stay uncommitted and are
+// re-read, rather than advancing past the gap.
 func (m *messageAck) Ack(failed bool) {
 	if m.reader == nil {
 		return
@@ -603,7 +602,7 @@ func (k *kafka) buildProducerConfig() (*ckafka.ConfigMap, error) {
 	return cfg, nil
 }
 
-// buildConsumerConfig builds config for group consumer mode; auto-commits every 5s, offsets stored only after downstream completion.
+// auto.offset.store is off so the watermark, not librdkafka, chooses the commit position.
 func (k *kafka) buildConsumerConfig() (*ckafka.ConfigMap, error) {
 	cfg, err := k.buildBaseConfig()
 	if err != nil {

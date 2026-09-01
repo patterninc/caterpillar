@@ -35,9 +35,7 @@ func (t *offsetTracker) partition(partition int32) *partitionState {
 	return ps
 }
 
-// settle records one message's outcome. commitTo is the next-to-read offset to
-// store when shouldStore is true. pause is true when the partition hit a failed
-// record and should stop fetching.
+// commitTo is the next offset Kafka should read, not the last completed one.
 func (t *offsetTracker) settle(partition int32, offset int64, failed bool) (commitTo int64, shouldStore bool, pause bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
