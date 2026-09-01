@@ -23,6 +23,19 @@ func newOffsetTracker() *offsetTracker {
 	}
 }
 
+// observe registers the next unread offset when a message is received; reads are
+// monotonic per partition so only the first call for a partition matters.
+func (t *offsetTracker) observe(partition int32, offset int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	ps := t.partition(partition)
+	if !ps.haveNext {
+		ps.nextCommit = offset
+		ps.haveNext = true
+	}
+}
+
 func (t *offsetTracker) partition(partition int32) *partitionState {
 	ps, ok := t.partitions[partition]
 	if !ok {
@@ -43,8 +56,15 @@ func (t *offsetTracker) settle(partition int32, offset int64, failed bool) (comm
 	ps := t.partition(partition)
 
 	if !ps.haveNext {
-		ps.nextCommit = offset
-		ps.haveNext = true
+		if failed {
+			if ps.lowestFailed < 0 || offset < ps.lowestFailed {
+				ps.lowestFailed = offset
+			}
+			ps.paused = true
+		} else {
+			ps.pending[offset] = struct{}{}
+		}
+		return -1, false, ps.paused
 	}
 
 	if failed {

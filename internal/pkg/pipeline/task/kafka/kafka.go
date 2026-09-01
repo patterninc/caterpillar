@@ -64,9 +64,10 @@ type kafka struct {
 
 // one consumer per worker: sharing one would race under task_concurrency > 1.
 type reader struct {
-	k        *kafka
-	consumer *ckafka.Consumer
-	offsets  *offsetTracker
+	k          *kafka
+	consumer   *ckafka.Consumer
+	offsets    *offsetTracker
+	consumerMu sync.Mutex
 }
 
 func New() (task.Task, error) {
@@ -157,10 +158,10 @@ func (k *kafka) Finish() error {
 
 		capped = append(capped, r.offsets.cappedPartitions()...)
 
-		if _, err := r.consumer.Commit(); err != nil {
+		if err := r.commit(); err != nil {
 			fmt.Printf("warning: failed to commit offsets for topic %s: %v\n", k.Topic, err)
 		}
-		if err := r.consumer.Close(); err != nil {
+		if err := r.close(); err != nil {
 			fmt.Printf("warning: error closing kafka consumer: %v\n", err)
 		}
 	}
@@ -408,7 +409,12 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 			}
 		}
 
-		msg, err := c.ReadMessage(timeout)
+		var msg *ckafka.Message
+		if r != nil {
+			msg, err = r.readMessage(timeout)
+		} else {
+			msg, err = c.ReadMessage(timeout)
+		}
 		if err != nil {
 			if kafkaErr, ok := err.(ckafka.Error); ok && kafkaErr.Code() == ckafka.ErrTimedOut {
 				retriesNumber++
@@ -437,11 +443,13 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 			k.SendData(ctx, data, output)
 		} else if output == nil {
 			// no downstream branch to settle: Track would hang Finish on Wait
+			r.offsets.observe(msg.TopicPartition.Partition, int64(msg.TopicPartition.Offset))
 			if err := r.storeOffset(msg.TopicPartition.Partition, int64(msg.TopicPartition.Offset)+1); err != nil {
 				fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
 					k.Topic, msg.TopicPartition.Partition, err)
 			}
 		} else {
+			r.offsets.observe(msg.TopicPartition.Partition, int64(msg.TopicPartition.Offset))
 			msgAck := ack.New()
 			k.SendData(ack.WithContext(ctx, msgAck), data, output)
 			k.tracker.Track(msgAck, &messageAck{
@@ -481,19 +489,22 @@ func (m *messageAck) Ack(failed bool) {
 	}
 
 	if pause {
-		topic := m.reader.k.Topic
-		tp := ckafka.TopicPartition{
-			Topic:     &topic,
-			Partition: m.partition,
-		}
-		if err := m.reader.consumer.Pause([]ckafka.TopicPartition{tp}); err != nil {
+		if err := m.reader.pausePartition(m.partition); err != nil {
 			fmt.Printf("warning: failed to pause topic %s partition %d: %v\n",
 				m.reader.k.Topic, m.partition, err)
 		}
 	}
 }
 
+func (r *reader) readMessage(timeout time.Duration) (*ckafka.Message, error) {
+	r.consumerMu.Lock()
+	defer r.consumerMu.Unlock()
+	return r.consumer.ReadMessage(timeout)
+}
+
 func (r *reader) storeOffset(partition int32, offset int64) error {
+	r.consumerMu.Lock()
+	defer r.consumerMu.Unlock()
 	topic := r.k.Topic
 	_, err := r.consumer.StoreOffsets([]ckafka.TopicPartition{{
 		Topic:     &topic,
@@ -503,8 +514,31 @@ func (r *reader) storeOffset(partition int32, offset int64) error {
 	return err
 }
 
+func (r *reader) pausePartition(partition int32) error {
+	r.consumerMu.Lock()
+	defer r.consumerMu.Unlock()
+	topic := r.k.Topic
+	return r.consumer.Pause([]ckafka.TopicPartition{{
+		Topic:     &topic,
+		Partition: partition,
+	}})
+}
+
+func (r *reader) commit() error {
+	r.consumerMu.Lock()
+	defer r.consumerMu.Unlock()
+	_, err := r.consumer.Commit()
+	return err
+}
+
+func (r *reader) close() error {
+	r.consumerMu.Lock()
+	defer r.consumerMu.Unlock()
+	return r.consumer.Close()
+}
+
 func (r *reader) allAssignedPaused() (bool, error) {
-	assignment, err := r.consumer.Assignment()
+	assignment, err := r.assignment()
 	if err != nil {
 		return false, err
 	}
@@ -515,6 +549,12 @@ func (r *reader) allAssignedPaused() (bool, error) {
 	}
 
 	return r.offsets.allAssignedPaused(partitions), nil
+}
+
+func (r *reader) assignment() ([]ckafka.TopicPartition, error) {
+	r.consumerMu.Lock()
+	defer r.consumerMu.Unlock()
+	return r.consumer.Assignment()
 }
 
 func (k *kafka) newCodec() (messageCodec, error) {

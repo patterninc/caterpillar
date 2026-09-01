@@ -223,7 +223,7 @@ In group consumer mode, an offset is stored only after every downstream task has
 
 That covers failures, not drops. A task configured to skip a bad record counts it as finished, so the offset advances and the message does not come back. See [Non-critical errors](../../../../../README.md#non-critical-errors) for the fields that behave this way.
 
-Kafka commits are positional: storing offset N means every offset below N is done. The reader tracks a contiguous completed prefix per partition and can only store up to the first gap. If offset 100 fails while 101 and 102 succeed, the stored offset stays at 100 and those later messages are re-read next run. The reader pauses that partition for the rest of the run so duplicates stay confined to what was already in flight; other partitions keep reading. `Finish` reports which partitions were paused when `fail_on_error` is set.
+Kafka commits are positional: storing offset N means every offset below N is done. The reader tracks a contiguous completed prefix per partition and can only store up to the first gap. If offset 100 fails while 101 and 102 succeed, the stored offset stays at 100 and those later messages are re-read next run. The reader pauses that partition for the rest of the run so duplicates stay confined to what was already in flight; other partitions keep reading. `Finish` always returns an error listing partitions paused due to failed records; the pipeline applies `fail_on_error` to decide whether that stops the run.
 
 Standalone mode (no `group_id`) never stores offsets and re-reads from the beginning every run, so it is already at-least-once without deferred commits. With `task_concurrency` above 1 in standalone mode, every worker reads every partition from the start, multiplying the work.
 

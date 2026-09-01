@@ -6,6 +6,7 @@ tasks:
     bootstrap_server: kafka.local:9092
     topic: input-topic
     group_id: acking-example-group
+    auto_offset_reset: earliest
     user_auth_type: none
     retry_limit: 1
 
