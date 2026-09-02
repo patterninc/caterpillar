@@ -1,14 +1,21 @@
 # number: 7 is not a divisor of exploded record counts, so a remainder is still buffered when the reader stops.
 
 tasks:
-  - name: read_topic
+  - name: kafka_read
     type: kafka
-    bootstrap_server: kafka.local:9092
-    topic: input-topic
-    group_id: acking-example-group
+    bootstrap_server: '{{ secret "/kafka/server" }}:9094'
+    topic: test-caterpillar-topic
+    group_id: test-caterpillar-group-acking
+    user_auth_type: scram
+    username: test-caterpillar
+    password: {{ secret "/kafka/test-caterpillar/secret" }}
+    server_auth_type: tls
+    timeout: 2s
+    max_records: 10
+    end_after: 30s
     auto_offset_reset: earliest
-    user_auth_type: none
-    retry_limit: 1
+    cert: |
+      {{ indent 6 (secret "/kafka/ca-cert") }}
 
   - name: explode_items
     type: jq
@@ -24,4 +31,4 @@ tasks:
     type: file
     path: ./output/kafka_acking/{{ macro "uuid" }}.json
 
-dag: read_topic >> explode_items >> batch >> save
+dag: kafka_read >> explode_items >> batch >> save

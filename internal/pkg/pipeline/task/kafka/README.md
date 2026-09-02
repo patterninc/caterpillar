@@ -227,7 +227,7 @@ Kafka commits are positional: storing offset N means every offset below N is don
 
 Standalone mode (no `group_id`) never stores offsets and re-reads from the beginning every run, so it is already at-least-once without deferred commits. With `task_concurrency` above 1 in standalone mode, every worker reads every partition from the start, multiplying the work.
 
-See `test/pipelines/kafka_acking.yaml` for a fixture that exercises deferred commits through a fan-in join whose batch size does not divide the record count. Seed `input-topic` with `{"items":[1,2,3,4,5]}` records before running it.
+See `test/pipelines/kafka_acking.yaml` for a fixture that exercises deferred commits through a fan-in join whose batch size does not divide the record count. Seed the topic with `{"items":[1,2,3,4,5]}` records before running it.
 
 ## Notes and Limitations
  - **Standalone mode** reads all partitions from `OffsetBeginning` on every run and never commits offsets. The PREFIXED group ACL is covered under Reading Modes above.

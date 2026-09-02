@@ -26,7 +26,7 @@
 # channel closes, and the channel can only close once the source stops
 # waiting. Keep it indivisible or this fixture stops testing that.
 #
-# Seed the queue first (see test/pipelines/setup_localstack_fanout.sh), then:
+# Seed the queue first, then:
 #   AWS_ENDPOINT_URL=http://localhost:4566 AWS_ACCESS_KEY_ID=test \
 #   AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-west-2 \
 #   go run ./cmd/caterpillar -conf test/pipelines/sqs_fanout_fanin_dag.yaml

@@ -104,7 +104,7 @@ Two consequences worth tuning for:
 
 ## Sample Pipelines
 
-- `test/pipelines/sqs_with_context_concurrency.yaml` - SQS read with context variables and concurrency; run `test/pipelines/setup_localstack_sqs.sh` first to create the queue
+- `test/pipelines/sqs_with_context_concurrency.yaml` - SQS read with context variables and concurrency
 
 ## Use Cases
 
