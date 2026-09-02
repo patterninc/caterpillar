@@ -2,17 +2,17 @@ package kafka
 
 import "sync"
 
-// offsetTracker tracks a contiguous completed prefix per partition so stored
-// offsets match Kafka's next-to-read convention.
+// offsetTracker tracks the next-to-read store position per partition from
+// received offsets that have not settled, so log holes are not treated as gaps.
 type offsetTracker struct {
 	mu         sync.Mutex
 	partitions map[int32]*partitionState
 }
 
 type partitionState struct {
-	nextCommit   int64
-	haveNext     bool
-	pending      map[int64]struct{}
+	inFlight     map[int64]struct{}
+	maxObserved  int64
+	haveObserved bool
 	lowestFailed int64
 	paused       bool
 }
@@ -23,16 +23,17 @@ func newOffsetTracker() *offsetTracker {
 	}
 }
 
-// observe registers the next unread offset when a message is received; reads are
-// monotonic per partition so only the first call for a partition matters.
+// observe records a received offset; every read must be observed so holes in
+// the log are not mistaken for unfinished records.
 func (t *offsetTracker) observe(partition int32, offset int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	ps := t.partition(partition)
-	if !ps.haveNext {
-		ps.nextCommit = offset
-		ps.haveNext = true
+	ps.inFlight[offset] = struct{}{}
+	if !ps.haveObserved || offset > ps.maxObserved {
+		ps.maxObserved = offset
+		ps.haveObserved = true
 	}
 }
 
@@ -40,7 +41,7 @@ func (t *offsetTracker) partition(partition int32) *partitionState {
 	ps, ok := t.partitions[partition]
 	if !ok {
 		ps = &partitionState{
-			pending:      make(map[int64]struct{}),
+			inFlight:     make(map[int64]struct{}),
 			lowestFailed: -1,
 		}
 		t.partitions[partition] = ps
@@ -55,65 +56,43 @@ func (t *offsetTracker) settle(partition int32, offset int64, failed bool) (comm
 
 	ps := t.partition(partition)
 
-	if !ps.haveNext {
+	if !ps.haveObserved {
 		if failed {
 			if ps.lowestFailed < 0 || offset < ps.lowestFailed {
 				ps.lowestFailed = offset
 			}
 			ps.paused = true
-		} else {
-			ps.pending[offset] = struct{}{}
 		}
 		return -1, false, ps.paused
 	}
+
+	delete(ps.inFlight, offset)
 
 	if failed {
 		if ps.lowestFailed < 0 || offset < ps.lowestFailed {
 			ps.lowestFailed = offset
 		}
 		ps.paused = true
-		commitTo = ps.cappedCommit()
-		return commitTo, ps.haveNext, true
+		return ps.cappedCommit(), true, true
 	}
 
-	if offset < ps.nextCommit {
-		return -1, false, ps.paused
-	}
-
-	if offset == ps.nextCommit {
-		ps.nextCommit++
-	} else {
-		ps.pending[offset] = struct{}{}
-	}
-
-	t.advance(ps)
-
-	commitTo = ps.cappedCommit()
-	if !ps.haveNext {
-		return -1, false, ps.paused
-	}
-
-	return commitTo, true, ps.paused
-}
-
-func (t *offsetTracker) advance(ps *partitionState) {
-	for {
-		if ps.lowestFailed >= 0 && ps.nextCommit >= ps.lowestFailed {
-			return
-		}
-		if _, ok := ps.pending[ps.nextCommit]; !ok {
-			return
-		}
-		delete(ps.pending, ps.nextCommit)
-		ps.nextCommit++
-	}
+	return ps.cappedCommit(), true, ps.paused
 }
 
 func (ps *partitionState) cappedCommit() int64 {
-	if ps.lowestFailed >= 0 && ps.nextCommit > ps.lowestFailed {
+	commitTo := ps.maxObserved + 1
+	if len(ps.inFlight) > 0 {
+		commitTo = -1
+		for offset := range ps.inFlight {
+			if commitTo < 0 || offset < commitTo {
+				commitTo = offset
+			}
+		}
+	}
+	if ps.lowestFailed >= 0 && commitTo > ps.lowestFailed {
 		return ps.lowestFailed
 	}
-	return ps.nextCommit
+	return commitTo
 }
 
 func (t *offsetTracker) cappedPartitions() []int32 {
@@ -135,7 +114,7 @@ func (t *offsetTracker) commitPositions() map[int32]int64 {
 
 	out := make(map[int32]int64, len(t.partitions))
 	for partition, ps := range t.partitions {
-		if ps.haveNext {
+		if ps.haveObserved {
 			out[partition] = ps.cappedCommit()
 		}
 	}

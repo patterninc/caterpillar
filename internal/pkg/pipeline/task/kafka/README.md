@@ -15,7 +15,7 @@ The task automatically determines its mode based on the presence of input/output
 There are two read modes, controlled by whether `group_id` is set:
 
 - **Standalone** (no `group_id`): assigns all partitions directly at `OffsetBeginning` and reads without committing offsets. Every run re-reads from the start of the topic. Useful for one-shot batch reads or testing.
-- **Group consumer** (`group_id` set): subscribes via the Kafka consumer group protocol, reads from committed offsets, and commits new offsets periodically. Multiple instances with the same `group_id` split partitions and each message is delivered once to the group. The `auto_offset_reset` field controls behavior when no committed offset is found or the stored offset is out of range (e.g., aged out by retention) — `latest` (default) skips to the tail, `earliest` starts from the beginning of the available log.
+- **Group consumer** (`group_id` set): subscribes via the Kafka consumer group protocol, reads from committed offsets, and commits new offsets periodically. `task_concurrency` opens that many Kafka consumers in this `group_id` (not goroutines sharing one consumer); the broker splits partitions among them. Workers beyond the partition count get no assignment and do not emit records. Multiple pipeline processes with the same `group_id` also split partitions, and each message is delivered once to the group. The `auto_offset_reset` field controls behavior when no committed offset is found or the stored offset is out of range (e.g., aged out by retention) — `latest` (default) skips to the tail, `earliest` starts from the beginning of the available log.
 
 > **Broker ACL requirement for standalone mode**: confluent-kafka-go requires a non-empty `group.id` even for direct-assign reads. Standalone mode builds one per run as `caterpillar-standalone-<topic>-<uuid>`. Grant `READ` on `GROUP` resource `caterpillar-standalone-` with `PREFIXED` pattern type. Without this ACL, standalone reads fail with a group authorization error.
 
@@ -30,7 +30,7 @@ There are two read modes, controlled by whether `group_id` is set:
 | `timeout` | duration string | `15s` | Read polling timeout and producer delivery/flush timeout. Uses Go duration format (e.g. `25s`, `1m`). |
 | `batch_flush_interval` | duration string | `2s` | Producer linger interval (`linger.ms`) for batching queued writes |
 | `batch_size` | int | `100` | Producer batch size (`batch.num.messages`) — messages per batch, alongside the `batch_flush_interval` time trigger |
-| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `task_concurrency` | int | `1` | Group read: Kafka consumers in `group_id` (one per worker, not shared). Standalone: each worker reads every partition from the start. |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 | `retry_limit` | int | `5` | Read retry threshold; reading stops when consecutive retryable errors or timeouts exceed this value |
 | `end_after` | duration string | - | Wall-clock deadline for read mode. When set, the reader stops cleanly after this duration regardless of message traffic. Worst-case overshoot is one `timeout` window. |
@@ -223,7 +223,7 @@ In group consumer mode, an offset is stored only after every downstream task has
 
 That covers failures, not drops. A task configured to skip a bad record counts it as finished, so the offset advances and the message does not come back. See [Non-critical errors](../../../../../README.md#non-critical-errors) for the fields that behave this way.
 
-Kafka commits are positional: storing offset N means every offset below N is done. The reader tracks a contiguous completed prefix per partition and can only store up to the first gap. If offset 100 fails while 101 and 102 succeed, the stored offset stays at 100 and those later messages are re-read next run. The reader pauses that partition for the rest of the run so duplicates stay confined to what was already in flight; other partitions keep reading. `Finish` always returns an error listing partitions paused due to failed records; the pipeline applies `fail_on_error` to decide whether that stops the run.
+Kafka commits are positional: storing offset N means every offset below N is done. The stored prefix is the lowest unsettled **received** offset, or one past the highest received offset when nothing is in flight. Holes in the log (compaction, `read_committed` skips) are not unfinished records. If offset 100 fails while 101 and 102 succeed, the stored offset stays at 100 and those later messages are re-read next run. The reader pauses that partition for the rest of the run so duplicates stay confined to what was already in flight; other partitions keep reading. `Finish` always returns an error listing partitions paused due to failed records; the pipeline applies `fail_on_error` to decide whether that stops the run.
 
 Standalone mode (no `group_id`) never stores offsets and re-reads from the beginning every run, so it is already at-least-once without deferred commits. With `task_concurrency` above 1 in standalone mode, every worker reads every partition from the start, multiplying the work.
 

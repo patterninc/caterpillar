@@ -146,9 +146,12 @@ func (r *reader) handleRecord(ctx context.Context, data []byte, output chan<- *r
 
 	if output == nil {
 		// no downstream branch to settle: Track would hang Finish on Wait
-		if err := r.storeOffset(partition, offset+1); err != nil {
-			fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
-				r.k.Topic, partition, err)
+		commitTo, shouldStore, _ := r.offsets.settle(partition, offset, false)
+		if shouldStore {
+			if err := r.storeOffset(partition, commitTo); err != nil {
+				fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
+					r.k.Topic, partition, err)
+			}
 		}
 		return
 	}
