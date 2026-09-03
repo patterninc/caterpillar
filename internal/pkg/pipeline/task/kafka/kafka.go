@@ -55,6 +55,10 @@ type kafka struct {
 	Idempotent         bool                 `yaml:"idempotent,omitempty" json:"idempotent,omitempty"`                                                          // enable idempotent producer
 	Format             string               `yaml:"format,omitempty" json:"format,omitempty"`                                                                  // message format: "json" (default) or "avro"
 	SchemaRegistry     schemaRegistryConfig `yaml:",inline" json:",inline"`                                                                                    // Schema Registry connection — required when format is "avro"
+
+	tracker   *ack.Tracker
+	readersMu sync.Mutex
+	readers   []*reader
 }
 
 func New() (task.Task, error) {
@@ -288,21 +292,10 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 	if err != nil {
 		return fmt.Errorf("failed to create consumer: %w", err)
 	}
-	defer func() {
-		if err := c.Close(); err != nil {
-			fmt.Printf("warning: error closing kafka consumer: %v\n", err)
-		}
-	}()
 
-	if standalone {
-		fmt.Printf("no group_id set — standalone read from beginning of topic %s\n", k.Topic)
-		if err := k.assignAllPartitions(c); err != nil {
-			return fmt.Errorf("failed to assign partitions: %w", err)
-		}
-	} else {
-		if err := c.SubscribeTopics([]string{k.Topic}, nil); err != nil {
-			return fmt.Errorf("failed to subscribe to topic %s: %w", k.Topic, err)
-		}
+	r, err := k.openReader(c, standalone)
+	if err != nil {
+		return err
 	}
 
 	codec, err := k.newCodec()
@@ -321,7 +314,14 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 		default:
 		}
 
-		msg, err := c.ReadMessage(timeout)
+		if stop, err := r.shouldStop(); err != nil {
+			fmt.Printf("warning: failed to check kafka assignment for topic %s: %v\n", k.Topic, err)
+		} else if stop {
+			fmt.Printf("all assigned partitions paused for topic %s, stopping reader\n", k.Topic)
+			return nil
+		}
+
+		msg, err := r.readMessage(timeout)
 		if err != nil {
 			if kafkaErr, ok := err.(ckafka.Error); ok && kafkaErr.Code() == ckafka.ErrTimedOut {
 				retriesNumber++
@@ -346,15 +346,7 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 			return fmt.Errorf("failed to deserialize message from topic %s: %w", k.Topic, err)
 		}
 
-		k.SendData(ctx, data, output)
-
-		// Only store offsets for group consumers — standalone reads never commit.
-		if !standalone {
-			if _, err := c.StoreMessage(msg); err != nil {
-				fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
-					k.Topic, msg.TopicPartition.Partition, err)
-			}
-		}
+		r.emit(ctx, data, output, msg)
 
 		recordsRead++
 		if k.MaxRecords > 0 && recordsRead >= k.MaxRecords {
@@ -455,7 +447,7 @@ func (k *kafka) buildProducerConfig() (*ckafka.ConfigMap, error) {
 	return cfg, nil
 }
 
-// buildConsumerConfig builds config for group consumer mode; auto-commits every 5s, offsets stored only after downstream delivery.
+// auto.offset.store is off so the watermark, not librdkafka, chooses the commit position.
 func (k *kafka) buildConsumerConfig() (*ckafka.ConfigMap, error) {
 	cfg, err := k.buildBaseConfig()
 	if err != nil {
