@@ -455,6 +455,7 @@ func (k *kafka) buildConsumerConfig() (*ckafka.ConfigMap, error) {
 	}
 
 	_ = cfg.SetKey("auto.offset.reset", k.AutoOffsetReset)
+	_ = cfg.SetKey("partition.assignment.strategy", "cooperative-sticky")
 	_ = cfg.SetKey("session.timeout.ms", 30000)
 	_ = cfg.SetKey("heartbeat.interval.ms", 3000)
 	_ = cfg.SetKey("enable.auto.offset.store", false)
