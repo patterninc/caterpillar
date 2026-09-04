@@ -87,8 +87,10 @@ func (k *kafka) Finish() error {
 		if r.group {
 			for partition, offset := range r.offsets.commitPositions() {
 				if err := r.storeOffset(partition, offset); err != nil {
-					fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
-						k.Topic, partition, err)
+					if kErr, ok := err.(ckafka.Error); !ok || kErr.Code() != ckafka.ErrState {
+						fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
+							k.Topic, partition, err)
+					}
 				}
 			}
 
@@ -149,8 +151,10 @@ func (r *reader) handleRecord(ctx context.Context, data []byte, output chan<- *r
 		commitTo, shouldStore, _ := r.offsets.settle(partition, offset, false)
 		if shouldStore {
 			if err := r.storeOffset(partition, commitTo); err != nil {
-				fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
-					r.k.Topic, partition, err)
+				if kErr, ok := err.(ckafka.Error); !ok || kErr.Code() != ckafka.ErrState {
+					fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
+						r.k.Topic, partition, err)
+				}
 			}
 		}
 		return
@@ -175,8 +179,10 @@ func (m *messageAck) Ack(failed bool) {
 	commitTo, shouldStore, pause := m.reader.offsets.settle(m.partition, m.offset, failed)
 	if shouldStore {
 		if err := m.reader.storeOffset(m.partition, commitTo); err != nil {
-			fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
-				m.reader.k.Topic, m.partition, err)
+			if kErr, ok := err.(ckafka.Error); !ok || kErr.Code() != ckafka.ErrState {
+				fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
+					m.reader.k.Topic, m.partition, err)
+			}
 		}
 	}
 
