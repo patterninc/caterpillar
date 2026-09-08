@@ -29,5 +29,5 @@ tasks:
     type: split
   - name: write_concurrently
     type: file
-    path: test/{{ macro "uuid" }}.txt
+    path: /tmp/caterpillar/file_concurrency_test/{{ macro "uuid" }}.txt
     task_concurrency: 8
