@@ -33,6 +33,7 @@ const (
 type Task interface {
 	Run(<-chan *record.Record, chan<- *record.Record) error
 	GetName() string
+	GetType() string
 	GetFailOnError() bool
 	GetTaskConcurrency() int
 	Init() error // Called once after unmarshaling, before pipeline execution
@@ -67,6 +68,10 @@ func (b *Base) GetFailOnError() bool {
 
 func (b *Base) GetName() string {
 	return b.Name
+}
+
+func (b *Base) GetType() string {
+	return b.Type
 }
 
 func (b *Base) GetTaskConcurrency() int {

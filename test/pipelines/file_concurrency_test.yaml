@@ -7,5 +7,5 @@ tasks:
     type: split
   - name: write_concurrently
     type: file
-    path: /test/pipelines/output/{{ macro "uuid" }}.txt
+    path: test/pipelines/output/{{ macro "uuid" }}.txt
     task_concurrency: 8

@@ -63,15 +63,6 @@ func New() (task.Task, error) {
 	}, nil
 }
 
-// set file task concurrency to 1 
-func (f *file) GetTaskConcurrency() int {
-	if f.Base.TaskConcurrency > 1 {
-		fmt.Printf("WARN: task_concurrency (%d) is not supported for task '%s'. Only one worker will run.\n",
-			f.Base.TaskConcurrency, f.Base.Type)
-	}
-	return 1
-}
-
 func (f *file) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
 	if err := validateStorageClass(f.StorageClass); err != nil {
