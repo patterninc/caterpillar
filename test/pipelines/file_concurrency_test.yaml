@@ -1,0 +1,11 @@
+tasks:
+  - name: read_glob_concurrently
+    type: file
+    path: test/pipelines/*.txt
+    task_concurrency: 4
+  - name: split_to_lines
+    type: split
+  - name: write_concurrently
+    type: file
+    path: /test/pipelines/output/{{ macro "uuid" }}.txt
+    task_concurrency: 8
