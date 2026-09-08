@@ -69,12 +69,66 @@ func (k *kafka) registerReader(r *reader) {
 	k.readers = append(k.readers, r)
 }
 
+const heartbeatPollMs = 1000
+
+// Group consumers must keep polling after Read stops: max.poll.interval.ms (5m)
+// is an application-poll deadline that heartbeat.interval.ms does not reset.
+func waitWhile(wait func(), poll func()) {
+	done := make(chan struct{})
+	go func() {
+		wait()
+		close(done)
+	}()
+	for {
+		select {
+		case <-done:
+			return
+		default:
+			poll()
+		}
+	}
+}
+
+func (k *kafka) heartbeatPoll() {
+	k.readersMu.Lock()
+	readers := slices.Clone(k.readers)
+	k.readersMu.Unlock()
+	for _, r := range readers {
+		r.pollHeartbeat()
+	}
+}
+
+func (r *reader) pollHeartbeat() {
+	if r.consumer == nil || !r.group {
+		return
+	}
+	r.consumerMu.Lock()
+	defer r.consumerMu.Unlock()
+	ev := r.consumer.Poll(heartbeatPollMs)
+	if err, ok := ev.(ckafka.Error); ok && err.Code() != ckafka.ErrTimedOut {
+		fmt.Printf("warning: kafka heartbeat poll for topic %s: %v\n", r.k.Topic, err)
+	}
+}
+
+func (r *reader) pauseAll() error {
+	r.consumerMu.Lock()
+	defer r.consumerMu.Unlock()
+	assignment, err := r.consumer.Assignment()
+	if err != nil {
+		return err
+	}
+	if len(assignment) == 0 {
+		return nil
+	}
+	return r.consumer.Pause(assignment)
+}
+
 // Finish, not Run, waits for deferred stores: a join that emits on input close
 // cannot settle until this task's output channel is closed, which happens only
 // after Run returns.
 func (k *kafka) Finish() error {
 	if k.tracker != nil {
-		k.tracker.Wait()
+		waitWhile(k.tracker.Wait, k.heartbeatPoll)
 	}
 
 	k.readersMu.Lock()
