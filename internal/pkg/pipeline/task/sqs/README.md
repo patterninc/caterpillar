@@ -21,7 +21,7 @@ The task automatically determines its mode based on the presence of input/output
 | `concurrency` | int | `10` | Number of concurrent workers that acknowledge (delete) fully-processed messages |
 | `max_messages` | int | `10` | Maximum number of messages to receive per batch |
 | `wait_time_seconds` | int | `10` | Long polling wait time in seconds |
-| `exit_on_empty` | bool | `false` | Exit when a receive returns no messages. On FIFO queues this waits until outstanding receipts are deleted, because an empty poll can mean the message group is blocked rather than the queue drained. |
+| `exit_on_empty` | bool | `false` | Exit when a receive returns no messages. FIFO: empty poll is not drain while receipts are outstanding. |
 | `end_after` | duration | - | Stop polling after this much time (read mode); e.g. `5m` |
 | `message_group_id` | string | - | Message group ID for FIFO queues |
 | `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |

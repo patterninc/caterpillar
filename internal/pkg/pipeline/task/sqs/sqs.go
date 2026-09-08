@@ -42,7 +42,7 @@ type sqs struct {
 
 	client      *qs.Client
 	tracker     *ack.Tracker
-	outstanding atomic.Int32 // receipts received and not yet Ack'd; FIFO empty polls are not drain while > 0
+	outstanding atomic.Int32
 }
 
 func New() (task.Task, error) {
@@ -206,9 +206,8 @@ func (m *messageAck) Ack(failed bool) {
 
 }
 
-// shouldExitOnEmpty reports a drained queue. FIFO withholds later messages in a
-// group until in-flight receipts are deleted, so an empty receive is not drain
-// while we still hold any.
+// FIFO withholds a group until deletes land, so an empty receive is not
+// drained while we still hold receipts.
 func (s *sqs) shouldExitOnEmpty() bool {
 	if !s.ExitOnEmpty {
 		return false
