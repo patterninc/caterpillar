@@ -21,7 +21,7 @@ The task automatically determines its mode based on the presence of input/output
 | `concurrency` | int | `10` | Number of concurrent workers that acknowledge (delete) fully-processed messages |
 | `max_messages` | int | `10` | Maximum number of messages to receive per batch |
 | `wait_time_seconds` | int | `10` | Long polling wait time in seconds |
-| `exit_on_empty` | bool | `false` | Exit when queue is empty |
+| `exit_on_empty` | bool | `false` | Exit when a receive returns no messages. On FIFO queues this waits until outstanding receipts are deleted, because an empty poll can mean the message group is blocked rather than the queue drained. |
 | `end_after` | duration | - | Stop polling after this much time (read mode); e.g. `5m` |
 | `message_group_id` | string | - | Message group ID for FIFO queues |
 | `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
@@ -98,9 +98,15 @@ Two consequences worth tuning for:
 - **SQS caps in-flight messages** at 120,000 per standard queue and 20,000 per FIFO queue.
   A large `channel_size` on a long pipeline can approach that; on a breach `ReceiveMessage`
   returns `OverLimit` and the task stops. FIFO queues are stricter still, since
-  unacknowledged messages block their message group. An unbounded `join` downstream of
-  read mode is a common cause: set `duration:` on that join so records flush mid-run and
-  messages can be deleted (see the join task README).
+  unacknowledged messages block their message group: later messages in that group are not
+  returned until the in-flight receipts are deleted, so a receive can come back empty while
+  the queue still holds work. `exit_on_empty` therefore does not treat an empty FIFO poll as
+  drained while this task still holds receipts; after those deletes, the next poll either
+  returns the next batch or a true empty. One message group is still capped at
+  `max_messages` in flight by AWS. An unbounded `join` downstream of read mode keeps those
+  receipts outstanding for the run, so the reader keeps polling rather than exiting: set
+  `duration:` (or `size:` / `number:`) on that join so records flush mid-run and messages
+  can be deleted (see the join task README).
 
 ## Sample Pipelines
 
