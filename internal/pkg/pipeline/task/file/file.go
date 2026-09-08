@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/patterninc/caterpillar/internal/pkg/config"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
@@ -50,6 +52,17 @@ type file struct {
 	StorageClass    storageClass             `yaml:"storage_class,omitempty" json:"storage_class,omitempty"`
 	Tags            map[string]config.String `yaml:"tags,omitempty" json:"tags,omitempty"`
 	Delimiter       string                   `yaml:"delimiter,omitempty" json:"delimiter,omitempty"`
+
+	// readOnce/readPaths/readErr/readReader/readIdx coordinate concurrent
+	// readers under task_concurrency > 1: the pipeline runs Run() N times
+	// concurrently on this same *file instance (see runTaskConcurrently), so
+	// the glob is expanded exactly once and workers claim disjoint paths off
+	// the shared slice via readIdx instead of each re-reading every file.
+	readOnce   sync.Once
+	readReader reader
+	readPaths  []string
+	readErr    error
+	readIdx    atomic.Int64
 }
 
 func New() (task.Task, error) {
@@ -96,18 +109,54 @@ func (f *file) Run(input <-chan *record.Record, output chan<- *record.Record) er
 
 }
 
+// readFile is invoked once per worker when task_concurrency > 1 (the pipeline
+// calls Run this many times concurrently on this same *file instance, sharing
+// the output channel — see runTaskConcurrently). The glob is only ever
+// expanded once, on whichever worker gets there first; every worker then
+// claims disjoint indices out of the shared path list via readIdx, so N
+// workers split the file list N ways instead of each reading every file.
 func (f *file) readFile(output chan<- *record.Record) error {
+
+	f.readOnce.Do(func() {
+		f.readReader, f.readPaths, f.readErr = f.newReader()
+	})
+
+	if f.readErr != nil {
+		return f.readErr
+	}
+
+	for {
+
+		idx := f.readIdx.Add(1) - 1
+		if idx >= int64(len(f.readPaths)) {
+			break
+		}
+
+		if err := f.readPath(f.readPaths[idx], output); err != nil {
+			return err
+		}
+
+	}
+
+	return nil
+
+}
+
+// newReader resolves f.Path's glob into a scheme-appropriate reader and the
+// full list of matched paths. Called at most once per file instance, guarded
+// by readOnce in readFile.
+func (f *file) newReader() (reader, []string, error) {
 
 	// let's get the glob
 	glob, err := f.Path.Get(nil)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	// Determine the scheme from the path
 	parsedURL, err := url.Parse(glob)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	pathScheme := parsedURL.Scheme
 	if pathScheme == `` {
@@ -116,44 +165,47 @@ func (f *file) readFile(output chan<- *record.Record) error {
 
 	newReaderFunction, found := readers[pathScheme]
 	if !found {
-		return unknownSchemeError(pathScheme)
+		return nil, nil, unknownSchemeError(pathScheme)
 	}
 
 	// let's create a reader
-	reader, err := newReaderFunction(f)
+	rdr, err := newReaderFunction(f)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	// let's parse the glob to get all paths
-	paths, err := reader.parse(glob)
+	paths, err := rdr.parse(glob)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return rdr, paths, nil
+
+}
+
+// readPath reads a single matched path and sends its content to output.
+func (f *file) readPath(path string, output chan<- *record.Record) error {
+
+	readerCloser, err := f.readReader.read(path)
+	if err != nil {
+		return err
+	}
+	defer readerCloser.Close()
+
+	content, err := io.ReadAll(readerCloser)
 	if err != nil {
 		return err
 	}
 
-	for _, path := range paths {
+	// Create a default record with context
+	fileName := textutil.SlugifyFileName(filepath.Base(path))
+	rc := &record.Record{Context: ctx}
+	rc.SetContextValue(string(task.CtxKeyFileNameWrite), fileName)
+	rc.SetContextValue(string(task.CtxKeyFilePathWrite), textutil.SlugifyFilePath(path))
 
-		readerCloser, err := reader.read(path)
-		if err != nil {
-			return err
-		}
-		defer readerCloser.Close()
-
-		content, err := io.ReadAll(readerCloser)
-		if err != nil {
-			return err
-		}
-
-		// Create a default record with context
-		fileName := textutil.SlugifyFileName(filepath.Base(path))
-		rc := &record.Record{Context: ctx}
-		rc.SetContextValue(string(task.CtxKeyFileNameWrite), fileName)
-		rc.SetContextValue(string(task.CtxKeyFilePathWrite), textutil.SlugifyFilePath(path))
-
-		// let's write content to output channel
-		f.SendData(rc.Context, content, output)
-
-	}
+	// let's write content to output channel
+	f.SendData(rc.Context, content, output)
 
 	return nil
 
@@ -198,9 +250,19 @@ func (f *file) writeFile(input <-chan *record.Record) error {
 			pathScheme = fileScheme
 		}
 
-		var fs file
+		// only the fields writerFunction reads are copied here — f itself
+		// carries the sync.Once/atomic read-concurrency state (and the
+		// embedded task.Base mutex), which must never be struct-copied.
+		fs := &file{
+			Path:            f.Path,
+			SuccessFile:     f.SuccessFile,
+			SuccessFileName: f.SuccessFileName,
+			Region:          f.Region,
+			StorageClass:    f.StorageClass,
+			Tags:            f.Tags,
+			Delimiter:       f.Delimiter,
+		}
 
-		fs = *f
 		filePath, found := rc.GetContextValue(string(task.CtxKeyArchiveFileNameWrite))
 		if found {
 			if filePath == "" {
@@ -216,7 +278,7 @@ func (f *file) writeFile(input <-chan *record.Record) error {
 		if !found {
 			return f.abort(rc, unknownSchemeError(pathScheme))
 		}
-		if err := writerFunction(&fs, rc, bytes.NewReader(rc.Data)); err != nil {
+		if err := writerFunction(fs, rc, bytes.NewReader(rc.Data)); err != nil {
 			return f.abort(rc, err)
 		}
 

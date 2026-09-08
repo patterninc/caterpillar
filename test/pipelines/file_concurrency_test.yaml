@@ -1,0 +1,33 @@
+# Covers task_concurrency on the file task in both directions.
+#
+# Read mode: test/pipelines/*.txt matches 2 files. Before the fix, every one
+# of the 4 read workers independently expanded the glob and read every
+# matched file, so each file was emitted 4x. The glob is now expanded once
+# and workers claim disjoint files off the shared list via an atomic index,
+# so exactly 2 read records come out no matter how many workers run.
+#
+# Write mode: split explodes those 2 records into one per line, and 8 write
+# workers compete for the shared input channel. Each write targets a unique
+# {{ macro "uuid" }} filename, so the number of files landed in the output
+# directory is the ground truth for how many records were actually written —
+# it must equal the input line count exactly (no drops, no duplicates).
+#
+# Run directly, then verify the counts:
+#   rm -rf /tmp/caterpillar/file_concurrency_test
+#   ./caterpillar -conf test/pipelines/file_concurrency_test.yaml
+#   ls /tmp/caterpillar/file_concurrency_test | wc -l
+#   cat test/pipelines/names.txt test/pipelines/birds.txt | wc -l   # off by 2:
+#     # both fixture files end without a trailing newline, so the true line
+#     # count is this number of newlines plus 1 per file (currently 2121 + 2
+#     # = 2123 total).
+tasks:
+  - name: read_glob_concurrently
+    type: file
+    path: test/pipelines/*.txt
+    task_concurrency: 4
+  - name: split_to_lines
+    type: split
+  - name: write_concurrently
+    type: file
+    path: test/{{ macro "uuid" }}.txt
+    task_concurrency: 8
