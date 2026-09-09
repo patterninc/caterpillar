@@ -297,6 +297,14 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 	if err != nil {
 		return err
 	}
+	if r.group {
+		// Pause assigned partitions so Finish heartbeat polls do not fetch new records.
+		defer func() {
+			if err := r.pauseAll(); err != nil {
+				fmt.Printf("warning: failed to pause partitions for topic %s: %v\n", k.Topic, err)
+			}
+		}()
+	}
 
 	codec, err := k.newCodec()
 	if err != nil {

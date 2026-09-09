@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -39,8 +40,9 @@ type sqs struct {
 	ExitOnEmpty     bool   `yaml:"exit_on_empty,omitempty" json:"exit_on_empty,omitempty"`
 	MessageGroupId  string `yaml:"message_group_id,omitempty" json:"message_group_id,omitempty"` // used for FIFO queues
 
-	client  *qs.Client
-	tracker *ack.Tracker
+	client      *qs.Client
+	tracker     *ack.Tracker
+	outstanding atomic.Int32
 }
 
 func New() (task.Task, error) {
@@ -151,7 +153,7 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 			}
 
 			if receiveMessageOutput == nil || len(receiveMessageOutput.Messages) == 0 {
-				if s.ExitOnEmpty {
+				if s.shouldExitOnEmpty() {
 					fmt.Println(`Queue is empty, exiting`)
 					return nil
 				}
@@ -170,6 +172,7 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 				msgAck := ack.New()
 				s.SendData(ack.WithContext(ctx, msgAck), []byte(*m.Body), output)
 
+				s.outstanding.Add(1)
 				s.tracker.Track(msgAck, &messageAck{
 					sqs:           s,
 					messageId:     m.MessageId,
@@ -193,12 +196,30 @@ type messageAck struct {
 // redeliver the message once the visibility timeout expires.
 func (m *messageAck) Ack(failed bool) {
 
+	defer m.sqs.outstanding.Add(-1)
+
 	if failed {
 		return
 	}
 
 	m.sqs.deleteMessage(m.messageId, m.receiptHandle)
 
+}
+
+// FIFO withholds a group until deletes land, so an empty receive is not
+// drained while we still hold receipts.
+func (s *sqs) shouldExitOnEmpty() bool {
+	if !s.ExitOnEmpty {
+		return false
+	}
+	if s.isFifo() && s.outstanding.Load() > 0 {
+		return false
+	}
+	return true
+}
+
+func (s *sqs) isFifo() bool {
+	return strings.HasSuffix(s.QueueURL, ".fifo")
 }
 
 // deleteMessage acknowledges a message by deleting its receipt. A failure is
@@ -240,8 +261,7 @@ func (s *sqs) sendMessages(input <-chan *record.Record) error {
 }
 
 func (s *sqs) getMessageGroupID() *string {
-	// Only return a group ID if the queue is FIFO (URL ends with .fifo)
-	if strings.HasSuffix(s.QueueURL, ".fifo") {
+	if s.isFifo() {
 
 		if s.MessageGroupId != "" {
 			return &s.MessageGroupId
