@@ -248,6 +248,11 @@ func (p *Pipeline) runTaskConcurrently(t task.Task, input <-chan *record.Record,
 
 	concurrency := t.GetTaskConcurrency()
 
+	// if file task is source task set concurrency to 1
+	if t.GetType() == "file" && input == nil {
+		concurrency = 1 // set read task concurrency to 1, as file read task does not support concurrent workers
+	}
+
 	// wait group for task workers
 	taskWg := sync.WaitGroup{}
 	taskWg.Add(concurrency)
