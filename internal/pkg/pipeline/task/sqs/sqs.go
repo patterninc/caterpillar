@@ -214,9 +214,7 @@ func (m *messageAck) Ack(failed bool) {
 
 }
 
-// FIFO withholds a group until deletes land — including receipts held by
-// another consumer or a dead one still inside the visibility timeout — so
-// an empty receive is not drain while the queue still has messages.
+// Outstanding is this process only; FIFO also hides groups held elsewhere until VT.
 func (s *sqs) shouldExitOnEmpty(ctx context.Context) bool {
 	if !s.ExitOnEmpty {
 		return false
