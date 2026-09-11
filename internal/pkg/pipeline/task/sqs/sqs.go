@@ -48,16 +48,9 @@ type sqs struct {
 	ExitOnEmpty     bool   `yaml:"exit_on_empty,omitempty" json:"exit_on_empty,omitempty"`
 	MessageGroupId  string `yaml:"message_group_id,omitempty" json:"message_group_id,omitempty"` // used for FIFO queues
 
-	client      sqsClient
+	client      *qs.Client
 	tracker     *ack.Tracker
 	outstanding atomic.Int32
-}
-
-type sqsClient interface {
-	ReceiveMessage(context.Context, *qs.ReceiveMessageInput, ...func(*qs.Options)) (*qs.ReceiveMessageOutput, error)
-	DeleteMessage(context.Context, *qs.DeleteMessageInput, ...func(*qs.Options)) (*qs.DeleteMessageOutput, error)
-	GetQueueAttributes(context.Context, *qs.GetQueueAttributesInput, ...func(*qs.Options)) (*qs.GetQueueAttributesOutput, error)
-	SendMessage(context.Context, *qs.SendMessageInput, ...func(*qs.Options)) (*qs.SendMessageOutput, error)
 }
 
 func New() (task.Task, error) {

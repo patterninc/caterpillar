@@ -29,10 +29,7 @@ The task automatically determines its mode based on the presence of input/output
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
 In read mode the task polls until the queue drains (`exit_on_empty`) or `end_after` elapses;
-with neither set it polls indefinitely. On FIFO, `exit_on_empty` waits until
-`GetQueueAttributes` confirms the queue is empty, so a competing consumer, a crashed
-container still inside the visibility timeout, or a `GetQueueAttributes` error keeps
-polling. Set `end_after` when the run itself must be bounded.
+with neither set it polls indefinitely.
 
 ## Example Configurations
 
@@ -106,12 +103,13 @@ Two consequences worth tuning for:
   the queue still holds work. That also happens when another consumer — or a dead one whose
   visibility timeout has not expired — holds the group heads. `exit_on_empty` therefore
   does not treat an empty FIFO poll as drained while this task still holds receipts or
-  `GetQueueAttributes` still shows visible, in-flight, or delayed messages. After those
-  clear, the next poll either returns the next batch or a true empty. One message group is
-  still capped at `max_messages` in flight by AWS. An unbounded `join` downstream of read
-  mode keeps those receipts outstanding for the run, so the reader keeps polling rather
-  than exiting: set `duration:` (or `size:` / `number:`) on that join so records flush
-  mid-run and messages can be deleted (see the join task README).
+  `GetQueueAttributes` still shows visible, in-flight, or delayed messages. A
+  `GetQueueAttributes` error also keeps polling; set `end_after` when the run must be
+  bounded. After those clear, the next poll either returns the next batch or a true empty.
+  One message group is still capped at `max_messages` in flight by AWS. An unbounded `join`
+  downstream of read mode keeps those receipts outstanding for the run, so the reader keeps
+  polling rather than exiting: set `duration:` (or `size:` / `number:`) on that join so
+  records flush mid-run and messages can be deleted (see the join task README).
 
 ## Sample Pipelines
 
