@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	qs "github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/google/uuid"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
@@ -29,6 +31,12 @@ const (
 var (
 	awsRegionRegex = regexp.MustCompile(`^[a-z]{2}-[a-z]+-\d+$`)
 	ctx            = context.Background()
+
+	fifoDrainAttributes = []types.QueueAttributeName{
+		types.QueueAttributeNameApproximateNumberOfMessages,
+		types.QueueAttributeNameApproximateNumberOfMessagesNotVisible,
+		types.QueueAttributeNameApproximateNumberOfMessagesDelayed,
+	}
 )
 
 type sqs struct {
@@ -40,9 +48,16 @@ type sqs struct {
 	ExitOnEmpty     bool   `yaml:"exit_on_empty,omitempty" json:"exit_on_empty,omitempty"`
 	MessageGroupId  string `yaml:"message_group_id,omitempty" json:"message_group_id,omitempty"` // used for FIFO queues
 
-	client      *qs.Client
+	client      sqsClient
 	tracker     *ack.Tracker
 	outstanding atomic.Int32
+}
+
+type sqsClient interface {
+	ReceiveMessage(context.Context, *qs.ReceiveMessageInput, ...func(*qs.Options)) (*qs.ReceiveMessageOutput, error)
+	DeleteMessage(context.Context, *qs.DeleteMessageInput, ...func(*qs.Options)) (*qs.DeleteMessageOutput, error)
+	GetQueueAttributes(context.Context, *qs.GetQueueAttributesInput, ...func(*qs.Options)) (*qs.GetQueueAttributesOutput, error)
+	SendMessage(context.Context, *qs.SendMessageInput, ...func(*qs.Options)) (*qs.SendMessageOutput, error)
 }
 
 func New() (task.Task, error) {
@@ -153,7 +168,7 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 			}
 
 			if receiveMessageOutput == nil || len(receiveMessageOutput.Messages) == 0 {
-				if s.shouldExitOnEmpty() {
+				if s.shouldExitOnEmpty(ctx) {
 					fmt.Println(`Queue is empty, exiting`)
 					return nil
 				}
@@ -206,16 +221,58 @@ func (m *messageAck) Ack(failed bool) {
 
 }
 
-// FIFO withholds a group until deletes land, so an empty receive is not
-// drained while we still hold receipts.
-func (s *sqs) shouldExitOnEmpty() bool {
+// FIFO withholds a group until deletes land — including receipts held by
+// another consumer or a dead one still inside the visibility timeout — so
+// an empty receive is not drain while the queue still has messages.
+func (s *sqs) shouldExitOnEmpty(ctx context.Context) bool {
 	if !s.ExitOnEmpty {
 		return false
 	}
-	if s.isFifo() && s.outstanding.Load() > 0 {
+	if !s.isFifo() {
+		return true
+	}
+	if s.outstanding.Load() > 0 {
+		return false
+	}
+	empty, err := s.fifoQueueConfirmedEmpty(ctx)
+	if err != nil {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			fmt.Println(`GetQueueAttributes:`, err)
+		}
+		return false
+	}
+	if !empty {
+		fmt.Println(`FIFO queue still has messages, continuing`)
 		return false
 	}
 	return true
+}
+
+func (s *sqs) fifoQueueConfirmedEmpty(ctx context.Context) (bool, error) {
+	out, err := s.client.GetQueueAttributes(ctx, &qs.GetQueueAttributesInput{
+		QueueUrl:       &s.QueueURL,
+		AttributeNames: fifoDrainAttributes,
+	})
+	if err != nil {
+		return false, err
+	}
+	if out == nil {
+		return false, nil
+	}
+	for _, name := range fifoDrainAttributes {
+		raw, ok := out.Attributes[string(name)]
+		if !ok {
+			return false, nil
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return false, fmt.Errorf("%s: %w", name, err)
+		}
+		if n > 0 {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (s *sqs) isFifo() bool {
