@@ -14,7 +14,7 @@ The join task combines multiple records into a single record. It receives record
 
 Caterpillar deletes an SQS message only after every downstream task has finished with the record produced from it. A `join` task with no `size:`, `number:`, or `duration:` limit holds its buffered records until the input channel closes, so the source message stays in flight for the whole run.
 
-On a FIFO queue, an in-flight message blocks its entire message group: SQS does not deliver later messages in that group until the earlier one is deleted. An unbounded `join` on a FIFO-sourced pipeline therefore blocks the group for the run, and throughput collapses to roughly `max_messages` messages per group per run. Empty FIFO receives while receipts are held are not treated as a drained queue, so `exit_on_empty` keeps polling. Without a join flush limit the acks never settle and the run does not finish.
+On a FIFO queue, an in-flight message blocks its entire message group: SQS does not deliver later messages in that group until the earlier one is deleted. An unbounded `join` on a FIFO-sourced pipeline therefore blocks the group for the run, and throughput collapses to roughly `max_messages` messages per group per run. Empty FIFO receives are not treated as a drained queue while receipts are held or the queue still has messages, so `exit_on_empty` keeps polling. Without a join flush limit the acks never settle and the run does not finish.
 
 The queue visibility timeout is not the fix. The gate is an in-flight message, not an expired timeout. Raising the timeout keeps the message in flight longer; lowering it causes SQS to redeliver the same blocked message instead of advancing to the next one in the group.
 

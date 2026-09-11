@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	qs "github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/google/uuid"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
@@ -29,6 +31,12 @@ const (
 var (
 	awsRegionRegex = regexp.MustCompile(`^[a-z]{2}-[a-z]+-\d+$`)
 	ctx            = context.Background()
+
+	fifoDrainAttributes = []types.QueueAttributeName{
+		types.QueueAttributeNameApproximateNumberOfMessages,
+		types.QueueAttributeNameApproximateNumberOfMessagesNotVisible,
+		types.QueueAttributeNameApproximateNumberOfMessagesDelayed,
+	}
 )
 
 type sqs struct {
@@ -153,7 +161,7 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 			}
 
 			if receiveMessageOutput == nil || len(receiveMessageOutput.Messages) == 0 {
-				if s.shouldExitOnEmpty() {
+				if s.shouldExitOnEmpty(ctx) {
 					fmt.Println(`Queue is empty, exiting`)
 					return nil
 				}
@@ -206,16 +214,56 @@ func (m *messageAck) Ack(failed bool) {
 
 }
 
-// FIFO withholds a group until deletes land, so an empty receive is not
-// drained while we still hold receipts.
-func (s *sqs) shouldExitOnEmpty() bool {
+// Outstanding is this process only; FIFO also hides groups held elsewhere until VT.
+func (s *sqs) shouldExitOnEmpty(ctx context.Context) bool {
 	if !s.ExitOnEmpty {
 		return false
 	}
-	if s.isFifo() && s.outstanding.Load() > 0 {
+	if !s.isFifo() {
+		return true
+	}
+	if s.outstanding.Load() > 0 {
+		return false
+	}
+	empty, err := s.fifoQueueConfirmedEmpty(ctx)
+	if err != nil {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			fmt.Println(`GetQueueAttributes:`, err)
+		}
+		return false
+	}
+	if !empty {
+		fmt.Println(`FIFO queue still has messages, continuing`)
 		return false
 	}
 	return true
+}
+
+func (s *sqs) fifoQueueConfirmedEmpty(ctx context.Context) (bool, error) {
+	out, err := s.client.GetQueueAttributes(ctx, &qs.GetQueueAttributesInput{
+		QueueUrl:       &s.QueueURL,
+		AttributeNames: fifoDrainAttributes,
+	})
+	if err != nil {
+		return false, err
+	}
+	if out == nil {
+		return false, nil
+	}
+	for _, name := range fifoDrainAttributes {
+		raw, ok := out.Attributes[string(name)]
+		if !ok {
+			return false, nil
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return false, fmt.Errorf("%s: %w", name, err)
+		}
+		if n > 0 {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (s *sqs) isFifo() bool {
