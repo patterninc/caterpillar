@@ -118,6 +118,7 @@ There is no cap on iterations: an expression that never returns `empty` loops fo
 | `next_page` | string | - | JQ expression driving pagination; its *result* may be a URL string or an object with `endpoint`, `method`, `body`, `headers`, `context` — see [Pagination](#pagination) |
 | `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
 | `context` | map[string]string | - | JQ expressions to extract values from the response and store in record context |
+| `ignore_error` | bool | `false` | If true, request or input errors after retries are non-critical: logs a warning with method, URL, and error, skips the record, and continues |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
 `timeout` and `retry_delay` take a string with a unit (`90s`, `500ms`, `2m`); a bare number
