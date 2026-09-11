@@ -113,6 +113,7 @@ continuing instead of returning. Each decides that from its own field, documente
 README:
 
 - **`jq`** — a query error on a single record; non-critical until `ignore_error: false`.
+- **`http`** — an HTTP request or input failure; non-critical from `ignore_error: true`.
 - **`xpath`** — a container XPath matching nothing; non-critical until `ignore_missing: false`.
 - **`heimdall`** — a per-record job failure in destination mode; non-critical from
   `skip_on_error: true`.

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +49,7 @@ type httpCore struct {
 	Timeout          duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	MaxRetries       int               `yaml:"max_retries,omitempty" json:"max_retries,omitempty"`
 	RetryDelay       duration.Duration `yaml:"retry_delay,omitempty" json:"retry_delay,omitempty"`
+	IgnoreError      bool              `yaml:"ignore_error,omitempty" json:"ignore_error,omitempty"`
 	client           *http.Client
 	clientOnce       sync.Once
 }
@@ -107,6 +109,7 @@ func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 		Timeout:          h.Timeout,
 		MaxRetries:       h.MaxRetries,
 		RetryDelay:       h.RetryDelay,
+		IgnoreError:      h.IgnoreError,
 	}
 
 	if err := json.Unmarshal(data, newHttp); err != nil {
@@ -129,6 +132,15 @@ func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 
 }
 
+func cleanURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	u.User = nil
+	return u.String()
+}
+
 func (h *httpCore) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
 	// if we have input, treat each value as a URL and try to get data from it...
@@ -142,9 +154,18 @@ func (h *httpCore) Run(input <-chan *record.Record, output chan<- *record.Record
 			// let's get our http object
 			newHttp, err := h.newFromInput(rc.Data)
 			if err != nil {
+				if h.IgnoreError {
+					fmt.Printf("WARN: %s: skipping record %d: %s\n", h.GetName(), rc.ID, err)
+					ack.Release(rc.Context)
+					continue
+				}
 				return ack.Rejected(rc.Context, err)
 			}
 			if err := newHttp.processItem(rc, output); err != nil {
+				if newHttp.IgnoreError {
+					ack.Release(rc.Context)
+					continue
+				}
 				return ack.Rejected(rc.Context, err)
 			}
 
@@ -155,7 +176,13 @@ func (h *httpCore) Run(input <-chan *record.Record, output chan<- *record.Record
 	}
 
 	// now we'll process the task configured item itself...
-	return h.processItem(nil, output)
+	if err := h.processItem(nil, output); err != nil {
+		if h.IgnoreError {
+			return nil
+		}
+		return err
+	}
+	return nil
 
 }
 
@@ -174,6 +201,14 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 		rc = &record.Record{Context: context.Background()}
 	}
 
+	handleErr := func(err error, failedEndpoint string) error {
+		if h.IgnoreError {
+			fmt.Printf("WARN: %s: skipping record %d %s %s: %s\n", h.GetName(), rc.ID, h.Method, cleanURL(failedEndpoint), err)
+			return err
+		}
+		return err
+	}
+
 	// TODO: perhaps expose the starting page number as a parameter for the task
 	pageID := 1
 
@@ -182,7 +217,7 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 		result, err := h.call(endpoint, rc)
 
 		if err != nil {
-			return err
+			return handleErr(err, endpoint)
 		}
 
 		if output != nil {
@@ -206,18 +241,18 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 
 		nextPage, err := h.NextPage.GetJQ(rc)
 		if err != nil {
-			return err
+			return handleErr(err, endpoint)
 		}
 		nextPageInput, err := json.Marshal(result)
 		if err != nil {
-			return err
+			return handleErr(err, endpoint)
 		}
 		nextPageData, err := nextPage.Execute(nextPageInput, map[string]any{
 			`page_id`: pageID,
 		})
 
 		if err != nil {
-			return err
+			return handleErr(err, endpoint)
 		}
 
 		if nextPageData == nil {
