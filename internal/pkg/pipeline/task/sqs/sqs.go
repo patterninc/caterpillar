@@ -51,6 +51,7 @@ type sqs struct {
 	QueueURL        string       `yaml:"queue_url" json:"queue_url" validate:"required"`
 	Concurrency     int          `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
 	MaxMessages     int32        `yaml:"max_messages,omitempty" json:"max_messages,omitempty"`
+	MaxRecords      int          `yaml:"max_records,omitempty" json:"max_records,omitempty" validate:"omitempty,gte=0"`
 	WaitTimeSeconds int          `yaml:"wait_time_seconds,omitempty" json:"wait_time_seconds,omitempty"`
 	ExitOnEmpty     bool         `yaml:"exit_on_empty,omitempty" json:"exit_on_empty,omitempty"`
 	MessageGroupId  string       `yaml:"message_group_id,omitempty" json:"message_group_id,omitempty"` // used for FIFO queues
@@ -153,6 +154,7 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 		defer cancel()
 	}
 
+	recordsRead := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -189,21 +191,23 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 
 				if output == nil {
 					s.deleteMessage(m.MessageId, m.ReceiptHandle)
-					continue
-				}
-
-				if s.Delivery == deliveryAtMostOnce {
+				} else if s.Delivery == deliveryAtMostOnce {
 					s.SendData(ctx, []byte(*m.Body), output)
 					del := ack.New()
 					del.AddBranch(1)
 					del.Done()
 					s.enqueueDelete(m, del)
-					continue
+				} else {
+					msgAck := ack.New()
+					s.SendData(ack.WithContext(ctx, msgAck), []byte(*m.Body), output)
+					s.enqueueDelete(m, msgAck)
 				}
 
-				msgAck := ack.New()
-				s.SendData(ack.WithContext(ctx, msgAck), []byte(*m.Body), output)
-				s.enqueueDelete(m, msgAck)
+				recordsRead++
+				if s.MaxRecords > 0 && recordsRead >= s.MaxRecords {
+					fmt.Printf("SQS max_records (%d) reached for queue %s, stopping reader\n", s.MaxRecords, s.QueueURL)
+					return nil
+				}
 			}
 		}
 	}
