@@ -50,7 +50,6 @@ type sqs struct {
 	MessageGroupId  string `yaml:"message_group_id,omitempty" json:"message_group_id,omitempty"` // used for FIFO queues
 
 	client      *qs.Client
-	receive     func(context.Context, *qs.ReceiveMessageInput, ...func(*qs.Options)) (*qs.ReceiveMessageOutput, error) // test fake; nil uses client
 	tracker     *ack.Tracker
 	outstanding atomic.Int32
 }
@@ -138,11 +137,6 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 		defer cancel()
 	}
 
-	recv := s.receive
-	if recv == nil {
-		recv = s.client.ReceiveMessage
-	}
-
 	recordsRead := 0
 	for {
 		select {
@@ -151,7 +145,7 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 			return nil
 
 		default:
-			receiveMessageOutput, err := recv(ctx, &qs.ReceiveMessageInput{
+			receiveMessageOutput, err := s.client.ReceiveMessage(ctx, &qs.ReceiveMessageInput{
 				QueueUrl:            &s.QueueURL,
 				MaxNumberOfMessages: s.MaxMessages,
 				WaitTimeSeconds:     int32(s.WaitTimeSeconds),
