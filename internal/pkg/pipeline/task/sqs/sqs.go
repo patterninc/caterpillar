@@ -28,6 +28,21 @@ const (
 	defaultRegion          = "us-west-2"
 )
 
+type deliveryMode string
+
+const (
+	deliveryAtMostOnce  deliveryMode = "at-most-once"
+	deliveryAtLeastOnce deliveryMode = "at-least-once"
+	deliveryExactlyOnce deliveryMode = "exactly-once"
+)
+
+type sqsClient interface {
+	ReceiveMessage(context.Context, *qs.ReceiveMessageInput, ...func(*qs.Options)) (*qs.ReceiveMessageOutput, error)
+	DeleteMessage(context.Context, *qs.DeleteMessageInput, ...func(*qs.Options)) (*qs.DeleteMessageOutput, error)
+	GetQueueAttributes(context.Context, *qs.GetQueueAttributesInput, ...func(*qs.Options)) (*qs.GetQueueAttributesOutput, error)
+	SendMessage(context.Context, *qs.SendMessageInput, ...func(*qs.Options)) (*qs.SendMessageOutput, error)
+}
+
 var (
 	awsRegionRegex = regexp.MustCompile(`^[a-z]{2}-[a-z]+-\d+$`)
 	ctx            = context.Background()
@@ -41,14 +56,15 @@ var (
 
 type sqs struct {
 	task.ServerBase `yaml:",inline" json:",inline"`
-	QueueURL        string `yaml:"queue_url" json:"queue_url" validate:"required"`
-	Concurrency     int    `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
-	MaxMessages     int32  `yaml:"max_messages,omitempty" json:"max_messages,omitempty"`
-	WaitTimeSeconds int    `yaml:"wait_time_seconds,omitempty" json:"wait_time_seconds,omitempty"`
-	ExitOnEmpty     bool   `yaml:"exit_on_empty,omitempty" json:"exit_on_empty,omitempty"`
-	MessageGroupId  string `yaml:"message_group_id,omitempty" json:"message_group_id,omitempty"` // used for FIFO queues
+	QueueURL        string       `yaml:"queue_url" json:"queue_url" validate:"required"`
+	Concurrency     int          `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
+	MaxMessages     int32        `yaml:"max_messages,omitempty" json:"max_messages,omitempty"`
+	WaitTimeSeconds int          `yaml:"wait_time_seconds,omitempty" json:"wait_time_seconds,omitempty"`
+	ExitOnEmpty     bool         `yaml:"exit_on_empty,omitempty" json:"exit_on_empty,omitempty"`
+	MessageGroupId  string       `yaml:"message_group_id,omitempty" json:"message_group_id,omitempty"` // used for FIFO queues
+	Delivery        deliveryMode `yaml:"delivery,omitempty" json:"delivery,omitempty"`
 
-	client      *qs.Client
+	client      sqsClient
 	tracker     *ack.Tracker
 	outstanding atomic.Int32
 }
@@ -70,6 +86,20 @@ func (s *sqs) Init() error {
 		return fmt.Errorf("queue_url is required")
 	}
 
+	if s.Delivery == "" {
+		s.Delivery = deliveryAtLeastOnce
+	}
+
+	switch s.Delivery {
+	case deliveryAtMostOnce:
+	case deliveryAtLeastOnce:
+		s.tracker = ack.NewTracker(s.Concurrency)
+	case deliveryExactlyOnce:
+		return fmt.Errorf("delivery mode %q is not supported: SQS does not support exactly-once consumption", s.Delivery)
+	default:
+		return fmt.Errorf("invalid delivery mode %q: must be %q or %q", s.Delivery, deliveryAtMostOnce, deliveryAtLeastOnce)
+	}
+
 	region := s.extractRegionFromQueueURL()
 	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
 	if err != nil {
@@ -77,7 +107,6 @@ func (s *sqs) Init() error {
 	}
 
 	s.client = qs.NewFromConfig(awsConfig)
-	s.tracker = ack.NewTracker(s.Concurrency)
 
 	return nil
 }
@@ -170,10 +199,14 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 
 			for _, m := range receiveMessageOutput.Messages {
 
-				// nothing to forward to, so there's no downstream ack to wait
-				// for: delete the receipt right away.
 				if output == nil {
 					s.deleteMessage(m.MessageId, m.ReceiptHandle)
+					continue
+				}
+
+				if s.Delivery == deliveryAtMostOnce {
+					s.deleteMessage(m.MessageId, m.ReceiptHandle)
+					s.SendData(ctx, []byte(*m.Body), output)
 					continue
 				}
 
