@@ -28,6 +28,13 @@ const (
 	defaultRegion          = "us-west-2"
 )
 
+type deliveryMode string
+
+const (
+	deliveryAtMostOnce  deliveryMode = "at-most-once"
+	deliveryAtLeastOnce deliveryMode = "at-least-once"
+)
+
 var (
 	awsRegionRegex = regexp.MustCompile(`^[a-z]{2}-[a-z]+-\d+$`)
 	ctx            = context.Background()
@@ -41,13 +48,14 @@ var (
 
 type sqs struct {
 	task.ServerBase `yaml:",inline" json:",inline"`
-	QueueURL        string `yaml:"queue_url" json:"queue_url" validate:"required"`
-	Concurrency     int    `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
-	MaxMessages     int32  `yaml:"max_messages,omitempty" json:"max_messages,omitempty"`
-	MaxRecords      int    `yaml:"max_records,omitempty" json:"max_records,omitempty" validate:"omitempty,gte=0"`
-	WaitTimeSeconds int    `yaml:"wait_time_seconds,omitempty" json:"wait_time_seconds,omitempty"`
-	ExitOnEmpty     bool   `yaml:"exit_on_empty,omitempty" json:"exit_on_empty,omitempty"`
-	MessageGroupId  string `yaml:"message_group_id,omitempty" json:"message_group_id,omitempty"` // used for FIFO queues
+	QueueURL        string       `yaml:"queue_url" json:"queue_url" validate:"required"`
+	Concurrency     int          `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
+	MaxMessages     int32        `yaml:"max_messages,omitempty" json:"max_messages,omitempty"`
+	MaxRecords      int          `yaml:"max_records,omitempty" json:"max_records,omitempty" validate:"omitempty,gte=0"`
+	WaitTimeSeconds int          `yaml:"wait_time_seconds,omitempty" json:"wait_time_seconds,omitempty"`
+	ExitOnEmpty     bool         `yaml:"exit_on_empty,omitempty" json:"exit_on_empty,omitempty"`
+	MessageGroupId  string       `yaml:"message_group_id,omitempty" json:"message_group_id,omitempty"` // used for FIFO queues
+	Delivery        deliveryMode `yaml:"delivery,omitempty" json:"delivery,omitempty"`
 
 	client      *qs.Client
 	tracker     *ack.Tracker
@@ -71,6 +79,16 @@ func (s *sqs) Init() error {
 		return fmt.Errorf("queue_url is required")
 	}
 
+	switch s.Delivery {
+	case "", deliveryAtLeastOnce:
+		s.Delivery = deliveryAtLeastOnce
+	case deliveryAtMostOnce:
+	default:
+		return fmt.Errorf("invalid delivery mode %q: must be %q or %q", s.Delivery, deliveryAtMostOnce, deliveryAtLeastOnce)
+	}
+
+	s.tracker = ack.NewTracker(s.Concurrency)
+
 	region := s.extractRegionFromQueueURL()
 	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
 	if err != nil {
@@ -78,7 +96,6 @@ func (s *sqs) Init() error {
 	}
 
 	s.client = qs.NewFromConfig(awsConfig)
-	s.tracker = ack.NewTracker(s.Concurrency)
 
 	return nil
 }
@@ -172,20 +189,18 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 
 			for _, m := range receiveMessageOutput.Messages {
 
-				// nothing to forward to, so there's no downstream ack to wait
-				// for: delete the receipt right away.
 				if output == nil {
 					s.deleteMessage(m.MessageId, m.ReceiptHandle)
+				} else if s.Delivery == deliveryAtMostOnce {
+					s.SendData(ctx, []byte(*m.Body), output)
+					del := ack.New()
+					del.AddBranch(1)
+					del.Done()
+					s.enqueueDelete(m, del)
 				} else {
 					msgAck := ack.New()
 					s.SendData(ack.WithContext(ctx, msgAck), []byte(*m.Body), output)
-
-					s.outstanding.Add(1)
-					s.tracker.Track(msgAck, &messageAck{
-						sqs:           s,
-						messageId:     m.MessageId,
-						receiptHandle: m.ReceiptHandle,
-					})
+					s.enqueueDelete(m, msgAck)
 				}
 
 				recordsRead++
@@ -197,6 +212,15 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 		}
 	}
 
+}
+
+func (s *sqs) enqueueDelete(m types.Message, a *ack.Ack) {
+	s.outstanding.Add(1)
+	s.tracker.Track(a, &messageAck{
+		sqs:           s,
+		messageId:     m.MessageId,
+		receiptHandle: m.ReceiptHandle,
+	})
 }
 
 // messageAck acknowledges one received message on behalf of ack.Tracker.
