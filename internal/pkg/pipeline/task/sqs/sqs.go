@@ -33,15 +33,7 @@ type deliveryMode string
 const (
 	deliveryAtMostOnce  deliveryMode = "at-most-once"
 	deliveryAtLeastOnce deliveryMode = "at-least-once"
-	deliveryExactlyOnce deliveryMode = "exactly-once"
 )
-
-type sqsClient interface {
-	ReceiveMessage(context.Context, *qs.ReceiveMessageInput, ...func(*qs.Options)) (*qs.ReceiveMessageOutput, error)
-	DeleteMessage(context.Context, *qs.DeleteMessageInput, ...func(*qs.Options)) (*qs.DeleteMessageOutput, error)
-	GetQueueAttributes(context.Context, *qs.GetQueueAttributesInput, ...func(*qs.Options)) (*qs.GetQueueAttributesOutput, error)
-	SendMessage(context.Context, *qs.SendMessageInput, ...func(*qs.Options)) (*qs.SendMessageOutput, error)
-}
 
 var (
 	awsRegionRegex = regexp.MustCompile(`^[a-z]{2}-[a-z]+-\d+$`)
@@ -64,7 +56,7 @@ type sqs struct {
 	MessageGroupId  string       `yaml:"message_group_id,omitempty" json:"message_group_id,omitempty"` // used for FIFO queues
 	Delivery        deliveryMode `yaml:"delivery,omitempty" json:"delivery,omitempty"`
 
-	client      sqsClient
+	client      *qs.Client
 	tracker     *ack.Tracker
 	outstanding atomic.Int32
 }
@@ -86,16 +78,11 @@ func (s *sqs) Init() error {
 		return fmt.Errorf("queue_url is required")
 	}
 
-	if s.Delivery == "" {
-		s.Delivery = deliveryAtLeastOnce
-	}
-
 	switch s.Delivery {
-	case deliveryAtMostOnce:
-	case deliveryAtLeastOnce:
+	case "", deliveryAtLeastOnce:
+		s.Delivery = deliveryAtLeastOnce
 		s.tracker = ack.NewTracker(s.Concurrency)
-	case deliveryExactlyOnce:
-		return fmt.Errorf("delivery mode %q is not supported: SQS does not support exactly-once consumption", s.Delivery)
+	case deliveryAtMostOnce:
 	default:
 		return fmt.Errorf("invalid delivery mode %q: must be %q or %q", s.Delivery, deliveryAtMostOnce, deliveryAtLeastOnce)
 	}

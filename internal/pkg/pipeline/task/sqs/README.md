@@ -24,7 +24,7 @@ The task automatically determines its mode based on the presence of input/output
 | `exit_on_empty` | bool | `false` | Exit when a receive returns no messages. FIFO: empty poll is not drain while this task holds receipts or the queue still has visible, in-flight, or delayed messages. |
 | `end_after` | duration | - | Stop polling after this much time (read mode); e.g. `5m` |
 | `message_group_id` | string | - | Message group ID for FIFO queues |
-| `delivery` | string | `at-least-once` | Delivery guarantee in read mode: `at-least-once` (delete receipt only after downstream completes) or `at-most-once` (delete receipt immediately on receive). `exactly-once` is not supported. |
+| `delivery` | string | `at-least-once` | Read mode: `at-least-once` deletes after downstream finishes; `at-most-once` deletes on receive. |
 | `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
 | `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
@@ -71,20 +71,15 @@ tasks:
     queue_url: {{ env "SQS_QUEUE_URL" }}
 ```
 
-## Message Acknowledgment and Delivery Modes
+## Message Acknowledgment
 
-In read mode, `delivery` controls when SQS receipts are deleted:
+When reading from a queue, a message's receipt is deleted only once every downstream task
+has finished with the record produced from it (`delivery: at-least-once`, the default). A task
+that returns an error while holding a record leaves the receipt alone, so SQS redelivers the
+message after the visibility timeout rather than losing it. Delivery is therefore at-least-once:
+a pipeline may see a message more than once. `delivery: at-most-once` deletes the receipt on
+receive instead, so FIFO groups are not blocked by downstream work; a crash can lose the message.
 
-- **`at-least-once` (default):** A message's receipt is deleted only once every downstream task has finished
-  with the record produced from it. A task returning an error leaves the receipt alone so SQS
-  redelivers it after visibility timeout. On FIFO queues, later messages in the same group wait
-  for that delete.
-- **`at-most-once`:** Receipts are deleted immediately upon receive before records are
-  passed downstream. Crashing during processing may lose messages, but FIFO message groups are
-  unblocked immediately and downstream latency does not bottle up the group.
-- **`exactly-once`:** SQS does not support exactly-once consumption; specifying this fails at startup.
-
-When `delivery` is `at-least-once` (the default), errors returned by tasks leave receipts intact for redelivery.
 That covers failures, not drops. A task configured to skip a bad record counts it as
 finished, so the receipt is deleted and the message does not come back — and `jq`'s
 `ignore_error` and `xpath`'s `ignore_missing` both default to skipping. See
