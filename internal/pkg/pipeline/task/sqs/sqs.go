@@ -44,11 +44,13 @@ type sqs struct {
 	QueueURL        string `yaml:"queue_url" json:"queue_url" validate:"required"`
 	Concurrency     int    `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
 	MaxMessages     int32  `yaml:"max_messages,omitempty" json:"max_messages,omitempty"`
+	MaxRecords      int    `yaml:"max_records,omitempty" json:"max_records,omitempty" validate:"omitempty,gte=0"`
 	WaitTimeSeconds int    `yaml:"wait_time_seconds,omitempty" json:"wait_time_seconds,omitempty"`
 	ExitOnEmpty     bool   `yaml:"exit_on_empty,omitempty" json:"exit_on_empty,omitempty"`
 	MessageGroupId  string `yaml:"message_group_id,omitempty" json:"message_group_id,omitempty"` // used for FIFO queues
 
 	client      *qs.Client
+	receive     func(context.Context, *qs.ReceiveMessageInput, ...func(*qs.Options)) (*qs.ReceiveMessageOutput, error) // test fake; nil uses client
 	tracker     *ack.Tracker
 	outstanding atomic.Int32
 }
@@ -136,6 +138,12 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 		defer cancel()
 	}
 
+	recv := s.receive
+	if recv == nil {
+		recv = s.client.ReceiveMessage
+	}
+
+	recordsRead := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -143,9 +151,16 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 			return nil
 
 		default:
-			receiveMessageOutput, err := s.client.ReceiveMessage(ctx, &qs.ReceiveMessageInput{
+			batch := s.MaxMessages
+			if s.MaxRecords > 0 {
+				if remaining := s.MaxRecords - recordsRead; remaining < int(batch) {
+					batch = int32(remaining)
+				}
+			}
+
+			receiveMessageOutput, err := recv(ctx, &qs.ReceiveMessageInput{
 				QueueUrl:            &s.QueueURL,
-				MaxNumberOfMessages: s.MaxMessages,
+				MaxNumberOfMessages: batch,
 				WaitTimeSeconds:     int32(s.WaitTimeSeconds),
 			})
 
@@ -174,18 +189,23 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 				// for: delete the receipt right away.
 				if output == nil {
 					s.deleteMessage(m.MessageId, m.ReceiptHandle)
-					continue
+				} else {
+					msgAck := ack.New()
+					s.SendData(ack.WithContext(ctx, msgAck), []byte(*m.Body), output)
+
+					s.outstanding.Add(1)
+					s.tracker.Track(msgAck, &messageAck{
+						sqs:           s,
+						messageId:     m.MessageId,
+						receiptHandle: m.ReceiptHandle,
+					})
 				}
 
-				msgAck := ack.New()
-				s.SendData(ack.WithContext(ctx, msgAck), []byte(*m.Body), output)
-
-				s.outstanding.Add(1)
-				s.tracker.Track(msgAck, &messageAck{
-					sqs:           s,
-					messageId:     m.MessageId,
-					receiptHandle: m.ReceiptHandle,
-				})
+				recordsRead++
+				if s.MaxRecords > 0 && recordsRead >= s.MaxRecords {
+					fmt.Printf("SQS max_records (%d) reached for queue %s, stopping reader\n", s.MaxRecords, s.QueueURL)
+					return nil
+				}
 			}
 		}
 	}

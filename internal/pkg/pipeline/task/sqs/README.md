@@ -19,7 +19,8 @@ The task automatically determines its mode based on the presence of input/output
 | `type` | string | `sqs` | Must be "sqs" |
 | `queue_url` | string | - | SQS queue URL (required) |
 | `concurrency` | int | `10` | Number of concurrent workers that acknowledge (delete) fully-processed messages |
-| `max_messages` | int | `10` | Maximum number of messages to receive per batch |
+| `max_messages` | int | `10` | Per poll: max messages per `ReceiveMessage` (AWS cap 10) |
+| `max_records` | int | `0` (unlimited) | Read-mode cap on records forwarded downstream (per worker). `0` = unlimited. |
 | `wait_time_seconds` | int | `10` | Long polling wait time in seconds |
 | `exit_on_empty` | bool | `false` | Exit when a receive returns no messages. FIFO: empty poll is not drain while this task holds receipts or the queue still has visible, in-flight, or delayed messages. |
 | `end_after` | duration | - | Stop polling after this much time (read mode); e.g. `5m` |
@@ -28,8 +29,8 @@ The task automatically determines its mode based on the presence of input/output
 | `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
-In read mode the task polls until the queue drains (`exit_on_empty`) or `end_after` elapses;
-with neither set it polls indefinitely.
+In read mode the task polls until the queue drains (`exit_on_empty`), `end_after` elapses, or `max_records` is reached;
+with none of those set it polls indefinitely.
 
 ## Example Configurations
 
