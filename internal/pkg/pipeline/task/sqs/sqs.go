@@ -151,16 +151,9 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 			return nil
 
 		default:
-			batch := s.MaxMessages
-			if s.MaxRecords > 0 {
-				if remaining := s.MaxRecords - recordsRead; remaining < int(batch) {
-					batch = int32(remaining)
-				}
-			}
-
 			receiveMessageOutput, err := recv(ctx, &qs.ReceiveMessageInput{
 				QueueUrl:            &s.QueueURL,
-				MaxNumberOfMessages: batch,
+				MaxNumberOfMessages: s.MaxMessages,
 				WaitTimeSeconds:     int32(s.WaitTimeSeconds),
 			})
 
