@@ -18,7 +18,7 @@ The task automatically determines its mode based on the presence of input/output
 | `name` | string | - | Task name for identification |
 | `type` | string | `sqs` | Must be "sqs" |
 | `queue_url` | string | - | SQS queue URL (required) |
-| `concurrency` | int | `10` | Number of concurrent workers that acknowledge (delete) fully-processed messages |
+| `concurrency` | int | `10` | Number of concurrent `DeleteMessage` calls |
 | `max_messages` | int | `10` | Maximum number of messages to receive per batch |
 | `wait_time_seconds` | int | `10` | Long polling wait time in seconds |
 | `exit_on_empty` | bool | `false` | Exit when a receive returns no messages. FIFO: empty poll is not drain while this task holds receipts or the queue still has visible, in-flight, or delayed messages. |
@@ -77,8 +77,9 @@ When reading from a queue, a message's receipt is deleted only once every downst
 has finished with the record produced from it (`delivery: at-least-once`, the default). A task
 that returns an error while holding a record leaves the receipt alone, so SQS redelivers the
 message after the visibility timeout rather than losing it. Delivery is therefore at-least-once:
-a pipeline may see a message more than once. `delivery: at-most-once` deletes the receipt on
-receive instead, so FIFO groups are not blocked by downstream work; a crash can lose the message.
+a pipeline may see a message more than once. `delivery: at-most-once` forwards the record
+without an ack and deletes on the same `concurrency` pool, so FIFO groups are not blocked by
+downstream work; a crash can lose the message.
 
 That covers failures, not drops. A task configured to skip a bad record counts it as
 finished, so the receipt is deleted and the message does not come back — and `jq`'s

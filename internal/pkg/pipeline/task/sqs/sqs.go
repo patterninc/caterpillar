@@ -81,11 +81,12 @@ func (s *sqs) Init() error {
 	switch s.Delivery {
 	case "", deliveryAtLeastOnce:
 		s.Delivery = deliveryAtLeastOnce
-		s.tracker = ack.NewTracker(s.Concurrency)
 	case deliveryAtMostOnce:
 	default:
 		return fmt.Errorf("invalid delivery mode %q: must be %q or %q", s.Delivery, deliveryAtMostOnce, deliveryAtLeastOnce)
 	}
+
+	s.tracker = ack.NewTracker(s.Concurrency)
 
 	region := s.extractRegionFromQueueURL()
 	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
@@ -192,24 +193,30 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) err
 				}
 
 				if s.Delivery == deliveryAtMostOnce {
-					s.deleteMessage(m.MessageId, m.ReceiptHandle)
 					s.SendData(ctx, []byte(*m.Body), output)
+					del := ack.New()
+					del.AddBranch(1)
+					del.Done()
+					s.enqueueDelete(m, del)
 					continue
 				}
 
 				msgAck := ack.New()
 				s.SendData(ack.WithContext(ctx, msgAck), []byte(*m.Body), output)
-
-				s.outstanding.Add(1)
-				s.tracker.Track(msgAck, &messageAck{
-					sqs:           s,
-					messageId:     m.MessageId,
-					receiptHandle: m.ReceiptHandle,
-				})
+				s.enqueueDelete(m, msgAck)
 			}
 		}
 	}
 
+}
+
+func (s *sqs) enqueueDelete(m types.Message, a *ack.Ack) {
+	s.outstanding.Add(1)
+	s.tracker.Track(a, &messageAck{
+		sqs:           s,
+		messageId:     m.MessageId,
+		receiptHandle: m.ReceiptHandle,
+	})
 }
 
 // messageAck acknowledges one received message on behalf of ack.Tracker.
