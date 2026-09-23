@@ -6,4 +6,4 @@ tasks:
     fail_on_error: true
   - name: write_to_local
     type: file
-    path: ./output/{{ context "CATERPILLAR_FILE_NAME_WRITE" }}
+    path: ./output/{{ macro "uuid" }}.txt
