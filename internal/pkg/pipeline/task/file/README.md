@@ -37,7 +37,7 @@ In read mode, two values are stored in each record's context:
 | `tags` | map[string]string | - | S3 **write** only: object tags applied on `PutObject`. Ignored for local paths. Values support macros and context templates. See [S3 object tags](#s3-object-tags). |
 | `success_file` | bool | `false` | Whether to create a success file after writing |
 | `success_file_name` | string | `_SUCCESS` | Name of the success file |
-| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `task_concurrency` | int | `1` | Write: competing-consumer workers. Read: parallel file fetches (the pipeline still runs a single source worker so files are not duplicated) |
 | `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
@@ -176,6 +176,7 @@ With the inputs above, the writes land at:
 
 - `test/pipelines/file.yaml` - Basic file operations
 - `test/pipelines/context_test.yaml` - File task with context variables
+- `test/pipelines/file_concurrency_test.yaml` - Concurrent read of 100 nested files (`task_concurrency: 3`)
 
 ## Use Cases
 

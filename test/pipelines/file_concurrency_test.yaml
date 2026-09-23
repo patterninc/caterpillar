@@ -1,11 +1,9 @@
 tasks:
-  - name: read_glob_concurrently
+  - name: read_nested_concurrently
     type: file
-    path: test/pipelines/*.txt
-    task_concurrency: 4
-  - name: split_to_lines
-    type: split
-  - name: write_concurrently
+    path: test/pipelines/file_concurrency/**/*.txt
+    task_concurrency: 3
+    fail_on_error: true
+  - name: write_to_local
     type: file
-    path: test/pipelines/output/{{ macro "uuid" }}.txt
-    task_concurrency: 8
+    path: ./output/{{ context "CATERPILLAR_FILE_NAME_WRITE" }}
