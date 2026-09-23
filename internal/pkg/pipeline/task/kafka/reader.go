@@ -254,9 +254,10 @@ func (r *reader) readMessage(timeout time.Duration) (*ckafka.Message, error) {
 	return r.consumer.ReadMessage(timeout)
 }
 
+// storeOffset and pausePartition skip consumerMu: both are thread-safe in
+// librdkafka, and queuing each deferred ack behind a blocking heartbeat poll
+// caps settling at a few acks per second.
 func (r *reader) storeOffset(partition int32, offset int64) error {
-	r.consumerMu.Lock()
-	defer r.consumerMu.Unlock()
 	topic := r.k.Topic
 	_, err := r.consumer.StoreOffsets([]ckafka.TopicPartition{{
 		Topic:     &topic,
@@ -267,8 +268,6 @@ func (r *reader) storeOffset(partition int32, offset int64) error {
 }
 
 func (r *reader) pausePartition(partition int32) error {
-	r.consumerMu.Lock()
-	defer r.consumerMu.Unlock()
 	topic := r.k.Topic
 	return r.consumer.Pause([]ckafka.TopicPartition{{
 		Topic:     &topic,
