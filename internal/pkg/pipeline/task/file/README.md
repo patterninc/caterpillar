@@ -37,7 +37,7 @@ In read mode, two values are stored in each record's context:
 | `tags` | map[string]string | - | S3 **write** only: object tags applied on `PutObject`. Ignored for local paths. Values support macros and context templates. See [S3 object tags](#s3-object-tags). |
 | `success_file` | bool | `false` | Whether to create a success file after writing |
 | `success_file_name` | string | `_SUCCESS` | Name of the success file |
-| `task_concurrency` | int | `1` | Write: competing-consumer workers. Read: parallel file fetches (the pipeline still runs a single source worker so files are not duplicated) |
+| `task_concurrency` | int | `1` | Write: competing-consumer workers. Read: parallel file fetches |
 | `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
