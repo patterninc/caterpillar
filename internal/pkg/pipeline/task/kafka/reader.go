@@ -254,9 +254,8 @@ func (r *reader) readMessage(timeout time.Duration) (*ckafka.Message, error) {
 	return r.consumer.ReadMessage(timeout)
 }
 
+// Safe to call while heartbeatPoll holds consumerMu; a lock here waits out that poll.
 func (r *reader) storeOffset(partition int32, offset int64) error {
-	r.consumerMu.Lock()
-	defer r.consumerMu.Unlock()
 	topic := r.k.Topic
 	_, err := r.consumer.StoreOffsets([]ckafka.TopicPartition{{
 		Topic:     &topic,
@@ -266,9 +265,8 @@ func (r *reader) storeOffset(partition int32, offset int64) error {
 	return err
 }
 
+// Safe to call while heartbeatPoll holds consumerMu; a lock here waits out that poll.
 func (r *reader) pausePartition(partition int32) error {
-	r.consumerMu.Lock()
-	defer r.consumerMu.Unlock()
 	topic := r.k.Topic
 	return r.consumer.Pause([]ckafka.TopicPartition{{
 		Topic:     &topic,
