@@ -137,21 +137,66 @@ func (f *file) readFile(output chan<- *record.Record) error {
 		return nil
 	}
 
-	// set the error group limit to the minimum of the task concurrency and the number of paths
+	// One list of paths, then one task instance per worker. SendData locks the
+	// task for the whole context evaluation, so workers that share f wait on
+	// each other. Each instance reads only the paths assigned to it.
+	workers := min(f.GetTaskConcurrency(), len(paths))
 	g, gctx := errgroup.WithContext(context.Background())
-	g.SetLimit(min(f.GetTaskConcurrency(), len(paths)))
-
-	// iterate over the paths and emit the file
-	for _, path := range paths {
-		if gctx.Err() != nil {
-			break
-		}
-		g.Go(func() error {
-			return f.emitFile(reader, path, output)
-		})
+	for _, assigned := range partitionPaths(paths, workers) {
+		g.Go(readAssigned(f.readWorker(), reader, assigned, output, gctx))
 	}
 
 	return g.Wait()
+
+}
+
+// readWorker is a copy of f with its own record counter and lock.
+func (f *file) readWorker() *file {
+
+	return &file{
+		Base: task.Base{
+			Name:            f.Name,
+			Type:            f.Type,
+			FailOnError:     f.FailOnError,
+			TaskConcurrency: f.TaskConcurrency,
+			Context:         f.Context,
+		},
+		Path:            f.Path,
+		SuccessFile:     f.SuccessFile,
+		SuccessFileName: f.SuccessFileName,
+		Region:          f.Region,
+		StorageClass:    f.StorageClass,
+		Tags:            f.Tags,
+		Delimiter:       f.Delimiter,
+	}
+
+}
+
+func readAssigned(worker *file, r reader, paths []string, output chan<- *record.Record, gctx context.Context) func() error {
+
+	return func() error {
+		for _, path := range paths {
+			if err := gctx.Err(); err != nil {
+				return err
+			}
+			if err := worker.emitFile(r, path, output); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+}
+
+// partitionPaths deals paths out round-robin so each path is owned by one worker.
+func partitionPaths(paths []string, workers int) [][]string {
+
+	chunks := make([][]string, workers)
+	for i, path := range paths {
+		chunks[i%workers] = append(chunks[i%workers], path)
+	}
+
+	return chunks
 
 }
 
