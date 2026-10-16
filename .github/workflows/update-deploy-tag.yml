@@ -1,0 +1,36 @@
+name: Update Last-Deploy Tag
+
+# Moves a last-deploy-<env> tag to the released commit after 'Release'
+# succeeds — the same tracking mechanism SRE-3491 added to the reusable
+# ecs-deployment.yml / terraform-ci-cd.yml workflows, reproduced standalone
+# here because caterpillar has no ECS/AWS deployment (it releases a Go
+# binary + Docker Hub image), so this falls back to tagging on the build
+# workflow per SRE-3523's "if deployment not there then on build" fallback.
+#
+# Uses GITHUB_TOKEN rather than GHA_RUNNER_TOKEN: this repo is public, and
+# GHA_RUNNER_TOKEN is an org secret scoped to private/internal repos only,
+# so it isn't available here. GITHUB_TOKEN + contents:write is sufficient
+# since this only pushes a tag within the same repo.
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+
+jobs:
+  update-deploy-tag:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout at the released commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Move last-deploy-prod tag
+        run: |
+          TAG_NAME="last-deploy-prod"
+          echo "Moving ${TAG_NAME} to ${{ github.event.workflow_run.head_sha }}"
+          git tag -f "$TAG_NAME" "${{ github.event.workflow_run.head_sha }}"
+          git push origin "refs/tags/$TAG_NAME" --force
