@@ -22,7 +22,7 @@ The system is particularly useful for:
 
 ### Prerequisites
 
-- Go 1.24.7 or later
+- Go 1.25 or later (the version in `go.mod`)
 - AWS CLI configured (for AWS-related tasks)
 
 ### Building and Running
