@@ -1,0 +1,183 @@
+name: EKS Image
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Semver version to build and push (e.g. 1.2.3), no leading v.'
+        required: false
+        type: string
+
+env:
+  AWS_REGION: us-west-2
+  ECR_REGISTRY: 842676014003.dkr.ecr.us-west-2.amazonaws.com
+  IMAGE_REPOSITORY: caterpillar-eks
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Resolve version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Resolve version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::version is empty"
+            exit 1
+          fi
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.+].+)?$'; then
+            echo "::error::version '$VERSION' is not semver-ish"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build and push per-arch image (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    environment: production
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS profile
+        env:
+          AWS_ACCESS_KEY: ${{ secrets.AWS_DATAPLATFORM_ACCESS_KEY }}
+          AWS_SECRET_KEY: ${{ secrets.AWS_DATAPLATFORM_SECRET_KEY }}
+        run: |
+          aws configure set aws_access_key_id "$AWS_ACCESS_KEY" --profile data-platform
+          aws configure set aws_secret_access_key "$AWS_SECRET_KEY" --profile data-platform
+
+      - name: ECR docker login
+        run: |
+          aws ecr get-login-password --region "$AWS_REGION" --profile data-platform \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/Dockerfile
+          target: eks
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.ECR_REGISTRY }}/${{ env.IMAGE_REPOSITORY }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  manifest:
+    name: Create, push and verify multi-arch manifest
+    runs-on: ubuntu-24.04
+    environment: production
+    needs: [version, build]
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS profile
+        env:
+          AWS_ACCESS_KEY: ${{ secrets.AWS_DATAPLATFORM_ACCESS_KEY }}
+          AWS_SECRET_KEY: ${{ secrets.AWS_DATAPLATFORM_SECRET_KEY }}
+        run: |
+          aws configure set aws_access_key_id "$AWS_ACCESS_KEY" --profile data-platform
+          aws configure set aws_secret_access_key "$AWS_SECRET_KEY" --profile data-platform
+
+      - name: ECR docker login
+        run: |
+          aws ecr get-login-password --region "$AWS_REGION" --profile data-platform \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+      - name: Create and push manifest list
+        working-directory: /tmp/digests
+        run: |
+          sources=()
+          for digest in *; do
+            sources+=("$ECR_REGISTRY/$IMAGE_REPOSITORY@sha256:$digest")
+          done
+          docker buildx imagetools create -t "$ECR_REGISTRY/$IMAGE_REPOSITORY:$VERSION" "${sources[@]}"
+
+      - name: Inspect
+        run: docker buildx imagetools inspect "$ECR_REGISTRY/$IMAGE_REPOSITORY:$VERSION"
+
+      - name: Verify binary architecture and entrypoint per platform
+        run: |
+          image="$ECR_REGISTRY/$IMAGE_REPOSITORY"
+          index="$(docker buildx imagetools inspect --raw "$image:$VERSION")"
+          status=0
+          for pair in "arm64:ARM aarch64" "amd64:x86-64"; do
+            arch="${pair%%:*}"
+            expected="${pair#*:}"
+            digest="$(echo "$index" | jq -r --arg arch "$arch" \
+              '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest')"
+            if [ -z "$digest" ] || [ "$(echo "$digest" | wc -l)" -ne 1 ]; then
+              echo "::error::expected exactly one linux/$arch manifest in $image:$VERSION, got '$digest'"
+              status=1
+              continue
+            fi
+            ref="$image@$digest"
+            docker pull -q --platform "linux/$arch" "$ref"
+            entrypoint="$(docker inspect --format '{{json .Config.Entrypoint}}' "$ref")"
+            container="$(docker create --platform "linux/$arch" "$ref")"
+            docker cp "$container:/caterpillar" "/tmp/caterpillar-$arch"
+            docker rm "$container" >/dev/null
+            description="$(file -b "/tmp/caterpillar-$arch")"
+            echo "linux/$arch $digest: entrypoint=$entrypoint; /caterpillar: $description"
+            if ! echo "$description" | grep -q "$expected"; then
+              echo "::error::linux/$arch /caterpillar is not $expected: $description"
+              status=1
+            fi
+            if [ "$entrypoint" != '["/caterpillar"]' ]; then
+              echo "::error::linux/$arch entrypoint is $entrypoint, want [\"/caterpillar\"]"
+              status=1
+            fi
+          done
+          exit "$status"

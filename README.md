@@ -43,6 +43,31 @@ The system is particularly useful for:
    ./caterpillar -conf test/pipelines/hello_name.yaml
    ```
 
+## Container Images
+
+`build/Dockerfile` produces two images that share the same runtime (Alpine 3.20, librdkafka, the binary at `/caterpillar`, and an `/output` directory). They differ only in their entrypoint.
+
+| Image | Build | Entrypoint | Platforms | Published by |
+|-------|-------|------------|-----------|--------------|
+| `patternoss/caterpillar` (Docker Hub) | default target | none | as configured in `release.yaml` | `.github/workflows/release.yaml` |
+| `842676014003.dkr.ecr.us-west-2.amazonaws.com/caterpillar-eks:X.Y.Z` | `--target eks` | `["/caterpillar"]` | `linux/amd64`, `linux/arm64` | `.github/workflows/eks-image.yml` |
+
+The default image has no entrypoint on purpose: ECS task definitions and images built `FROM` it supply their own command (for example `sh -c "... caterpillar -conf pipeline.yml"`). With an entrypoint, that command would be passed to the entrypoint as arguments instead of running. Keep it that way.
+
+The EKS image is the one [caterpillar-operator](https://github.com/patterninc/caterpillar-operator) runs. The operator passes only container args (`-conf /etc/caterpillar/pipeline.yaml`), so the image itself names the binary.
+
+Build either image locally from the repository root:
+
+```bash
+docker build -f build/Dockerfile -t caterpillar .                     # default image
+docker build -f build/Dockerfile --target eks -t caterpillar-eks .    # EKS image
+docker run --rm -v "$PWD:/work:ro" -w /work caterpillar-eks -conf test/pipelines/hello_name.yaml
+```
+
+### Releasing the EKS image
+
+Push a `vX.Y.Z` tag. `eks-image.yml` builds each architecture on a native GitHub runner, pushes `caterpillar-eks:X.Y.Z` as a multi-arch image, and fails if the `/caterpillar` binary in any platform variant is not built for that platform. Tags are immutable and there is no `latest`. To rebuild a version by hand, run the workflow from the Actions tab with `version` set to `X.Y.Z` (no leading `v`); a version already in the repository cannot be pushed again.
+
 ## Core Concepts
 
 ### Tasks and Records
