@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 
 	"github.com/patterninc/caterpillar/internal/pkg/config"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
@@ -52,9 +51,6 @@ type file struct {
 	StorageClass    storageClass             `yaml:"storage_class,omitempty" json:"storage_class,omitempty"`
 	Tags            map[string]config.String `yaml:"tags,omitempty" json:"tags,omitempty"`
 	Delimiter       string                   `yaml:"delimiter,omitempty" json:"delimiter,omitempty"`
-
-	// recordSeq is shared by read workers so record ids stay unique.
-	recordSeq *atomic.Int64
 }
 
 func New() (task.Task, error) {
@@ -141,66 +137,21 @@ func (f *file) readFile(output chan<- *record.Record) error {
 		return nil
 	}
 
-	// One task instance per worker. SendData locks the task for the whole
-	// context evaluation, so workers that share f wait on each other.
-	// Workers pull paths from one queue, so a large file does not pin the
-	// rest of a fixed list, and each path is still read once.
-	f.recordSeq = &atomic.Int64{}
-	workers := min(f.GetTaskConcurrency(), len(paths))
+	// set the error group limit to the minimum of the task concurrency and the number of paths
 	g, gctx := errgroup.WithContext(context.Background())
-	pathsCh := make(chan string)
+	g.SetLimit(min(f.GetTaskConcurrency(), len(paths)))
 
-	g.Go(func() error {
-		defer close(pathsCh)
-		for _, path := range paths {
-			select {
-			case pathsCh <- path:
-			case <-gctx.Done():
-				return gctx.Err()
-			}
+	// iterate over the paths and emit the file
+	for _, path := range paths {
+		if gctx.Err() != nil {
+			break
 		}
-		return nil
-	})
-
-	for range workers {
-		worker := f.readWorker()
 		g.Go(func() error {
-			for path := range pathsCh {
-				if err := worker.emitFile(reader, path, output); err != nil {
-					return err
-				}
-			}
-			return nil
+			return f.emitFile(reader, path, output)
 		})
 	}
 
 	return g.Wait()
-
-}
-
-// readWorker is a copy of f with its own lock. Fields are listed by hand
-// because Base embeds a mutex (a struct copy trips copylocks). Keep this
-// list in sync with file and task.Base: a field left out is dropped for
-// read workers, and nothing else checks it.
-func (f *file) readWorker() *file {
-
-	return &file{
-		Base: task.Base{
-			Name:            f.Name,
-			Type:            f.Type,
-			FailOnError:     f.FailOnError,
-			TaskConcurrency: f.TaskConcurrency,
-			Context:         f.Context,
-		},
-		Path:            f.Path,
-		SuccessFile:     f.SuccessFile,
-		SuccessFileName: f.SuccessFileName,
-		Region:          f.Region,
-		StorageClass:    f.StorageClass,
-		Tags:            f.Tags,
-		Delimiter:       f.Delimiter,
-		recordSeq:       f.recordSeq,
-	}
 
 }
 
@@ -225,27 +176,6 @@ func (f *file) emitFile(r reader, path string, output chan<- *record.Record) err
 	f.SendData(rc.Context, content, output)
 
 	return nil
-
-}
-
-// SendData uses the shared counter when this task is a read worker. Each
-// worker still locks only itself around context evaluation.
-func (f *file) SendData(ctx context.Context, data []byte, output chan<- *record.Record) {
-
-	if f.recordSeq == nil {
-		f.Base.SendData(ctx, data, output)
-		return
-	}
-
-	f.Lock()
-	defer f.Unlock()
-
-	f.SendRecord(&record.Record{
-		ID:      int(f.recordSeq.Add(1)),
-		Origin:  f.Name,
-		Data:    data,
-		Context: ctx,
-	}, output)
 
 }
 
