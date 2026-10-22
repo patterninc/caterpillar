@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
+	"sync/atomic"
 
 	"github.com/patterninc/caterpillar/internal/pkg/jq"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
@@ -58,8 +58,9 @@ type Base struct {
 	TaskConcurrency int                  `yaml:"task_concurrency,omitempty" json:"task_concurrency,omitempty"`
 	Context         map[string]*jq.Query `yaml:"context,omitempty" json:"context,omitempty"`
 
-	recordIndex int
-	sync.RWMutex
+	// recordIndex is atomic so concurrent workers of one task never wait on
+	// each other while their records are built, evaluated and sent.
+	recordIndex atomic.Int64
 }
 
 func (b *Base) GetFailOnError() bool {
@@ -111,13 +112,8 @@ func (b *Base) Run(input <-chan *record.Record, output chan<- *record.Record) er
 
 func (b *Base) SendData(ctx context.Context, data []byte, output chan<- *record.Record) /* we should return error here */ {
 
-	b.Lock()
-	defer b.Unlock()
-
-	b.recordIndex++
-
 	record := &record.Record{
-		ID:      b.recordIndex,
+		ID:      int(b.recordIndex.Add(1)),
 		Origin:  b.Name,
 		Data:    data,
 		Context: ctx,
