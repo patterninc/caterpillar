@@ -3,12 +3,22 @@ name: Release
 # Pushes to main build and verify both release binaries, so a broken build is
 # caught before a tag is cut. Pushes of v* tags also publish both binaries as
 # assets of the GitHub release for that tag.
+#
+# The same pushes, plus the `latest` tag, build build/Dockerfile for
+# linux/amd64 and linux/arm64 and publish a multi-arch patternoss/caterpillar
+# image to Docker Hub: `<version>` (v prefix stripped) for v* tags, `dev` for
+# main and `latest` for the `latest` tag. The `latest` tag only moves the image
+# tag; it builds no binaries and creates no GitHub release.
 on:
   push:
     tags:
       - 'v*'
+      - 'latest'
     branches:
       - 'main'
+
+env:
+  IMAGE: patternoss/caterpillar
 
 permissions:
   contents: read
@@ -25,6 +35,7 @@ jobs:
   # pinned (rather than ubuntu-latest) so the binary's glibc baseline only
   # changes when we choose to change it.
   build-linux-amd64:
+    if: github.ref != 'refs/tags/latest'
     runs-on: ubuntu-24.04
 
     steps:
@@ -53,7 +64,7 @@ jobs:
         ./caterpillar -conf test/pipelines/hello_name.yaml
 
     - name: Upload binary for the release job
-      if: startsWith(github.ref, 'refs/tags/')
+      if: startsWith(github.ref, 'refs/tags/v')
       uses: actions/upload-artifact@v7
       with:
         name: caterpillar
@@ -65,6 +76,7 @@ jobs:
   # ARM runner, so cgo and the bundled glibc_linux_arm64 librdkafka link without
   # cross-compiling. Published as the `caterpillar-linux-arm64` asset.
   build-linux-arm64:
+    if: github.ref != 'refs/tags/latest'
     runs-on: ubuntu-24.04-arm
 
     steps:
@@ -93,7 +105,7 @@ jobs:
         ./caterpillar-linux-arm64 -conf test/pipelines/hello_name.yaml
 
     - name: Upload binary for the release job
-      if: startsWith(github.ref, 'refs/tags/')
+      if: startsWith(github.ref, 'refs/tags/v')
       uses: actions/upload-artifact@v7
       with:
         name: caterpillar-linux-arm64
@@ -101,11 +113,11 @@ jobs:
         if-no-files-found: error
         retention-days: 1
 
-  # Tags only: publishes both binaries in a single release call, so two jobs
+  # v* tags only: publishes both binaries in a single release call, so two jobs
   # never create or update the release at the same time. This is the only job
   # with write access, and it runs no repository code.
   release:
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-linux-amd64, build-linux-arm64]
     runs-on: ubuntu-24.04
     permissions:
@@ -149,3 +161,184 @@ jobs:
         prerelease: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Builds build/Dockerfile for one platform on that platform's own runner (no
+  # QEMU) and pushes it to Docker Hub by digest: an untagged, single-platform
+  # image that docker-merge then tags. This job and docker-merge are
+  # independent of the binary jobs and the release job, so a Docker Hub
+  # failure never blocks the release assets, and the other way round.
+  docker-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+    - name: Check Docker Hub secrets
+      env:
+        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      run: |
+        missing=""
+        if [ -z "$DOCKERHUB_USERNAME" ]; then missing="$missing DOCKERHUB_USERNAME"; fi
+        if [ -z "$DOCKERHUB_TOKEN" ]; then missing="$missing DOCKERHUB_TOKEN"; fi
+        if [ -n "$missing" ]; then
+          echo "::error::Cannot push to Docker Hub: the repository secret(s)${missing} are not set. A repository admin must add DOCKERHUB_USERNAME and DOCKERHUB_TOKEN (a Docker Hub access token that can push to ${IMAGE})."
+          exit 1
+        fi
+
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v4
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Build and push by digest
+      id: build
+      uses: docker/build-push-action@v7
+      env:
+        DOCKER_BUILD_SUMMARY: false
+        DOCKER_BUILD_RECORD_UPLOAD: false
+      with:
+        context: .
+        file: build/Dockerfile
+        platforms: ${{ matrix.platform }}
+        outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+        cache-from: type=gha,scope=${{ matrix.platform }}
+        cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+
+    - name: Export digest
+      env:
+        DIGEST: ${{ steps.build.outputs.digest }}
+      run: |
+        case "$DIGEST" in
+          sha256:*) ;;
+          *) echo "::error::build-push-action returned no image digest"; exit 1 ;;
+        esac
+        mkdir -p "$RUNNER_TEMP/digests"
+        touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+    - name: Upload digest
+      uses: actions/upload-artifact@v7
+      with:
+        name: digest-${{ matrix.arch }}
+        path: ${{ runner.temp }}/digests/*
+        if-no-files-found: error
+        retention-days: 1
+
+  # Combines the two per-platform digests into one multi-arch manifest list,
+  # tags it, and checks what was published: both platforms are listed, and each
+  # platform's /caterpillar is a binary for that architecture.
+  docker-merge:
+    needs: docker-build
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Check Docker Hub secrets
+      env:
+        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      run: |
+        missing=""
+        if [ -z "$DOCKERHUB_USERNAME" ]; then missing="$missing DOCKERHUB_USERNAME"; fi
+        if [ -z "$DOCKERHUB_TOKEN" ]; then missing="$missing DOCKERHUB_TOKEN"; fi
+        if [ -n "$missing" ]; then
+          echo "::error::Cannot push to Docker Hub: the repository secret(s)${missing} are not set. A repository admin must add DOCKERHUB_USERNAME and DOCKERHUB_TOKEN (a Docker Hub access token that can push to ${IMAGE})."
+          exit 1
+        fi
+
+    - name: Determine Docker tag
+      id: tag
+      run: |
+        case "$GITHUB_REF" in
+          refs/tags/latest) tag=latest ;;
+          refs/tags/v*) tag="${GITHUB_REF#refs/tags/v}" ;;
+          refs/heads/main) tag=dev ;;
+          *) echo "::error::No Docker tag is defined for $GITHUB_REF"; exit 1 ;;
+        esac
+        if ! printf '%s' "$tag" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'; then
+          echo "::error::'$tag' (from $GITHUB_REF) is not a valid Docker tag"
+          exit 1
+        fi
+        echo "Docker tag: $tag"
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+    - name: Download digests
+      uses: actions/download-artifact@v8
+      with:
+        path: ${{ runner.temp }}/digests
+        pattern: digest-*
+        merge-multiple: true
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v4
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Create and push manifest list
+      working-directory: ${{ runner.temp }}/digests
+      env:
+        TAG: ${{ steps.tag.outputs.tag }}
+      run: |
+        set -- *
+        if [ "$#" -ne 2 ]; then
+          echo "::error::Expected 2 platform digests, found $#: $*"
+          exit 1
+        fi
+        refs=()
+        for d in "$@"; do refs+=("${IMAGE}@sha256:${d}"); done
+        docker buildx imagetools create -t "${IMAGE}:${TAG}" "${refs[@]}"
+
+    - name: Verify published image
+      env:
+        TAG: ${{ steps.tag.outputs.tag }}
+      run: |
+        ref="${IMAGE}:${TAG}"
+        docker buildx imagetools inspect "$ref"
+
+        # Attestation manifests are listed as unknown/unknown; ignore them.
+        platforms="$(docker buildx imagetools inspect --raw "$ref" \
+          | jq -r '.manifests[].platform | select(.os != "unknown") | "\(.os)/\(.architecture)"' \
+          | sort -u)"
+        echo "Platforms in ${ref}:"
+        echo "$platforms"
+
+        check() {
+          platform="$1"
+          want="$2"
+          if ! printf '%s\n' "$platforms" | grep -qx "$platform"; then
+            echo "::error::${ref} has no ${platform} image"
+            exit 1
+          fi
+          # create + cp only read the image, so the arm64 image needs no QEMU.
+          cid="$(docker create --pull always --platform "$platform" "$ref")"
+          docker cp "${cid}:/caterpillar" "./caterpillar-${platform#linux/}"
+          docker rm "$cid" >/dev/null
+          out="$(file "./caterpillar-${platform#linux/}")"
+          echo "${platform}: ${out}"
+          case "$out" in
+            *"ELF 64-bit"*"$want"*) ;;
+            *) echo "::error::/caterpillar in the ${platform} image is not a ${want} ELF binary"; exit 1 ;;
+          esac
+        }
+        check linux/amd64 x86-64
+        check linux/arm64 "ARM aarch64"
