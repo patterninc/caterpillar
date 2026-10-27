@@ -43,6 +43,23 @@ The system is particularly useful for:
    ./caterpillar -conf test/pipelines/hello_name.yaml
    ```
 
+### Docker Image
+
+CI builds `build/Dockerfile` for linux/amd64 and linux/arm64 and publishes it to Docker Hub as the multi-arch image `patternoss/caterpillar`:
+
+| Tag | Published when |
+| --- | --- |
+| `<version>` (for example `1.2.3`) | a `v<version>` git tag is pushed |
+| `dev` | a commit is pushed to `main` |
+| `latest` | the `latest` git tag is pushed |
+
+The image has no `ENTRYPOINT`. The binary is `/caterpillar`, so name it in the command:
+
+```bash
+docker run --rm -v "$PWD/test:/test:ro" patternoss/caterpillar:dev \
+  /caterpillar -conf /test/pipelines/hello_name.yaml
+```
+
 ## Core Concepts
 
 ### Tasks and Records
