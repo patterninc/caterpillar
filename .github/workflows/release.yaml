@@ -167,7 +167,34 @@ jobs:
   # image that docker-merge then tags. This job and docker-merge are
   # independent of the binary jobs and the release job, so a Docker Hub
   # failure never blocks the release assets, and the other way round.
+  # Publishing to Docker Hub is optional: without the DOCKERHUB_USERNAME and
+  # DOCKERHUB_TOKEN repository secrets, docker-build and docker-merge are skipped
+  # with a warning, so the run (and the binary release) stays green. Once the
+  # secrets are added, the next push to main or tag publishes the image.
+  docker-secrets:
+    runs-on: ubuntu-24.04
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+    - name: Check Docker Hub secrets
+      id: check
+      env:
+        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      run: |
+        missing=""
+        if [ -z "$DOCKERHUB_USERNAME" ]; then missing="$missing DOCKERHUB_USERNAME"; fi
+        if [ -z "$DOCKERHUB_TOKEN" ]; then missing="$missing DOCKERHUB_TOKEN"; fi
+        if [ -n "$missing" ]; then
+          echo "::warning::Skipping the ${IMAGE} Docker Hub publish: the repository secret(s)${missing} are not set. A repository admin can add DOCKERHUB_USERNAME and DOCKERHUB_TOKEN (a Docker Hub access token that can push to ${IMAGE}) to enable it."
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+        fi
+
   docker-build:
+    needs: docker-secrets
+    if: needs.docker-secrets.outputs.enabled == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -181,19 +208,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     steps:
-    - name: Check Docker Hub secrets
-      env:
-        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      run: |
-        missing=""
-        if [ -z "$DOCKERHUB_USERNAME" ]; then missing="$missing DOCKERHUB_USERNAME"; fi
-        if [ -z "$DOCKERHUB_TOKEN" ]; then missing="$missing DOCKERHUB_TOKEN"; fi
-        if [ -n "$missing" ]; then
-          echo "::error::Cannot push to Docker Hub: the repository secret(s)${missing} are not set. A repository admin must add DOCKERHUB_USERNAME and DOCKERHUB_TOKEN (a Docker Hub access token that can push to ${IMAGE})."
-          exit 1
-        fi
-
     - name: Checkout code
       uses: actions/checkout@v7
       with:
@@ -245,23 +259,11 @@ jobs:
   # tags it, and checks what was published: both platforms are listed, and each
   # platform's /caterpillar is a binary for that architecture.
   docker-merge:
-    needs: docker-build
+    needs: [docker-secrets, docker-build]
+    if: needs.docker-secrets.outputs.enabled == 'true'
     runs-on: ubuntu-24.04
 
     steps:
-    - name: Check Docker Hub secrets
-      env:
-        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      run: |
-        missing=""
-        if [ -z "$DOCKERHUB_USERNAME" ]; then missing="$missing DOCKERHUB_USERNAME"; fi
-        if [ -z "$DOCKERHUB_TOKEN" ]; then missing="$missing DOCKERHUB_TOKEN"; fi
-        if [ -n "$missing" ]; then
-          echo "::error::Cannot push to Docker Hub: the repository secret(s)${missing} are not set. A repository admin must add DOCKERHUB_USERNAME and DOCKERHUB_TOKEN (a Docker Hub access token that can push to ${IMAGE})."
-          exit 1
-        fi
-
     - name: Determine Docker tag
       id: tag
       run: |
