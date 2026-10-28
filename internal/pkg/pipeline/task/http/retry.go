@@ -3,6 +3,8 @@ package http
 import (
 	"math"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
@@ -22,20 +24,16 @@ func getStatusCode(response *http.Response) int {
 	return response.StatusCode
 }
 
-// retryAfter returns the delay a 429 response asks for in its Retry-After header (seconds).
+// retryAfter returns the delay a 429 response asks for in its Retry-After header (delay-seconds only).
 func retryAfter(response *http.Response) (time.Duration, bool) {
 	if response == nil || response.StatusCode != http.StatusTooManyRequests {
 		return 0, false
 	}
-	value := response.Header.Get(retryAfterHeader)
-	if value == "" {
+	seconds, err := strconv.ParseUint(strings.TrimSpace(response.Header.Get(retryAfterHeader)), 10, 32)
+	if err != nil {
 		return 0, false
 	}
-	delay, err := time.ParseDuration(value + "s")
-	if err != nil || delay < 0 {
-		return 0, false
-	}
-	return delay, true
+	return time.Duration(seconds) * time.Second, true
 }
 
 func (h *httpCore) handleBackoff(attempt int, response *http.Response) {
