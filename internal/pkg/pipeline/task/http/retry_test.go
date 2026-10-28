@@ -59,6 +59,7 @@ func TestCall(t *testing.T) {
 		{"throttle budget then max_retries are both exhausted", 100, "0", 2, 3, true, 5},
 		{"429 without Retry-After uses max_retries", 100, "", 1, 5, true, 1},
 		{"unparseable Retry-After uses max_retries", 100, "soon", 1, 5, true, 1},
+		{"Retry-After above the cap uses max_retries", 100, "61", 1, 5, true, 1},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

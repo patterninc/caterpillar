@@ -10,6 +10,7 @@ import (
 
 const (
 	retryAfterHeader  = "Retry-After"
+	maxThrottleDelay  = 60 * time.Second
 	defaultMaxRetries = 3
 	defaultDelay      = duration.Duration(1 * time.Second)
 	statusNilResponse = -1

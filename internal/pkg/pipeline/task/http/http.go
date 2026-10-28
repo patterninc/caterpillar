@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -386,9 +387,10 @@ func (h *httpCore) call(endpoint string, rc *record.Record) (*result, error) {
 		if h.ExpectedStatuses != nil {
 			if code := response.StatusCode; !h.ExpectedStatuses.Has(code) {
 				lastErr = fmt.Errorf("unexpected http response code [%v %s]: %s", code, http.StatusText(code), string(body))
-				if delay, ok := retryAfter(response); ok && throttled < h.MaxThrottleRetries {
+				if delay, ok := retryAfter(response); ok && delay <= maxThrottleDelay && throttled < h.MaxThrottleRetries {
 					throttled++
 					attempt--
+					log.Printf("http: 429 throttle retry %d/%d in %s", throttled, h.MaxThrottleRetries, delay)
 					time.Sleep(delay)
 					continue
 				}

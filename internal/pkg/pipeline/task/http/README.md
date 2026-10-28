@@ -112,7 +112,7 @@ There is no cap on iterations: an expression that never returns `empty` loops fo
 | `timeout` | duration | `90s` | Request timeout |
 | `max_retries` | int | `3` | Maximum number of retry attempts |
 | `retry_delay` | duration | `1s` | Delay between retries |
-| `max_throttle_retries` | int | `0` | Extra attempts for `429` responses that carry a `Retry-After` header (in seconds). Each one sleeps for `Retry-After` and does not count against `max_retries`, so a shared rate limiter (e.g. rate-gate) slows the task down instead of failing it. Once used up, those `429`s count against `max_retries` as before |
+| `max_throttle_retries` | int | `0` | Extra attempts for `429` responses that carry a `Retry-After` header (in seconds, up to 60). Each one sleeps for `Retry-After` and does not count against `max_retries`, so a shared rate limiter (e.g. rate-gate) slows the task down instead of failing it. Once used up, those `429`s count against `max_retries` as before |
 | `expected_statuses` | string | `200` | Comma-separated list of expected HTTP status codes; ranges are allowed, e.g. `200..299,304` |
 | `oauth` | object | - | OAuth configuration (see OAuth section) |
 | `proxy` | object | - | Proxy configuration (see Proxy section) |
