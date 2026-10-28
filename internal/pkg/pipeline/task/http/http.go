@@ -37,21 +37,22 @@ var (
 )
 
 type httpCore struct {
-	task.Base        `yaml:",inline" json:",inline"`
-	Method           string            `yaml:"method,omitempty" json:"method,omitempty"`
-	Endpoint         string            `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
-	Headers          map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
-	ExpectedStatuses *status.Statuses  `yaml:"expected_statuses,omitempty" json:"expected_statuses,omitempty"`
-	Body             string            `yaml:"body,omitempty" json:"body,omitempty"`
-	NextPage         *config.String    `yaml:"next_page,omitempty" json:"next_page,omitempty"`
-	Oauth            *oauth            `yaml:"oauth,omitempty" json:"oauth,omitempty"`
-	Proxy            *proxy            `yaml:"proxy,omitempty" json:"proxy,omitempty"`
-	Timeout          duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
-	MaxRetries       int               `yaml:"max_retries,omitempty" json:"max_retries,omitempty"`
-	RetryDelay       duration.Duration `yaml:"retry_delay,omitempty" json:"retry_delay,omitempty"`
-	IgnoreError      bool              `yaml:"ignore_error,omitempty" json:"ignore_error,omitempty"`
-	client           *http.Client
-	clientOnce       sync.Once
+	task.Base          `yaml:",inline" json:",inline"`
+	Method             string            `yaml:"method,omitempty" json:"method,omitempty"`
+	Endpoint           string            `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
+	Headers            map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	ExpectedStatuses   *status.Statuses  `yaml:"expected_statuses,omitempty" json:"expected_statuses,omitempty"`
+	Body               string            `yaml:"body,omitempty" json:"body,omitempty"`
+	NextPage           *config.String    `yaml:"next_page,omitempty" json:"next_page,omitempty"`
+	Oauth              *oauth            `yaml:"oauth,omitempty" json:"oauth,omitempty"`
+	Proxy              *proxy            `yaml:"proxy,omitempty" json:"proxy,omitempty"`
+	Timeout            duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	MaxRetries         int               `yaml:"max_retries,omitempty" json:"max_retries,omitempty"`
+	RetryDelay         duration.Duration `yaml:"retry_delay,omitempty" json:"retry_delay,omitempty"`
+	MaxThrottleRetries int               `yaml:"max_throttle_retries,omitempty" json:"max_throttle_retries,omitempty"`
+	IgnoreError        bool              `yaml:"ignore_error,omitempty" json:"ignore_error,omitempty"`
+	client             *http.Client
+	clientOnce         sync.Once
 }
 
 type result struct {
@@ -99,17 +100,18 @@ func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 			Type:    h.Type,
 			Context: h.Context,
 		},
-		Method:           h.Method,
-		Endpoint:         h.Endpoint,
-		ExpectedStatuses: h.ExpectedStatuses,
-		Body:             h.Body,
-		NextPage:         h.NextPage,
-		Oauth:            h.Oauth.copy(),
-		Proxy:            h.Proxy,
-		Timeout:          h.Timeout,
-		MaxRetries:       h.MaxRetries,
-		RetryDelay:       h.RetryDelay,
-		IgnoreError:      h.IgnoreError,
+		Method:             h.Method,
+		Endpoint:           h.Endpoint,
+		ExpectedStatuses:   h.ExpectedStatuses,
+		Body:               h.Body,
+		NextPage:           h.NextPage,
+		Oauth:              h.Oauth.copy(),
+		Proxy:              h.Proxy,
+		Timeout:            h.Timeout,
+		MaxRetries:         h.MaxRetries,
+		RetryDelay:         h.RetryDelay,
+		MaxThrottleRetries: h.MaxThrottleRetries,
+		IgnoreError:        h.IgnoreError,
 	}
 
 	if err := json.Unmarshal(data, newHttp); err != nil {
@@ -314,6 +316,7 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 func (h *httpCore) call(endpoint string, rc *record.Record) (*result, error) {
 
 	var lastErr error
+	throttled := 0
 	for attempt := 1; attempt <= h.MaxRetries; attempt++ {
 
 		// set http request
@@ -383,6 +386,12 @@ func (h *httpCore) call(endpoint string, rc *record.Record) (*result, error) {
 		if h.ExpectedStatuses != nil {
 			if code := response.StatusCode; !h.ExpectedStatuses.Has(code) {
 				lastErr = fmt.Errorf("unexpected http response code [%v %s]: %s", code, http.StatusText(code), string(body))
+				if delay, ok := retryAfter(response); ok && throttled < h.MaxThrottleRetries {
+					throttled++
+					attempt--
+					time.Sleep(delay)
+					continue
+				}
 				if attempt < h.MaxRetries {
 					h.handleBackoff(attempt, response)
 					continue

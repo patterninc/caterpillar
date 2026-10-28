@@ -22,6 +22,22 @@ func getStatusCode(response *http.Response) int {
 	return response.StatusCode
 }
 
+// retryAfter returns the delay a 429 response asks for in its Retry-After header (seconds).
+func retryAfter(response *http.Response) (time.Duration, bool) {
+	if response == nil || response.StatusCode != http.StatusTooManyRequests {
+		return 0, false
+	}
+	value := response.Header.Get(retryAfterHeader)
+	if value == "" {
+		return 0, false
+	}
+	delay, err := time.ParseDuration(value + "s")
+	if err != nil || delay < 0 {
+		return 0, false
+	}
+	return delay, true
+}
+
 func (h *httpCore) handleBackoff(attempt int, response *http.Response) {
 
 	statusCode := getStatusCode(response)
@@ -29,15 +45,9 @@ func (h *httpCore) handleBackoff(attempt int, response *http.Response) {
 	behaviors := map[int]func(int, *http.Response){
 		http.StatusTooManyRequests: func(attempt int, response *http.Response) {
 
-			if response != nil {
-				if response.Header.Get(retryAfterHeader) != "" {
-					retryAfter := response.Header.Get(retryAfterHeader)
-					retryAfterDuration, err := time.ParseDuration(retryAfter + "s")
-					if err == nil {
-						time.Sleep(retryAfterDuration)
-					}
-					return
-				}
+			if delay, ok := retryAfter(response); ok {
+				time.Sleep(delay)
+				return
 			}
 			backoff := math.Pow(2, float64(attempt))
 			time.Sleep(time.Duration(backoff) * time.Second)
