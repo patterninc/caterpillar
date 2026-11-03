@@ -77,6 +77,9 @@ func (c *core) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	if obj.Action != actionPack && obj.Action != actionUnpack {
 		return fmt.Errorf("invalid action: %s (must be 'pack' or 'unpack')", obj.Action)
 	}
+	if _, ok := supportedFormats[obj.Format]; !ok {
+		return fmt.Errorf("invalid format: %s (must be 'zip' or 'tar')", obj.Format)
+	}
 
 	*c = core(obj)
 
