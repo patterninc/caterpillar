@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/antchfx/htmlquery"
+	antchxpath "github.com/antchfx/xpath"
 	"golang.org/x/net/html"
 
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
@@ -118,72 +120,157 @@ func isEmpty(node *html.Node) bool {
 	return node.FirstChild == nil
 }
 
-// antchfx/xpath evaluates "|" unions branch-by-branch rather than sorting into XPath 1.0 document order.
-func findNodes(root *html.Node, expr string) []*html.Node {
-	nodes := htmlquery.Find(root, expr)
-	if len(nodes) > 1 && strings.Contains(expr, "|") {
-		return sortNodesInDocumentOrder(root, nodes)
-	}
-	return nodes
+var compiledExprCache sync.Map
+
+type matchedNode struct {
+	owner  *html.Node
+	output *html.Node
 }
 
-func sortNodesInDocumentOrder(root *html.Node, nodes []*html.Node) []*html.Node {
-	if len(nodes) <= 1 {
-		return nodes
+// antchfx/xpath evaluates "|" unions branch-by-branch rather than sorting into XPath 1.0 document order.
+func findNodes(root *html.Node, expr string) []*html.Node {
+	if !strings.Contains(expr, "|") {
+		return htmlquery.Find(root, expr)
 	}
 
-	selected := make(map[*html.Node]struct{}, len(nodes))
-	for _, n := range nodes {
-		selected[n] = struct{}{}
+	compiled, err := compileXPath(expr)
+	if err != nil {
+		panic(err)
 	}
 
-	ordered := make([]*html.Node, 0, len(nodes))
+	t := compiled.Select(htmlquery.CreateXPathNavigator(root))
+	var matches []matchedNode
+	for t.MoveNext() {
+		nav := t.Current().(*htmlquery.NodeNavigator)
+		owner := nav.Current()
+		output := owner
+		if nav.NodeType() == antchxpath.AttributeNode {
+			childNode := &html.Node{
+				Type: html.TextNode,
+				Data: nav.Value(),
+			}
+			output = &html.Node{
+				Type:       html.ElementNode,
+				Data:       nav.LocalName(),
+				FirstChild: childNode,
+				LastChild:  childNode,
+			}
+		}
+		matches = append(matches, matchedNode{owner: owner, output: output})
+	}
+
+	return sortMatchesInDocumentOrder(root, matches)
+}
+
+func compileXPath(expr string) (*antchxpath.Expr, error) {
+	if cached, ok := compiledExprCache.Load(expr); ok {
+		return cached.(*antchxpath.Expr), nil
+	}
+	compiled, err := antchxpath.Compile(expr)
+	if err != nil {
+		return nil, err
+	}
+	compiledExprCache.Store(expr, compiled)
+	return compiled, nil
+}
+
+func sortMatchesInDocumentOrder(root *html.Node, matches []matchedNode) []*html.Node {
+	if len(matches) == 0 {
+		return nil
+	}
+	if len(matches) == 1 {
+		return []*html.Node{matches[0].output}
+	}
+
+	single := make(map[*html.Node]*html.Node, len(matches))
+	var multi map[*html.Node][]*html.Node
+	for _, m := range matches {
+		if first, exists := single[m.owner]; !exists {
+			single[m.owner] = m.output
+		} else if first != nil {
+			if multi == nil {
+				multi = make(map[*html.Node][]*html.Node)
+			}
+			multi[m.owner] = []*html.Node{first, m.output}
+			single[m.owner] = nil
+		} else {
+			multi[m.owner] = append(multi[m.owner], m.output)
+		}
+	}
+
+	ordered := make([]*html.Node, 0, len(matches))
+	remaining := len(single)
+
 	var walk func(*html.Node)
 	walk = func(n *html.Node) {
-		if _, ok := selected[n]; ok {
-			ordered = append(ordered, n)
-			delete(selected, n)
-			if len(selected) == 0 {
+		if out, ok := single[n]; ok {
+			if out != nil {
+				ordered = append(ordered, out)
+			} else {
+				outs := multi[n]
+				var self []*html.Node
+				var attrs []*html.Node
+				for _, o := range outs {
+					if o == n {
+						self = append(self, o)
+					} else {
+						attrs = append(attrs, o)
+					}
+				}
+				if len(attrs) > 1 && len(n.Attr) > 1 {
+					sortedAttrs := make([]*html.Node, 0, len(attrs))
+					for _, a := range n.Attr {
+						for _, attrNode := range attrs {
+							if attrNode.Data == a.Key && attrNode.FirstChild != nil && attrNode.FirstChild.Data == a.Val {
+								sortedAttrs = append(sortedAttrs, attrNode)
+							}
+						}
+					}
+					if len(sortedAttrs) == len(attrs) {
+						attrs = sortedAttrs
+					}
+				}
+				ordered = append(ordered, self...)
+				ordered = append(ordered, attrs...)
+			}
+			delete(single, n)
+			remaining--
+			if remaining == 0 {
 				return
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			walk(c)
-			if len(selected) == 0 {
+			if remaining == 0 {
 				return
 			}
 		}
 	}
 	walk(root)
 
-	if len(selected) > 0 && root.Parent != nil {
-		hasAttachedNode := false
-		for n := range selected {
-			if n.Parent != nil {
-				hasAttachedNode = true
-				break
+	if remaining > 0 && root.Parent != nil {
+		top := root
+		for top.Parent != nil {
+			top = top.Parent
+		}
+		clear(single)
+		clear(multi)
+		for _, m := range matches {
+			if first, exists := single[m.owner]; !exists {
+				single[m.owner] = m.output
+			} else if first != nil {
+				if multi == nil {
+					multi = make(map[*html.Node][]*html.Node)
+				}
+				multi[m.owner] = []*html.Node{first, m.output}
+				single[m.owner] = nil
+			} else {
+				multi[m.owner] = append(multi[m.owner], m.output)
 			}
 		}
-		if hasAttachedNode {
-			top := root
-			for top.Parent != nil {
-				top = top.Parent
-			}
-			for _, n := range ordered {
-				selected[n] = struct{}{}
-			}
-			ordered = ordered[:0]
-			walk(top)
-		}
-	}
-
-	// Synthetic attribute nodes returned by htmlquery have no parent in the DOM tree.
-	if len(selected) > 0 {
-		for _, n := range nodes {
-			if _, ok := selected[n]; ok {
-				ordered = append(ordered, n)
-			}
-		}
+		ordered = ordered[:0]
+		remaining = len(single)
+		walk(top)
 	}
 
 	return ordered
