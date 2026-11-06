@@ -34,7 +34,10 @@ func (c *html) convert(data []byte, _ string) ([]converterOutput, error) {
 	// adjust to the container if requested...
 	containerNodes := []*h.Node{document}
 	if c.Container != `` {
-		containerNodes = FindNodes(document, c.Container)
+		containerNodes, err = FindNodes(document, c.Container)
+		if err != nil {
+			return nil, fmt.Errorf("invalid XPath %q: %w", c.Container, err)
+		}
 		if len(containerNodes) == 0 {
 			return nil, fmt.Errorf("no nodes found for XPath: %s", c.Container)
 		}
@@ -110,6 +113,11 @@ func CompileXPath(expr string) (CompiledXPath, error) {
 	}, nil
 }
 
+// IsCompiled reports whether the XPath expression has been compiled.
+func (cx CompiledXPath) IsCompiled() bool {
+	return cx.expr != nil
+}
+
 // Find executes the compiled XPath against root, sorting results into XPath 1.0 document order for union queries.
 func (cx CompiledXPath) Find(root *h.Node) []*h.Node {
 	if !cx.isUnion {
@@ -119,37 +127,40 @@ func (cx CompiledXPath) Find(root *h.Node) []*h.Node {
 	t := cx.expr.Select(htmlquery.CreateXPathNavigator(root))
 	var matches []matchedNode
 	for t.MoveNext() {
-		nav := t.Current().(*htmlquery.NodeNavigator)
-		owner := nav.Current()
-		output := owner
-		if nav.NodeType() == antchxpath.AttributeNode {
-			childNode := &h.Node{
-				Type: h.TextNode,
-				Data: nav.Value(),
-			}
-			output = &h.Node{
-				Type:       h.ElementNode,
-				Data:       nav.LocalName(),
-				FirstChild: childNode,
-				LastChild:  childNode,
-			}
-		}
-		matches = append(matches, matchedNode{owner: owner, output: output})
+		matches = append(matches, newMatchedNode(t.Current().(*htmlquery.NodeNavigator)))
 	}
 
 	return sortMatchesInDocumentOrder(root, matches)
 }
 
+func newMatchedNode(nav *htmlquery.NodeNavigator) matchedNode {
+	owner := nav.Current()
+	if nav.NodeType() != antchxpath.AttributeNode {
+		return matchedNode{owner: owner, output: owner}
+	}
+	childNode := &h.Node{
+		Type: h.TextNode,
+		Data: nav.Value(),
+	}
+	output := &h.Node{
+		Type:       h.ElementNode,
+		Data:       nav.LocalName(),
+		FirstChild: childNode,
+		LastChild:  childNode,
+	}
+	return matchedNode{owner: owner, output: output}
+}
+
 // FindNodes evaluates expr against root and returns matched nodes in XPath 1.0 document order.
-func FindNodes(root *h.Node, expr string) []*h.Node {
+func FindNodes(root *h.Node, expr string) ([]*h.Node, error) {
 	if !hasUnionOperator(expr) {
-		return htmlquery.Find(root, expr)
+		return htmlquery.QueryAll(root, expr)
 	}
 	cx, err := CompileXPath(expr)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return cx.Find(root)
+	return cx.Find(root), nil
 }
 
 func hasUnionOperator(expr string) bool {
@@ -157,19 +168,32 @@ func hasUnionOperator(expr string) bool {
 	for i := 0; i < len(expr); i++ {
 		ch := expr[i]
 		if quote != 0 {
-			if ch == quote {
-				quote = 0
-			}
+			quote = updateQuoteState(quote, ch)
 			continue
 		}
-		switch ch {
-		case '\'', '"':
+		if ch == '\'' || ch == '"' {
 			quote = ch
-		case '|':
+			continue
+		}
+		if ch == '|' {
 			return true
 		}
 	}
 	return false
+}
+
+func updateQuoteState(quote, ch byte) byte {
+	if ch == quote {
+		return 0
+	}
+	return quote
+}
+
+type matchIndex struct {
+	single    map[*h.Node]*h.Node
+	multi     map[*h.Node][]*h.Node
+	ordered   []*h.Node
+	remaining int
 }
 
 func sortMatchesInDocumentOrder(root *h.Node, matches []matchedNode) []*h.Node {
@@ -180,89 +204,112 @@ func sortMatchesInDocumentOrder(root *h.Node, matches []matchedNode) []*h.Node {
 		return []*h.Node{matches[0].output}
 	}
 
-	single := make(map[*h.Node]*h.Node, len(matches))
-	var multi map[*h.Node][]*h.Node
-	populate := func() {
-		clear(single)
-		clear(multi)
-		for _, m := range matches {
-			if first, exists := single[m.owner]; !exists {
-				single[m.owner] = m.output
-			} else if first != nil {
-				if multi == nil {
-					multi = make(map[*h.Node][]*h.Node)
-				}
-				multi[m.owner] = []*h.Node{first, m.output}
-				single[m.owner] = nil
-			} else {
-				multi[m.owner] = append(multi[m.owner], m.output)
-			}
-		}
+	idx := &matchIndex{
+		single:  make(map[*h.Node]*h.Node, len(matches)),
+		ordered: make([]*h.Node, 0, len(matches)),
 	}
-	populate()
+	idx.populate(matches)
+	idx.walk(root)
 
-	ordered := make([]*h.Node, 0, len(matches))
-	remaining := len(single)
-
-	var walk func(*h.Node)
-	walk = func(n *h.Node) {
-		if out, ok := single[n]; ok {
-			if out != nil {
-				ordered = append(ordered, out)
-			} else {
-				outs := multi[n]
-				var self []*h.Node
-				var attrs []*h.Node
-				for _, o := range outs {
-					if o == n {
-						self = append(self, o)
-					} else {
-						attrs = append(attrs, o)
-					}
-				}
-				if len(attrs) > 1 && len(n.Attr) > 1 {
-					sortedAttrs := make([]*h.Node, 0, len(attrs))
-					for _, a := range n.Attr {
-						for i, attrNode := range attrs {
-							if attrNode != nil && attrNode.Data == a.Key && attrNode.FirstChild != nil && attrNode.FirstChild.Data == a.Val {
-								sortedAttrs = append(sortedAttrs, attrNode)
-								attrs[i] = nil
-								break
-							}
-						}
-					}
-					if len(sortedAttrs) == len(attrs) {
-						attrs = sortedAttrs
-					}
-				}
-				ordered = append(ordered, self...)
-				ordered = append(ordered, attrs...)
-			}
-			delete(single, n)
-			remaining--
-			if remaining == 0 {
-				return
-			}
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-			if remaining == 0 {
-				return
-			}
-		}
-	}
-	walk(root)
-
-	if remaining > 0 && root.Parent != nil {
-		top := root
-		for top.Parent != nil {
-			top = top.Parent
-		}
-		populate()
-		ordered = ordered[:0]
-		remaining = len(single)
-		walk(top)
+	if idx.remaining > 0 && root.Parent != nil {
+		idx.populate(matches)
+		idx.walk(topNode(root))
 	}
 
-	return ordered
+	return idx.ordered
+}
+
+func (idx *matchIndex) populate(matches []matchedNode) {
+	clear(idx.single)
+	clear(idx.multi)
+	for _, m := range matches {
+		idx.add(m)
+	}
+	idx.ordered = idx.ordered[:0]
+	idx.remaining = len(idx.single)
+}
+
+func (idx *matchIndex) add(m matchedNode) {
+	first, exists := idx.single[m.owner]
+	if !exists {
+		idx.single[m.owner] = m.output
+		return
+	}
+	if first != nil {
+		if idx.multi == nil {
+			idx.multi = make(map[*h.Node][]*h.Node)
+		}
+		idx.multi[m.owner] = []*h.Node{first, m.output}
+		idx.single[m.owner] = nil
+		return
+	}
+	idx.multi[m.owner] = append(idx.multi[m.owner], m.output)
+}
+
+func (idx *matchIndex) walk(n *h.Node) {
+	if out, ok := idx.single[n]; ok {
+		idx.collectOwner(n, out)
+		if idx.remaining == 0 {
+			return
+		}
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		idx.walk(c)
+		if idx.remaining == 0 {
+			return
+		}
+	}
+}
+
+func (idx *matchIndex) collectOwner(n, out *h.Node) {
+	delete(idx.single, n)
+	idx.remaining--
+	if out != nil {
+		idx.ordered = append(idx.ordered, out)
+		return
+	}
+
+	var self, attrs []*h.Node
+	for _, o := range idx.multi[n] {
+		if o == n {
+			self = append(self, o)
+		} else {
+			attrs = append(attrs, o)
+		}
+	}
+	idx.ordered = append(idx.ordered, self...)
+	idx.ordered = append(idx.ordered, orderOwnerAttrs(n, attrs)...)
+}
+
+func orderOwnerAttrs(n *h.Node, attrs []*h.Node) []*h.Node {
+	if len(attrs) <= 1 || len(n.Attr) <= 1 {
+		return attrs
+	}
+	sorted := make([]*h.Node, 0, len(attrs))
+	for _, a := range n.Attr {
+		if matched := takeMatchingAttr(attrs, a); matched != nil {
+			sorted = append(sorted, matched)
+		}
+	}
+	if len(sorted) != len(attrs) {
+		return attrs
+	}
+	return sorted
+}
+
+func takeMatchingAttr(attrs []*h.Node, a h.Attribute) *h.Node {
+	for i, attrNode := range attrs {
+		if attrNode != nil && attrNode.Data == a.Key && attrNode.FirstChild != nil && attrNode.FirstChild.Data == a.Val {
+			attrs[i] = nil
+			return attrNode
+		}
+	}
+	return nil
+}
+
+func topNode(n *h.Node) *h.Node {
+	for n.Parent != nil {
+		n = n.Parent
+	}
+	return n
 }

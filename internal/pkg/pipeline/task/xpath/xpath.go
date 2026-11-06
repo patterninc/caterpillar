@@ -39,24 +39,30 @@ func (x *xpath) Init() error {
 		}
 		x.containerExpr = cx
 	}
-	if len(x.Fields) > 0 {
-		x.fieldExprs = make(map[string]converter.CompiledXPath, len(x.Fields))
-		for field, expr := range x.Fields {
-			cx, err := converter.CompileXPath(expr)
-			if err != nil {
-				return fmt.Errorf("invalid field %q xpath %q: %w", field, expr, err)
-			}
-			x.fieldExprs[field] = cx
+	if len(x.Fields) == 0 {
+		return nil
+	}
+	x.fieldExprs = make(map[string]converter.CompiledXPath, len(x.Fields))
+	for field, expr := range x.Fields {
+		cx, err := converter.CompileXPath(expr)
+		if err != nil {
+			return fmt.Errorf("invalid field %q xpath %q: %w", field, expr, err)
 		}
+		x.fieldExprs[field] = cx
+	}
+	return nil
+}
+
+func (x *xpath) ensureCompiled() error {
+	if (x.Container != `` && !x.containerExpr.IsCompiled()) || (len(x.Fields) > 0 && x.fieldExprs == nil) {
+		return x.Init()
 	}
 	return nil
 }
 
 func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) error {
-	if (x.Container != `` && x.containerExpr == (converter.CompiledXPath{})) || (len(x.Fields) > 0 && x.fieldExprs == nil) {
-		if err := x.Init(); err != nil {
-			return err
-		}
+	if err := x.ensureCompiled(); err != nil {
+		return err
 	}
 
 	for {
