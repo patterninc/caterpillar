@@ -43,7 +43,7 @@ func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) e
 
 		containerNodes := []*html.Node{document}
 		if x.Container != `` {
-			containerNodes = htmlquery.Find(document, x.Container)
+			containerNodes = findNodes(document, x.Container)
 			if len(containerNodes) == 0 {
 				if !x.IgnoreMissing {
 					return ack.Rejected(r.Context, fmt.Errorf("no nodes found for XPath: %s", x.Container))
@@ -79,7 +79,7 @@ func (x *xpath) queryFields(container *html.Node) ([]byte, error) {
 	result := make(map[string]any)
 
 	for field, xpathExpr := range x.Fields {
-		nodes := htmlquery.Find(container, xpathExpr)
+		nodes := findNodes(container, xpathExpr)
 
 		if len(nodes) == 0 && !x.IgnoreMissing {
 			return nil, fmt.Errorf("field '%s' not found for xpath: %s", field, xpathExpr)
@@ -117,3 +117,75 @@ func isNonLeaf(node *html.Node) bool {
 func isEmpty(node *html.Node) bool {
 	return node.FirstChild == nil
 }
+
+// antchfx/xpath evaluates "|" unions branch-by-branch rather than sorting into XPath 1.0 document order.
+func findNodes(root *html.Node, expr string) []*html.Node {
+	nodes := htmlquery.Find(root, expr)
+	if len(nodes) > 1 && strings.Contains(expr, "|") {
+		return sortNodesInDocumentOrder(root, nodes)
+	}
+	return nodes
+}
+
+func sortNodesInDocumentOrder(root *html.Node, nodes []*html.Node) []*html.Node {
+	if len(nodes) <= 1 {
+		return nodes
+	}
+
+	selected := make(map[*html.Node]struct{}, len(nodes))
+	for _, n := range nodes {
+		selected[n] = struct{}{}
+	}
+
+	ordered := make([]*html.Node, 0, len(nodes))
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if _, ok := selected[n]; ok {
+			ordered = append(ordered, n)
+			delete(selected, n)
+			if len(selected) == 0 {
+				return
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+			if len(selected) == 0 {
+				return
+			}
+		}
+	}
+	walk(root)
+
+	if len(selected) > 0 && root.Parent != nil {
+		hasAttachedNode := false
+		for n := range selected {
+			if n.Parent != nil {
+				hasAttachedNode = true
+				break
+			}
+		}
+		if hasAttachedNode {
+			top := root
+			for top.Parent != nil {
+				top = top.Parent
+			}
+			for _, n := range ordered {
+				selected[n] = struct{}{}
+			}
+			ordered = ordered[:0]
+			walk(top)
+		}
+	}
+
+	// Synthetic attribute nodes returned by htmlquery have no parent in the DOM tree.
+	if len(selected) > 0 {
+		for _, n := range nodes {
+			if _, ok := selected[n]; ok {
+				ordered = append(ordered, n)
+			}
+		}
+	}
+
+	return ordered
+}
+
