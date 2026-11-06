@@ -23,8 +23,8 @@ type xpath struct {
 	Fields        map[string]string `yaml:"fields" json:"fields"`
 	IgnoreMissing bool              `yaml:"ignore_missing" json:"ignore_missing"` // if true, missing fields will not cause an error
 
-	containerExpr converter.CompiledXPath
-	fieldExprs    map[string]converter.CompiledXPath
+	containerExpr compiledXPath
+	fieldExprs    map[string]compiledXPath
 }
 
 func New() (task.Task, error) {
@@ -33,7 +33,7 @@ func New() (task.Task, error) {
 
 func (x *xpath) Init() error {
 	if x.Container != `` {
-		cx, err := converter.CompileXPath(x.Container)
+		cx, err := compileXPath(x.Container)
 		if err != nil {
 			return fmt.Errorf("invalid container xpath %q: %w", x.Container, err)
 		}
@@ -42,9 +42,9 @@ func (x *xpath) Init() error {
 	if len(x.Fields) == 0 {
 		return nil
 	}
-	x.fieldExprs = make(map[string]converter.CompiledXPath, len(x.Fields))
+	x.fieldExprs = make(map[string]compiledXPath, len(x.Fields))
 	for field, expr := range x.Fields {
-		cx, err := converter.CompileXPath(expr)
+		cx, err := compileXPath(expr)
 		if err != nil {
 			return fmt.Errorf("invalid field %q xpath %q: %w", field, expr, err)
 		}
@@ -53,17 +53,7 @@ func (x *xpath) Init() error {
 	return nil
 }
 
-func (x *xpath) ensureCompiled() error {
-	if (x.Container != `` && !x.containerExpr.IsCompiled()) || (len(x.Fields) > 0 && x.fieldExprs == nil) {
-		return x.Init()
-	}
-	return nil
-}
-
 func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) error {
-	if err := x.ensureCompiled(); err != nil {
-		return err
-	}
 
 	for {
 		r, ok := x.GetRecord(input)
@@ -78,7 +68,7 @@ func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) e
 
 		containerNodes := []*html.Node{document}
 		if x.Container != `` {
-			containerNodes = x.containerExpr.Find(document)
+			containerNodes = x.containerExpr.find(document)
 			if len(containerNodes) == 0 {
 				if !x.IgnoreMissing {
 					return ack.Rejected(r.Context, fmt.Errorf("no nodes found for XPath: %s", x.Container))
@@ -114,7 +104,7 @@ func (x *xpath) queryFields(container *html.Node) ([]byte, error) {
 	result := make(map[string]any)
 
 	for field, xpathExpr := range x.Fields {
-		nodes := x.fieldExprs[field].Find(container)
+		nodes := x.fieldExprs[field].find(container)
 
 		if len(nodes) == 0 && !x.IgnoreMissing {
 			return nil, fmt.Errorf("field '%s' not found for xpath: %s", field, xpathExpr)
