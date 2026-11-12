@@ -10,7 +10,7 @@ The XPath task applies XPath queries to XML/HTML data to extract specific elemen
 
 The XPath task extracts structured data from XML and HTML documents using XPath expressions. It receives records from its input channel, optionally selects container elements using a container XPath, then extracts multiple fields using field-specific XPath expressions. The extracted data is returned as JSON with field names as keys.
 
-**Important**: Each field value is returned as an **array**, even if there's only one matching node. This allows the task to handle cases where multiple nodes match the same XPath expression.
+**Important**: Each field value is returned as an **array**, even if there's only one matching node. This allows the task to handle cases where multiple nodes match the same XPath expression. Matched container and field nodes—including those selected via union (`|`) expressions—are always evaluated and returned in DOM document order per the XPath 1.0 specification.
 
 ### Missing Element Handling
 
@@ -43,7 +43,7 @@ When using a container XPath that matches one or more nodes, the task sets the f
 
 | Variable | Type | Description |
 |----------|------|-------------|
-| `node_index` | string | 1-based index of the container node (e.g., "1", "2", "3") |
+| `node_index` | string | 1-based index of the container node in DOM document order (e.g., "1", "2", "3") |
 
 This allows downstream tasks to track which container element the data was extracted from, useful for maintaining order or grouping related data.
 
