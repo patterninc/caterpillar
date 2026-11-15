@@ -1,7 +1,12 @@
-# golangci-lint v2 configuration. CI runs it with `make lint`, which reports
-# only issues introduced since LINT_BASE (the PR's base commit in CI). The 151
-# findings that predate this config (revive 118, errcheck 20, staticcheck 10,
-# unused 3) are a backlog to burn down, not a merge blocker.
+# golangci-lint v2 configuration. CI runs it twice (see `make lint` and
+# `make lint-policy` in the makefile):
+#
+#   * `make lint-policy` runs the policy linters (gomodguard_v2, govet)
+#     over the whole tree. The tree passes them today, so any new finding fails.
+#   * `make lint` runs every linter below, but reports only issues introduced
+#     since LINT_BASE (the PR's base commit in CI). The 151 findings that
+#     predate this config (revive 118, errcheck 20, staticcheck 10, unused 3)
+#     are a backlog to burn down, not a merge blocker.
 version: "2"
 
 run:
@@ -11,6 +16,7 @@ linters:
   default: none
   enable:
     - errcheck
+    - gomodguard_v2
     - govet
     - ineffassign
     - revive
@@ -24,6 +30,66 @@ linters:
         # (archive.go, compress.go, file.go). Fixing them changes shipped code,
         # so it is a separate change; re-enable copylocks once it lands.
         - copylocks
+
+    # Dependency policy. Every direct module in go.mod is listed here, so adding
+    # a new direct dependency fails lint until this list gets a reviewed edit.
+    # This is a public repo that ships binaries and a Docker image, so new
+    # dependencies should be deliberate.
+    gomodguard_v2:
+      allowed:
+        - module: github.com/antchfx/htmlquery
+        # Imported directly by internal/pkg/pipeline/task/xpath, although go.mod
+        # still lists it as indirect.
+        - module: github.com/antchfx/xpath
+        - module: github.com/aws/aws-sdk-go-v2
+        - module: github.com/aws/aws-sdk-go-v2/config
+        - module: github.com/aws/aws-sdk-go-v2/service/s3
+        - module: github.com/aws/aws-sdk-go-v2/service/sns
+        - module: github.com/aws/aws-sdk-go-v2/service/sqs
+        - module: github.com/aws/aws-sdk-go-v2/service/ssm
+        - module: github.com/aws/aws-sdk-go-v2/service/translate
+        # Exception: a personal-namespace module, used only for its generic
+        # set type in internal/pkg/pipeline/task/http/status. Kept until it is
+        # replaced by a local type; do not add more imports from it.
+        - module: github.com/babourine/x
+        - module: github.com/bmatcuk/doublestar
+        - module: github.com/cockroachdb/pebble
+        - module: github.com/confluentinc/confluent-kafka-go/v2
+        - module: github.com/go-playground/validator/v10
+        - module: github.com/golang-jwt/jwt/v5
+        - module: github.com/golang/snappy
+        - module: github.com/google/uuid
+        - module: github.com/hamba/avro/v2
+        - module: github.com/itchyny/gojq
+        - module: github.com/jhillyerd/enmime
+        - module: github.com/pkg/sftp
+        - module: github.com/stretchr/testify
+        - module: github.com/xuri/excelize/v2
+        - module: github.com/yamitzky/xlrd-go
+        - module: golang.org/x/crypto
+        - module: golang.org/x/net
+        - module: golang.org/x/sync
+        - module: google.golang.org/protobuf
+        - module: gopkg.in/yaml.v3
+      blocked:
+        - module: github.com/golang/protobuf
+          recommendations: [google.golang.org/protobuf]
+          reason: "Deprecated; superseded by google.golang.org/protobuf."
+        - module: github.com/aws/aws-sdk-go
+          recommendations: [github.com/aws/aws-sdk-go-v2]
+          reason: "AWS SDK v1 is end-of-support; the repo uses v2."
+        - module: gopkg.in/yaml.v2
+          recommendations: [gopkg.in/yaml.v3]
+          reason: "The repo standardises on yaml.v3."
+        - module: github.com/dgrijalva/jwt-go
+          recommendations: [github.com/golang-jwt/jwt/v5]
+          reason: "Unmaintained, with known vulnerabilities."
+        - module: github.com/satori/go.uuid
+          recommendations: [github.com/google/uuid]
+          reason: "Unmaintained, with a known weak-randomness bug."
+        - module: github.com/pkg/errors
+          recommendations: [errors, fmt]
+          reason: "Archived; the standard library wraps errors."
 
 formatters:
   enable:

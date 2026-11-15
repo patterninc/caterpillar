@@ -49,6 +49,11 @@ vet:
 lint:
 	golangci-lint run --new-from-rev=$(LINT_BASE) ./...
 
+# Dependency allow/deny list and vet over the whole tree.
+.PHONY: lint-policy
+lint-policy:
+	golangci-lint run --enable-only=gomodguard_v2,govet ./...
+
 # Installs the tools above at the pinned versions into $(go env GOPATH)/bin.
 .PHONY: tools
 tools:

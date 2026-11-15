@@ -17,9 +17,17 @@ before you push:
 | `make fmt-check` | Every Go file is `gofmt`-formatted. Fix with `gofmt -w .`. |
 | `make vet` | `go vet` over every package. |
 | `make lint` | golangci-lint with `.golangci.yml`, reporting only issues introduced since `LINT_BASE` (default `origin/main`). Older findings are a backlog, not a blocker; do not add new ones. |
+| `make lint-policy` | The dependency allow/deny list (gomodguard_v2) and `go vet`, over the whole tree. |
 | `go test -race ./...` | The tests. They need no Kafka, AWS or network. |
 
 `make tools` installs golangci-lint at the version CI uses.
+
+### Adding a dependency
+
+`.golangci.yml` lists every module the code may import directly. A new import
+from any other module fails `make lint-policy`. To add one, add the module to
+`gomodguard_v2.allowed` in the same pull request, so the addition is reviewed;
+say why it is needed.
 
 ## Git hooks
 
