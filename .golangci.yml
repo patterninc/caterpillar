@@ -1,7 +1,7 @@
 # golangci-lint v2 configuration. CI runs it twice (see `make lint` and
 # `make lint-policy` in the makefile):
 #
-#   * `make lint-policy` runs the policy linters (gomodguard_v2, govet)
+#   * `make lint-policy` runs the policy linters (gomodguard_v2, gocyclo, govet)
 #     over the whole tree. The tree passes them today, so any new finding fails.
 #   * `make lint` runs every linter below, but reports only issues introduced
 #     since LINT_BASE (the PR's base commit in CI). The 151 findings that
@@ -16,6 +16,7 @@ linters:
   default: none
   enable:
     - errcheck
+    - gocyclo
     - gomodguard_v2
     - govet
     - ineffassign
@@ -30,6 +31,11 @@ linters:
         # (archive.go, compress.go, file.go). Fixing them changes shipped code,
         # so it is a separate change; re-enable copylocks once it lands.
         - copylocks
+
+    gocyclo:
+      # Complexity ceiling. Seven functions are between 16 and 25 today; the
+      # one above the ceiling is excluded below.
+      min-complexity: 30
 
     # Dependency policy. Every direct module in go.mod is listed here, so adding
     # a new direct dependency fails lint until this list gets a reviewed edit.
@@ -90,6 +96,16 @@ linters:
         - module: github.com/pkg/errors
           recommendations: [errors, fmt]
           reason: "Archived; the standard library wraps errors."
+
+  exclusions:
+    rules:
+      # Baselined complexity offender (cyclomatic complexity 36): the DAG
+      # input validator walks every edge case of the pipeline graph in one
+      # function. Split it before touching it further; new functions get no
+      # exemption.
+      - path: internal/pkg/pipeline/dag\.go
+        linters: [gocyclo]
+        text: "validateInput"
 
 formatters:
   enable:

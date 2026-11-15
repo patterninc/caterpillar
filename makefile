@@ -55,10 +55,10 @@ vet:
 lint:
 	golangci-lint run --new-from-rev=$(LINT_BASE) ./...
 
-# Dependency allow/deny list and vet over the whole tree.
+# Dependency allow/deny list, complexity ceiling and vet over the whole tree.
 .PHONY: lint-policy
 lint-policy:
-	golangci-lint run --enable-only=gomodguard_v2,govet ./...
+	golangci-lint run --enable-only=gomodguard_v2,gocyclo,govet ./...
 
 # Fails if any dependency compiled into the binary uses a license outside
 # ALLOWED_LICENSES (or one go-licenses cannot identify).
