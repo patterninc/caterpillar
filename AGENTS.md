@@ -8,6 +8,8 @@ how pipelines are configured.
 
 Every pull request runs `.github/workflows/ci.yaml`. Its `ci-status` job passes
 only when every other job passes, and it is the check to require before merge.
+(Until the `ci-status`, `lint`, `licenses` and `pr-title` jobs from this repo's
+audit PR are applied to `ci.yaml`, CI runs only build, vet and tests.)
 The jobs call these makefile targets, so you can run the same checks locally
 before you push:
 
@@ -66,7 +68,8 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 
 Pull requests are usually squash-merged, and the squashed commit takes the pull
 request title, so CI checks the **title** against this format on every pull
-request (the `pr-title` job).
+request (the `pr-title` job, once it is applied to `ci.yaml`; until then,
+reviewers check the title).
 
 ## Releases and secrets
 
