@@ -32,6 +32,23 @@ make hooks
 
 Run every hook over the whole tree with `pre-commit run --all-files`.
 
+## Commit messages and pull request titles
+
+Use [Conventional Commits](https://www.conventionalcommits.org/):
+`<type>(<optional scope>): <description>`, for example
+`fix(kafka): stop deferred offset stores from queuing behind heartbeat polls`.
+
+- Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`,
+  `ci`, `chore`, `revert`.
+- The scope is optional; use the task or package name (`kafka`, `sqs`, `http`,
+  `file`, `task`, ...).
+- Mark a breaking change with `!` after the type or scope (`feat(http)!: ...`)
+  and explain it in the body.
+
+Pull requests are usually squash-merged, and the squashed commit takes the pull
+request title, so CI checks the **title** against this format on every pull
+request (the `pr-title` job).
+
 ## Secrets
 
 The tool itself holds no credentials: pipelines resolve secrets at runtime (see
