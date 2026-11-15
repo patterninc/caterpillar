@@ -34,3 +34,4 @@ go.work.sum
 PATTERN-AIDLC.md
 .aidlc-rule-details/
 aidlc-docs/
+third_party_licenses/

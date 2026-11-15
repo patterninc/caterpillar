@@ -18,16 +18,19 @@ before you push:
 | `make vet` | `go vet` over every package. |
 | `make lint` | golangci-lint with `.golangci.yml`, reporting only issues introduced since `LINT_BASE` (default `origin/main`). Older findings are a backlog, not a blocker; do not add new ones. |
 | `make lint-policy` | The dependency allow/deny list (gomodguard_v2) and `go vet`, over the whole tree. |
+| `make licenses` | Every dependency compiled into the binary uses a license in `ALLOWED_LICENSES`. |
 | `go test -race ./...` | The tests. They need no Kafka, AWS or network. |
 
-`make tools` installs golangci-lint at the version CI uses.
+`make tools` installs golangci-lint and go-licenses at the versions CI uses.
 
 ### Adding a dependency
 
 `.golangci.yml` lists every module the code may import directly. A new import
 from any other module fails `make lint-policy`. To add one, add the module to
 `gomodguard_v2.allowed` in the same pull request, so the addition is reviewed;
-say why it is needed.
+say why it is needed. The new module's license (and its dependencies') must
+pass `make licenses`; extend `ALLOWED_LICENSES` only for permissive licenses,
+and say why in the makefile comment.
 
 ## Git hooks
 
