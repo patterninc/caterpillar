@@ -6,8 +6,10 @@ how pipelines are configured.
 
 ## Checks
 
-Every pull request runs `.github/workflows/ci.yaml`. Its jobs call these
-makefile targets, so you can run the same checks locally before you push:
+Every pull request runs `.github/workflows/ci.yaml`. Its `ci-status` job passes
+only when every other job passes, and it is the check to require before merge.
+The jobs call these makefile targets, so you can run the same checks locally
+before you push:
 
 | Command | What it checks |
 | --- | --- |
