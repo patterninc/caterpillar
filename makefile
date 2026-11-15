@@ -54,3 +54,7 @@ lint:
 tools:
 	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
+# Installs the git hooks in .pre-commit-config.yaml (needs pre-commit).
+.PHONY: hooks
+hooks:
+	pre-commit install --install-hooks --hook-type pre-commit

@@ -1,0 +1,33 @@
+# Git hooks run on every commit. Install once with `make hooks` (needs
+# pre-commit: `pipx install pre-commit` or `uv tool install pre-commit`).
+# Run every hook over the whole tree with `pre-commit run --all-files`.
+#
+# Hook repos are pinned to a commit; the comment names its tag. Keep the
+# golangci-lint version in step with GOLANGCI_LINT_VERSION in the makefile.
+repos:
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        language: system
+        entry: gofmt -l -w
+        types: [go]
+      - id: go-vet
+        name: go vet
+        language: system
+        # copylocks is disabled for three existing findings; see .golangci.yml.
+        entry: go vet -copylocks=false ./...
+        pass_filenames: false
+        types: [go]
+
+  - repo: https://github.com/golangci/golangci-lint
+    rev: 25c5369a93aacb8cccea0d46e1569ca4a194564d  # frozen: v2.15.0
+    hooks:
+      # Reports only issues in uncommitted changes (--new-from-rev HEAD).
+      - id: golangci-lint
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e  # frozen: v8.30.1
+    hooks:
+      # Scans the staged changes for secrets.
+      - id: gitleaks
