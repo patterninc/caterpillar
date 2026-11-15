@@ -33,6 +33,12 @@ GOLANGCI_LINT_VERSION ?= v2.15.0
 # it are reported. CI sets it to the pull request's base commit.
 LINT_BASE ?= origin/main
 
+# Fails if any Go file is not gofmt-formatted, and lists the files.
+.PHONY: fmt-check
+fmt-check:
+	@out="$$(gofmt -l .)"; \
+	if [ -n "$$out" ]; then echo "These files are not gofmt-formatted (run gofmt -w):"; echo "$$out"; exit 1; fi
+
 # copylocks is disabled for three existing findings; see .golangci.yml.
 .PHONY: vet
 vet:
