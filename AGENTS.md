@@ -68,7 +68,17 @@ Pull requests are usually squash-merged, and the squashed commit takes the pull
 request title, so CI checks the **title** against this format on every pull
 request (the `pr-title` job).
 
-## Secrets
+## Releases and secrets
+
+`.github/workflows/release.yaml` runs on pushes to `main` and on `v*` and
+`latest` tags. It builds the release binaries and publishes the
+`patternoss/caterpillar` Docker Hub image (`dev` from `main`). Anything merged
+to `main` is therefore published as the `dev` image.
+
+The Docker Hub credentials (`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`) belong in
+the `dockerhub-release` GitHub environment, whose deployment policy allows only
+`main` and the `v*` and `latest` tags. Only the Docker publishing jobs name that
+environment. Pull request workflows must never use it or any other secret.
 
 The tool itself holds no credentials: pipelines resolve secrets at runtime (see
 [Secrets](README.md#secrets) in the README). Never commit a secret or a real
