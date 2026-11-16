@@ -155,9 +155,12 @@ func (h *httpCore) fetchToken(resolved *resolvedAuth) (string, time.Duration, er
 	if err != nil {
 		return ``, 0, fmt.Errorf("auth token request to %s failed: %w", tokenURLForError(resolved.TokenURL), err)
 	}
+	return parseTokenResponse(resp.StatusCode, body, resolved)
+}
 
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return ``, 0, fmt.Errorf("auth token request to %s failed with status %d", tokenURLForError(resolved.TokenURL), resp.StatusCode)
+func parseTokenResponse(status int, body []byte, resolved *resolvedAuth) (string, time.Duration, error) {
+	if status < http.StatusOK || status >= http.StatusMultipleChoices {
+		return ``, 0, fmt.Errorf("auth token request to %s failed with status %d", tokenURLForError(resolved.TokenURL), status)
 	}
 
 	var payload map[string]any
@@ -181,7 +184,7 @@ func (r *resolvedAuth) wireGrant() string {
 	return r.GrantType
 }
 
-func (r *resolvedAuth) tokenRequest() (*http.Request, error) {
+func (r *resolvedAuth) tokenParams() url.Values {
 	params := url.Values{}
 	params.Set(grantTypeKey, r.wireGrant())
 
@@ -212,7 +215,11 @@ func (r *resolvedAuth) tokenRequest() (*http.Request, error) {
 			params.Set(secretName, r.ClientSecret)
 		}
 	}
+	return params
+}
 
+func (r *resolvedAuth) tokenRequest() (*http.Request, error) {
+	params := r.tokenParams()
 	endpoint := r.TokenURL
 	var body io.Reader
 	contentType := ``

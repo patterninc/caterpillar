@@ -143,40 +143,8 @@ func (a *auth) readAuth(rc *record.Record) (*resolvedAuth, error) {
 }
 
 func (r *resolvedAuth) prepare() error {
-	if r.GrantType == `` {
-		return fmt.Errorf("auth grant_type is required")
-	}
-	if r.TokenURL == `` {
-		return fmt.Errorf("auth token_url is required")
-	}
-
-	switch r.GrantType {
-	case grantRefreshToken:
-		if err := requireAuth(r.RefreshToken, `refresh_token`); err != nil {
-			return err
-		}
-		if err := requireClient(r); err != nil {
-			return err
-		}
-	case grantClientCredentials:
-		if err := requireClient(r); err != nil {
-			return err
-		}
-	case grantJWTBearer:
-		if err := requireAuth(r.PrivateKey, `private_key`); err != nil {
-			return err
-		}
-		if err := requireAuth(r.Issuer, `issuer`); err != nil {
-			return err
-		}
-		if err := requireAuth(r.Subject, `subject`); err != nil {
-			return err
-		}
-		if err := requireAuth(r.Audience, `audience`); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("unsupported auth grant_type: %s", r.GrantType)
+	if err := r.requireGrant(); err != nil {
+		return err
 	}
 
 	r.ClientAuth = nonempty(r.ClientAuth, clientAuthBody)
@@ -218,6 +186,38 @@ func (r *resolvedAuth) prepare() error {
 		r.RefreshTokenParam = nonempty(r.RefreshTokenParam, grantRefreshToken)
 	}
 	return nil
+}
+
+func (r *resolvedAuth) requireGrant() error {
+	if r.GrantType == `` {
+		return fmt.Errorf("auth grant_type is required")
+	}
+	if r.TokenURL == `` {
+		return fmt.Errorf("auth token_url is required")
+	}
+
+	switch r.GrantType {
+	case grantRefreshToken:
+		if err := requireAuth(r.RefreshToken, `refresh_token`); err != nil {
+			return err
+		}
+		return requireClient(r)
+	case grantClientCredentials:
+		return requireClient(r)
+	case grantJWTBearer:
+		if err := requireAuth(r.PrivateKey, `private_key`); err != nil {
+			return err
+		}
+		if err := requireAuth(r.Issuer, `issuer`); err != nil {
+			return err
+		}
+		if err := requireAuth(r.Subject, `subject`); err != nil {
+			return err
+		}
+		return requireAuth(r.Audience, `audience`)
+	default:
+		return fmt.Errorf("unsupported auth grant_type: %s", r.GrantType)
+	}
 }
 
 func requireAuth(value, name string) error {
