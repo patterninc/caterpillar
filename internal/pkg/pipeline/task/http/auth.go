@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -293,9 +294,14 @@ func (a *auth) store(key, token string, lifetime time.Duration, now time.Time) {
 	if a.cache.entries == nil {
 		a.cache.entries = make(map[string]cachedToken)
 	}
+	// A fetch that started earlier must not replace a token that expires later.
+	expiresAt := now.Add(lifetime)
+	if current, ok := a.cache.entries[key]; ok && current.expiresAt.After(expiresAt) {
+		return
+	}
 	a.cache.entries[key] = cachedToken{
 		value:     token,
-		expiresAt: now.Add(lifetime),
+		expiresAt: expiresAt,
 		lifetime:  lifetime,
 	}
 }
@@ -380,7 +386,7 @@ func (h *httpCore) fetchToken(resolved *resolvedAuth) (string, time.Duration, er
 
 	resp, err := h.tokenClient().Do(req)
 	if err != nil {
-		return ``, 0, fmt.Errorf("auth token request to %s failed: %w", tokenURLForError(resolved.TokenURL), err)
+		return ``, 0, fmt.Errorf("auth token request to %s failed: %w", tokenURLForError(resolved.TokenURL), tokenTransportErr(err))
 	}
 	defer resp.Body.Close()
 
@@ -529,12 +535,6 @@ func parseExpires(value any) (time.Duration, bool) {
 	switch typed := value.(type) {
 	case float64:
 		return expiresFromFloat(typed)
-	case json.Number:
-		parsed, err := typed.Float64()
-		if err != nil {
-			return 0, false
-		}
-		return expiresFromFloat(parsed)
 	case string:
 		parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
 		if err != nil {
@@ -551,6 +551,15 @@ func expiresFromFloat(seconds float64) (time.Duration, bool) {
 		return 0, false
 	}
 	return time.Duration(seconds * float64(time.Second)), true
+}
+
+// tokenTransportErr drops the request URL. *url.Error includes the query string and user info.
+func tokenTransportErr(err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) && urlErr.Err != nil {
+		return urlErr.Err
+	}
+	return err
 }
 
 func tokenURLForError(raw string) string {
