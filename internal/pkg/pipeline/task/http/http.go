@@ -107,7 +107,6 @@ func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 		Body:             h.Body,
 		NextPage:         h.NextPage,
 		Oauth:            h.Oauth.copy(),
-		Auth:             h.Auth,
 		Proxy:            h.Proxy,
 		Timeout:          h.Timeout,
 		MaxRetries:       h.MaxRetries,
@@ -119,7 +118,7 @@ func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 		return nil, fmt.Errorf("cannot parse http payload: %w", err)
 	}
 
-	// A record payload must not replace the task auth block or its shared token cache.
+	// Unmarshal must not see the shared pointer: encoding/json writes into a non-nil auth.
 	newHttp.Auth = h.Auth
 	if err := newHttp.rejectCombinedAuth(); err != nil {
 		return nil, err

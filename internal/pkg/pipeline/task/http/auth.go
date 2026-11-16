@@ -74,8 +74,20 @@ type auth struct {
 }
 
 type authCache struct {
-	mu      sync.Mutex
-	entries map[string]cachedToken
+	mu       sync.Mutex
+	entries  map[string]cachedToken
+	gen      map[string]uint64
+	inflight map[string]*tokenFetch
+}
+
+// tokenFetch is one in-flight token HTTP call. Waiters block on done.
+// gen is the cache generation captured when the fetch started.
+type tokenFetch struct {
+	gen      uint64
+	done     chan struct{}
+	token    string
+	lifetime time.Duration
+	err      error
 }
 
 type cachedToken struct {
@@ -272,44 +284,69 @@ func tokenUsable(now time.Time, entry cachedToken) bool {
 	return remaining >= authRefreshSkew
 }
 
-func (a *auth) cached(key string, now time.Time) (string, bool) {
-	a.cache.mu.Lock()
-	defer a.cache.mu.Unlock()
-
-	entry, ok := a.cache.entries[key]
-	if !ok || !tokenUsable(now, entry) {
-		return ``, false
-	}
-	return entry.value, true
-}
-
-func (a *auth) store(key, token string, lifetime time.Duration, now time.Time) {
-	if lifetime <= 0 {
-		return
-	}
-
-	a.cache.mu.Lock()
-	defer a.cache.mu.Unlock()
-
-	if a.cache.entries == nil {
-		a.cache.entries = make(map[string]cachedToken)
-	}
-	// A fetch that started earlier must not replace a token that expires later.
-	expiresAt := now.Add(lifetime)
-	if current, ok := a.cache.entries[key]; ok && current.expiresAt.After(expiresAt) {
-		return
-	}
-	a.cache.entries[key] = cachedToken{
-		value:     token,
-		expiresAt: expiresAt,
-		lifetime:  lifetime,
-	}
-}
-
 func (a *auth) invalidate(key string) {
 	a.cache.mu.Lock()
 	defer a.cache.mu.Unlock()
+
+	if a.cache.gen == nil {
+		a.cache.gen = make(map[string]uint64)
+	}
+	a.cache.gen[key]++
 	delete(a.cache.entries, key)
+	// The fetch already running keeps its pointer. Its store is dropped because gen moved.
+	delete(a.cache.inflight, key)
+}
+
+// token returns a cached access token or the result of a single in-flight fetch for key.
+// force skips the cache and any fetch already running.
+func (a *auth) token(key string, now time.Time, force bool, fetch func() (string, time.Duration, error)) (string, error) {
+	a.cache.mu.Lock()
+	if !force {
+		if entry, ok := a.cache.entries[key]; ok && tokenUsable(now, entry) {
+			a.cache.mu.Unlock()
+			return entry.value, nil
+		}
+		if flight, ok := a.cache.inflight[key]; ok {
+			a.cache.mu.Unlock()
+			<-flight.done
+			return flight.token, flight.err
+		}
+	}
+
+	if a.cache.gen == nil {
+		a.cache.gen = make(map[string]uint64)
+	}
+	if a.cache.inflight == nil {
+		a.cache.inflight = make(map[string]*tokenFetch)
+	}
+	flight := &tokenFetch{gen: a.cache.gen[key], done: make(chan struct{})}
+	a.cache.inflight[key] = flight
+	a.cache.mu.Unlock()
+
+	token, lifetime, err := fetch()
+
+	a.cache.mu.Lock()
+	defer a.cache.mu.Unlock()
+	if err == nil && lifetime > 0 && a.cache.gen[key] == flight.gen {
+		if a.cache.entries == nil {
+			a.cache.entries = make(map[string]cachedToken)
+		}
+		// A fetch that started earlier must not replace a token that expires later.
+		expiresAt := now.Add(lifetime)
+		if current, ok := a.cache.entries[key]; !ok || !current.expiresAt.After(expiresAt) {
+			a.cache.entries[key] = cachedToken{
+				value:     token,
+				expiresAt: expiresAt,
+				lifetime:  lifetime,
+			}
+		}
+	}
+	if a.cache.inflight[key] == flight {
+		delete(a.cache.inflight, key)
+	}
+	flight.token, flight.lifetime, flight.err = token, lifetime, err
+	close(flight.done)
+	return token, err
 }
 
 func (h *httpCore) applyAuth(req *http.Request, rc *record.Record, force bool) error {
@@ -318,19 +355,12 @@ func (h *httpCore) applyAuth(req *http.Request, rc *record.Record, force bool) e
 		return err
 	}
 
-	now := time.Now()
-	key := resolved.cacheKey()
-	if !force {
-		if token, ok := h.Auth.cached(key, now); ok {
-			return setAuthHeader(req, resolved, token)
-		}
-	}
-
-	token, lifetime, err := h.fetchToken(resolved)
+	token, err := h.Auth.token(resolved.cacheKey(), time.Now(), force, func() (string, time.Duration, error) {
+		return h.fetchToken(resolved)
+	})
 	if err != nil {
 		return err
 	}
-	h.Auth.store(key, token, lifetime, now)
 	return setAuthHeader(req, resolved, token)
 }
 
