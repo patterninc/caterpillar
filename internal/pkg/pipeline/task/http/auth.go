@@ -94,7 +94,17 @@ func (a *auth) resolve(rc *record.Record) (*resolvedAuth, error) {
 	if a == nil {
 		return nil, nil
 	}
+	resolved, err := a.readAuth(rc)
+	if err != nil {
+		return nil, err
+	}
+	if err := resolved.prepare(); err != nil {
+		return nil, err
+	}
+	return resolved, nil
+}
 
+func (a *auth) readAuth(rc *record.Record) (*resolvedAuth, error) {
 	resolved := &resolvedAuth{}
 	fields := []struct {
 		name string
@@ -129,83 +139,85 @@ func (a *auth) resolve(rc *record.Record) (*resolvedAuth, error) {
 		}
 		*field.dst = value
 	}
+	return resolved, nil
+}
 
-	if resolved.GrantType == `` {
-		return nil, fmt.Errorf("auth grant_type is required")
+func (r *resolvedAuth) prepare() error {
+	if r.GrantType == `` {
+		return fmt.Errorf("auth grant_type is required")
 	}
-	if resolved.TokenURL == `` {
-		return nil, fmt.Errorf("auth token_url is required")
+	if r.TokenURL == `` {
+		return fmt.Errorf("auth token_url is required")
 	}
 
-	switch resolved.GrantType {
+	switch r.GrantType {
 	case grantRefreshToken:
-		if err := requireAuth(resolved.RefreshToken, `refresh_token`); err != nil {
-			return nil, err
+		if err := requireAuth(r.RefreshToken, `refresh_token`); err != nil {
+			return err
 		}
-		if err := requireClient(resolved); err != nil {
-			return nil, err
+		if err := requireClient(r); err != nil {
+			return err
 		}
 	case grantClientCredentials:
-		if err := requireClient(resolved); err != nil {
-			return nil, err
+		if err := requireClient(r); err != nil {
+			return err
 		}
 	case grantJWTBearer:
-		if err := requireAuth(resolved.PrivateKey, `private_key`); err != nil {
-			return nil, err
+		if err := requireAuth(r.PrivateKey, `private_key`); err != nil {
+			return err
 		}
-		if err := requireAuth(resolved.Issuer, `issuer`); err != nil {
-			return nil, err
+		if err := requireAuth(r.Issuer, `issuer`); err != nil {
+			return err
 		}
-		if err := requireAuth(resolved.Subject, `subject`); err != nil {
-			return nil, err
+		if err := requireAuth(r.Subject, `subject`); err != nil {
+			return err
 		}
-		if err := requireAuth(resolved.Audience, `audience`); err != nil {
-			return nil, err
+		if err := requireAuth(r.Audience, `audience`); err != nil {
+			return err
 		}
 	default:
-		return nil, fmt.Errorf("unsupported auth grant_type: %s", resolved.GrantType)
+		return fmt.Errorf("unsupported auth grant_type: %s", r.GrantType)
 	}
 
-	resolved.ClientAuth = nonempty(resolved.ClientAuth, clientAuthBody)
-	switch resolved.ClientAuth {
+	r.ClientAuth = nonempty(r.ClientAuth, clientAuthBody)
+	switch r.ClientAuth {
 	case clientAuthBody, clientAuthBasic, clientAuthQuery:
 	default:
-		return nil, fmt.Errorf("unsupported auth client_auth: %s", resolved.ClientAuth)
+		return fmt.Errorf("unsupported auth client_auth: %s", r.ClientAuth)
 	}
 
-	if resolved.ClientAuth == clientAuthBasic {
-		if err := requireClient(resolved); err != nil {
-			return nil, err
+	if r.ClientAuth == clientAuthBasic {
+		if err := requireClient(r); err != nil {
+			return err
 		}
 	}
 
-	if resolved.ClientAuth != clientAuthQuery {
-		resolved.BodyEncoding = nonempty(resolved.BodyEncoding, bodyEncodingForm)
-		switch resolved.BodyEncoding {
+	if r.ClientAuth != clientAuthQuery {
+		r.BodyEncoding = nonempty(r.BodyEncoding, bodyEncodingForm)
+		switch r.BodyEncoding {
 		case bodyEncodingJSON, bodyEncodingForm:
 		default:
-			return nil, fmt.Errorf("unsupported auth body_encoding: %s", resolved.BodyEncoding)
+			return fmt.Errorf("unsupported auth body_encoding: %s", r.BodyEncoding)
 		}
 	}
 
-	resolved.Header = nonempty(resolved.Header, defaultAuthHeader)
-	resolved.Scheme = nonempty(resolved.Scheme, authSchemeBearer)
-	switch resolved.Scheme {
+	r.Header = nonempty(r.Header, defaultAuthHeader)
+	r.Scheme = nonempty(r.Scheme, authSchemeBearer)
+	switch r.Scheme {
 	case authSchemeBearer, authSchemeRaw, authSchemeToken:
 	default:
-		return nil, fmt.Errorf("unsupported auth scheme: %s", resolved.Scheme)
+		return fmt.Errorf("unsupported auth scheme: %s", r.Scheme)
 	}
 
-	resolved.TokenField = nonempty(resolved.TokenField, defaultTokenField)
-	resolved.ExpiresField = nonempty(resolved.ExpiresField, defaultExpiresField)
+	r.TokenField = nonempty(r.TokenField, defaultTokenField)
+	r.ExpiresField = nonempty(r.ExpiresField, defaultExpiresField)
 
-	if resolved.ClientAuth == clientAuthQuery {
-		resolved.ClientIDParam = nonempty(resolved.ClientIDParam, defaultClientIDParam)
-		resolved.ClientSecretParam = nonempty(resolved.ClientSecretParam, defaultClientSecretParam)
-		resolved.RefreshTokenParam = nonempty(resolved.RefreshTokenParam, grantRefreshToken)
+	if r.ClientAuth == clientAuthQuery {
+		r.ClientIDParam = nonempty(r.ClientIDParam, defaultClientIDParam)
+		r.ClientSecretParam = nonempty(r.ClientSecretParam, defaultClientSecretParam)
+		r.RefreshTokenParam = nonempty(r.RefreshTokenParam, grantRefreshToken)
 	}
-
-	return resolved, nil
+	return nil
 }
 
 func requireAuth(value, name string) error {
