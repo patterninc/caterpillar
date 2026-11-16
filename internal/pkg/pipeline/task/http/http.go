@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -45,6 +46,7 @@ type httpCore struct {
 	Body             string            `yaml:"body,omitempty" json:"body,omitempty"`
 	NextPage         *config.String    `yaml:"next_page,omitempty" json:"next_page,omitempty"`
 	Oauth            *oauth            `yaml:"oauth,omitempty" json:"oauth,omitempty"`
+	Auth             *auth             `yaml:"auth,omitempty" json:"auth,omitempty"`
 	Proxy            *proxy            `yaml:"proxy,omitempty" json:"proxy,omitempty"`
 	Timeout          duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	MaxRetries       int               `yaml:"max_retries,omitempty" json:"max_retries,omitempty"`
@@ -105,6 +107,7 @@ func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 		Body:             h.Body,
 		NextPage:         h.NextPage,
 		Oauth:            h.Oauth.copy(),
+		Auth:             h.Auth,
 		Proxy:            h.Proxy,
 		Timeout:          h.Timeout,
 		MaxRetries:       h.MaxRetries,
@@ -114,6 +117,12 @@ func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 
 	if err := json.Unmarshal(data, newHttp); err != nil {
 		return nil, fmt.Errorf("cannot parse http payload: %w", err)
+	}
+
+	// A record payload must not replace the task auth block or its shared token cache.
+	newHttp.Auth = h.Auth
+	if err := newHttp.rejectCombinedAuth(); err != nil {
+		return nil, err
 	}
 
 	// we only append headers that are present in the current task (h) and missing in the new one
@@ -143,6 +152,11 @@ func cleanURL(raw string) string {
 
 func (h *httpCore) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
 
+	// Task configuration, not a per-record failure.
+	if err := h.rejectCombinedAuth(); err != nil {
+		return err
+	}
+
 	// if we have input, treat each value as a URL and try to get data from it...
 	if input != nil {
 		for {
@@ -154,6 +168,9 @@ func (h *httpCore) Run(input <-chan *record.Record, output chan<- *record.Record
 			// let's get our http object
 			newHttp, err := h.newFromInput(rc.Data)
 			if err != nil {
+				if errors.Is(err, errAuthAndOAuth) {
+					return ack.Rejected(rc.Context, err)
+				}
 				if h.IgnoreError {
 					fmt.Printf("WARN: %s: skipping record %d: %s\n", h.GetName(), rc.ID, err)
 					ack.Release(rc.Context)
@@ -314,6 +331,8 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 func (h *httpCore) call(endpoint string, rc *record.Record) (*result, error) {
 
 	var lastErr error
+	var forceAuthRefresh bool
+	var authRefreshed bool
 	for attempt := 1; attempt <= h.MaxRetries; attempt++ {
 
 		// set http request
@@ -331,8 +350,17 @@ func (h *httpCore) call(endpoint string, rc *record.Record) (*result, error) {
 			request.Header.Set(k, v)
 		}
 
-		// TODO: support multiple "behaviors" for oauth support
-		if h.Oauth != nil {
+		// After the header copy so a header carried by next_page cannot keep a stale token.
+		if h.Auth != nil && h.Oauth != nil {
+			return nil, errAuthAndOAuth
+		}
+		refreshThisAttempt := forceAuthRefresh
+		forceAuthRefresh = false
+		if h.Auth != nil {
+			if err := h.applyAuth(request, rc, refreshThisAttempt); err != nil {
+				return nil, err
+			}
+		} else if h.Oauth != nil {
 			if err := h.oauth(endpoint, request, rc); err != nil {
 				lastErr = err
 				if attempt < h.MaxRetries {
@@ -383,6 +411,15 @@ func (h *httpCore) call(endpoint string, rc *record.Record) (*result, error) {
 		if h.ExpectedStatuses != nil {
 			if code := response.StatusCode; !h.ExpectedStatuses.Has(code) {
 				lastErr = fmt.Errorf("unexpected http response code [%v %s]: %s", code, http.StatusText(code), string(body))
+				if h.Auth != nil && !authRefreshed && (code == http.StatusUnauthorized || code == http.StatusForbidden) {
+					authRefreshed = true
+					if err := h.invalidateAuth(rc); err != nil {
+						return nil, err
+					}
+					if attempt < h.MaxRetries {
+						forceAuthRefresh = true
+					}
+				}
 				if attempt < h.MaxRetries {
 					h.handleBackoff(attempt, response)
 					continue
