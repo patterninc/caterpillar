@@ -248,17 +248,19 @@ func (r *resolvedAuth) cacheKey() string {
 	if r.GrantType == grantJWTBearer {
 		identity = r.Subject
 	}
-	sum := sha256.Sum256([]byte(strings.Join([]string{r.GrantType, r.TokenURL, r.ClientID, identity}, "\n")))
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		r.GrantType, r.TokenURL, r.ClientID, identity, r.Scope, r.Audience, r.Issuer, r.PrivateKey,
+	}, "\n")))
 	return hex.EncodeToString(sum[:])
 }
 
-func (h *httpCore) applyAuth(req *http.Request, rc *record.Record, force bool) error {
+func (h *httpCore) applyAuth(req *http.Request, rc *record.Record) error {
 	resolved, err := h.Auth.resolve(rc)
 	if err != nil {
 		return err
 	}
 
-	token, err := h.Auth.token(resolved.cacheKey(), time.Now(), force, func() (string, time.Duration, error) {
+	token, err := h.Auth.token(resolved.cacheKey(), time.Now(), func() (string, time.Duration, error) {
 		return h.fetchToken(resolved)
 	})
 	if err != nil {

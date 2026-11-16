@@ -330,7 +330,6 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 func (h *httpCore) call(endpoint string, rc *record.Record) (*result, error) {
 
 	var lastErr error
-	var forceAuthRefresh bool
 	var authRefreshed bool
 	for attempt := 1; attempt <= h.MaxRetries; attempt++ {
 
@@ -353,10 +352,8 @@ func (h *httpCore) call(endpoint string, rc *record.Record) (*result, error) {
 		if h.Auth != nil && h.Oauth != nil {
 			return nil, errAuthAndOAuth
 		}
-		refreshThisAttempt := forceAuthRefresh
-		forceAuthRefresh = false
 		if h.Auth != nil {
-			if err := h.applyAuth(request, rc, refreshThisAttempt); err != nil {
+			if err := h.applyAuth(request, rc); err != nil {
 				return nil, err
 			}
 		} else if h.Oauth != nil {
@@ -414,9 +411,6 @@ func (h *httpCore) call(endpoint string, rc *record.Record) (*result, error) {
 					authRefreshed = true
 					if err := h.invalidateAuth(rc); err != nil {
 						return nil, err
-					}
-					if attempt < h.MaxRetries {
-						forceAuthRefresh = true
 					}
 				}
 				if attempt < h.MaxRetries {

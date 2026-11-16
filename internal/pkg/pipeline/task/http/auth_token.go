@@ -68,19 +68,17 @@ func (a *auth) invalidate(key string) {
 }
 
 // token returns a cached access token or the result of a single in-flight fetch for key.
-// force skips the cache and any fetch already running.
-func (a *auth) token(key string, now time.Time, force bool, fetch func() (string, time.Duration, error)) (string, error) {
+// invalidate drops a rejected token; the next call joins whatever fetch is already running.
+func (a *auth) token(key string, now time.Time, fetch func() (string, time.Duration, error)) (string, error) {
 	a.cache.mu.Lock()
-	if !force {
-		if entry, ok := a.cache.entries[key]; ok && tokenUsable(now, entry) {
-			a.cache.mu.Unlock()
-			return entry.value, nil
-		}
-		if flight, ok := a.cache.inflight[key]; ok {
-			a.cache.mu.Unlock()
-			<-flight.done
-			return flight.token, flight.err
-		}
+	if entry, ok := a.cache.entries[key]; ok && tokenUsable(now, entry) {
+		a.cache.mu.Unlock()
+		return entry.value, nil
+	}
+	if flight, ok := a.cache.inflight[key]; ok {
+		a.cache.mu.Unlock()
+		<-flight.done
+		return flight.token, flight.err
 	}
 
 	if a.cache.gen == nil {
@@ -120,8 +118,17 @@ func (a *auth) token(key string, now time.Time, force bool, fetch func() (string
 }
 
 // tokenClient stays off the task proxy. API calls still use h.Proxy.
+// A redirect to another host is not followed: the body carries the client secret.
 func (h *httpCore) tokenClient() *http.Client {
-	return &http.Client{Timeout: time.Duration(h.Timeout)}
+	return &http.Client{
+		Timeout: time.Duration(h.Timeout),
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) > 0 && !strings.EqualFold(req.URL.Hostname(), via[0].URL.Hostname()) {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		},
+	}
 }
 
 func (h *httpCore) fetchToken(resolved *resolvedAuth) (string, time.Duration, error) {
