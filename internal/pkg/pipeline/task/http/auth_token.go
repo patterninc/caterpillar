@@ -54,17 +54,24 @@ func tokenUsable(now time.Time, entry cachedToken) bool {
 	return remaining >= authRefreshSkew
 }
 
-func (a *auth) invalidate(key string) {
+// invalidate drops rejected only when it is still the cached token.
+// A newer cached token is left alone. An in-flight refresh is left in place so its store lands and the retry joins it.
+func (a *auth) invalidate(key, rejected string) {
 	a.cache.mu.Lock()
 	defer a.cache.mu.Unlock()
 
+	entry, ok := a.cache.entries[key]
+	if !ok || entry.value != rejected {
+		return
+	}
+	delete(a.cache.entries, key)
+	if a.cache.inflight[key] != nil {
+		return
+	}
 	if a.cache.gen == nil {
 		a.cache.gen = make(map[string]uint64)
 	}
 	a.cache.gen[key]++
-	delete(a.cache.entries, key)
-	// The fetch already running keeps its pointer. Its store is dropped because gen moved.
-	delete(a.cache.inflight, key)
 }
 
 // token returns a cached access token or the result of a single in-flight fetch for key.
@@ -118,16 +125,40 @@ func (a *auth) token(key string, now time.Time, fetch func() (string, time.Durat
 }
 
 // tokenClient stays off the task proxy. API calls still use h.Proxy.
-// A redirect to another host is not followed: the body carries the client secret.
+// A redirect that changes scheme, host, or port is not followed: the body carries the client secret.
 func (h *httpCore) tokenClient() *http.Client {
 	return &http.Client{
 		Timeout: time.Duration(h.Timeout),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) > 0 && !strings.EqualFold(req.URL.Hostname(), via[0].URL.Hostname()) {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			if len(via) > 0 && !sameEndpoint(req.URL, via[0].URL) {
 				return http.ErrUseLastResponse
 			}
 			return nil
 		},
+	}
+}
+
+func sameEndpoint(next, prev *url.URL) bool {
+	if !strings.EqualFold(next.Scheme, prev.Scheme) || !strings.EqualFold(next.Hostname(), prev.Hostname()) {
+		return false
+	}
+	return endpointPort(next) == endpointPort(prev)
+}
+
+func endpointPort(u *url.URL) string {
+	if port := u.Port(); port != `` {
+		return port
+	}
+	switch strings.ToLower(u.Scheme) {
+	case `https`:
+		return `443`
+	case `http`:
+		return `80`
+	default:
+		return ``
 	}
 }
 

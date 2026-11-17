@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -254,29 +255,35 @@ func (r *resolvedAuth) cacheKey() string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (h *httpCore) applyAuth(req *http.Request, rc *record.Record) error {
+func (h *httpCore) applyAuth(req *http.Request, rc *record.Record) (string, error) {
 	resolved, err := h.Auth.resolve(rc)
 	if err != nil {
-		return err
+		return ``, err
 	}
 
 	token, err := h.Auth.token(resolved.cacheKey(), time.Now(), func() (string, time.Duration, error) {
 		return h.fetchToken(resolved)
 	})
 	if err != nil {
-		return err
+		return ``, err
 	}
-	return setAuthHeader(req, resolved, token)
+	if err := setAuthHeader(req, resolved, token); err != nil {
+		return ``, err
+	}
+	return token, nil
 }
 
-func (h *httpCore) invalidateAuth(rc *record.Record) error {
+func (h *httpCore) invalidateAuth(rc *record.Record, rejected string) error {
 	resolved, err := h.Auth.resolve(rc)
 	if err != nil {
 		return err
 	}
-	h.Auth.invalidate(resolved.cacheKey())
+	h.Auth.invalidate(resolved.cacheKey(), rejected)
 	return nil
 }
+
+// authHeaderContextKey carries the rendered auth header name so a redirect can drop it.
+type authHeaderContextKey struct{}
 
 func setAuthHeader(req *http.Request, resolved *resolvedAuth, token string) error {
 	value, err := formatAuthToken(resolved.Scheme, token)
@@ -284,6 +291,7 @@ func setAuthHeader(req *http.Request, resolved *resolvedAuth, token string) erro
 		return err
 	}
 	req.Header.Set(resolved.Header, value)
+	*req = *req.WithContext(context.WithValue(req.Context(), authHeaderContextKey{}, resolved.Header))
 	return nil
 }
 

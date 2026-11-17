@@ -85,12 +85,29 @@ func (h *httpCore) getClient() *http.Client {
 		transport.MaxIdleConnsPerHost = defaultMaxConnsPerHost
 		jar, _ := cookiejar.New(nil)
 		h.client = &http.Client{
-			Timeout:   time.Duration(h.Timeout),
-			Transport: transport,
-			Jar:       jar,
+			Timeout:       time.Duration(h.Timeout),
+			Transport:     transport,
+			Jar:           jar,
+			CheckRedirect: dropAuthHeaderOnHostChange,
 		}
 	})
 	return h.client
+}
+
+// dropAuthHeaderOnHostChange removes a custom auth header when a redirect changes host.
+// Go already strips Authorization. The name is the one applyAuth stored on the request.
+func dropAuthHeaderOnHostChange(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if len(via) == 0 || strings.EqualFold(req.URL.Hostname(), via[0].URL.Hostname()) {
+		return nil
+	}
+	name, _ := req.Context().Value(authHeaderContextKey{}).(string)
+	if name != `` {
+		req.Header.Del(name)
+	}
+	return nil
 }
 
 func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
@@ -352,8 +369,10 @@ func (h *httpCore) call(endpoint string, rc *record.Record) (*result, error) {
 		if h.Auth != nil && h.Oauth != nil {
 			return nil, errAuthAndOAuth
 		}
+		var authToken string
 		if h.Auth != nil {
-			if err := h.applyAuth(request, rc); err != nil {
+			authToken, err = h.applyAuth(request, rc)
+			if err != nil {
 				return nil, err
 			}
 		} else if h.Oauth != nil {
@@ -378,9 +397,10 @@ func (h *httpCore) call(endpoint string, rc *record.Record) (*result, error) {
 			}
 			jar, _ := cookiejar.New(nil)
 			client = &http.Client{
-				Timeout:   time.Duration(h.Timeout),
-				Transport: transport,
-				Jar:       jar,
+				Timeout:       time.Duration(h.Timeout),
+				Transport:     transport,
+				Jar:           jar,
+				CheckRedirect: dropAuthHeaderOnHostChange,
 			}
 		}
 
@@ -409,7 +429,7 @@ func (h *httpCore) call(endpoint string, rc *record.Record) (*result, error) {
 				lastErr = fmt.Errorf("unexpected http response code [%v %s]: %s", code, http.StatusText(code), string(body))
 				if h.Auth != nil && !authRefreshed && (code == http.StatusUnauthorized || code == http.StatusForbidden) {
 					authRefreshed = true
-					if err := h.invalidateAuth(rc); err != nil {
+					if err := h.invalidateAuth(rc, authToken); err != nil {
 						return nil, err
 					}
 				}
