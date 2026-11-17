@@ -94,13 +94,13 @@ func (h *httpCore) getClient() *http.Client {
 	return h.client
 }
 
-// dropAuthHeaderOnHostChange removes a custom auth header when a redirect changes host.
-// Go already strips Authorization. The name is the one applyAuth stored on the request.
+// dropAuthHeaderOnHostChange removes the auth header when a redirect changes scheme, host, or port.
+// The name is the one applyAuth stored on the request.
 func dropAuthHeaderOnHostChange(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
 	}
-	if len(via) == 0 || strings.EqualFold(req.URL.Hostname(), via[0].URL.Hostname()) {
+	if len(via) == 0 || sameEndpoint(req.URL, via[0].URL) {
 		return nil
 	}
 	name, _ := req.Context().Value(authHeaderContextKey{}).(string)
@@ -427,11 +427,15 @@ func (h *httpCore) call(endpoint string, rc *record.Record) (*result, error) {
 		if h.ExpectedStatuses != nil {
 			if code := response.StatusCode; !h.ExpectedStatuses.Has(code) {
 				lastErr = fmt.Errorf("unexpected http response code [%v %s]: %s", code, http.StatusText(code), string(body))
-				if h.Auth != nil && !authRefreshed && (code == http.StatusUnauthorized || code == http.StatusForbidden) {
-					authRefreshed = true
+				if h.Auth != nil && (code == http.StatusUnauthorized || code == http.StatusForbidden) {
 					if err := h.invalidateAuth(rc, authToken); err != nil {
 						return nil, err
 					}
+					// One refresh per call: a rejected replacement token fails the call.
+					if authRefreshed {
+						break
+					}
+					authRefreshed = true
 				}
 				if attempt < h.MaxRetries {
 					h.handleBackoff(attempt, response)

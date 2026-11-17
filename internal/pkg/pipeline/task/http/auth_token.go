@@ -26,14 +26,11 @@ const (
 type authCache struct {
 	mu       sync.Mutex
 	entries  map[string]cachedToken
-	gen      map[string]uint64
 	inflight map[string]*tokenFetch
 }
 
 // tokenFetch is one in-flight token HTTP call. Waiters block on done.
-// gen is the cache generation captured when the fetch started.
 type tokenFetch struct {
-	gen      uint64
 	done     chan struct{}
 	token    string
 	lifetime time.Duration
@@ -54,28 +51,18 @@ func tokenUsable(now time.Time, entry cachedToken) bool {
 	return remaining >= authRefreshSkew
 }
 
-// invalidate drops rejected only when it is still the cached token.
-// A newer cached token is left alone. An in-flight refresh is left in place so its store lands and the retry joins it.
+// invalidate drops rejected only when it is still the cached token, so a late 401 keeps a newer token.
+// An in-flight refresh is left in place so the retry joins it.
 func (a *auth) invalidate(key, rejected string) {
 	a.cache.mu.Lock()
 	defer a.cache.mu.Unlock()
 
-	entry, ok := a.cache.entries[key]
-	if !ok || entry.value != rejected {
-		return
+	if entry, ok := a.cache.entries[key]; ok && entry.value == rejected {
+		delete(a.cache.entries, key)
 	}
-	delete(a.cache.entries, key)
-	if a.cache.inflight[key] != nil {
-		return
-	}
-	if a.cache.gen == nil {
-		a.cache.gen = make(map[string]uint64)
-	}
-	a.cache.gen[key]++
 }
 
 // token returns a cached access token or the result of a single in-flight fetch for key.
-// invalidate drops a rejected token; the next call joins whatever fetch is already running.
 func (a *auth) token(key string, now time.Time, fetch func() (string, time.Duration, error)) (string, error) {
 	a.cache.mu.Lock()
 	if entry, ok := a.cache.entries[key]; ok && tokenUsable(now, entry) {
@@ -88,13 +75,10 @@ func (a *auth) token(key string, now time.Time, fetch func() (string, time.Durat
 		return flight.token, flight.err
 	}
 
-	if a.cache.gen == nil {
-		a.cache.gen = make(map[string]uint64)
-	}
 	if a.cache.inflight == nil {
 		a.cache.inflight = make(map[string]*tokenFetch)
 	}
-	flight := &tokenFetch{gen: a.cache.gen[key], done: make(chan struct{})}
+	flight := &tokenFetch{done: make(chan struct{})}
 	a.cache.inflight[key] = flight
 	a.cache.mu.Unlock()
 
@@ -102,26 +86,31 @@ func (a *auth) token(key string, now time.Time, fetch func() (string, time.Durat
 
 	a.cache.mu.Lock()
 	defer a.cache.mu.Unlock()
-	if err == nil && lifetime > 0 && a.cache.gen[key] == flight.gen {
+	if err == nil && lifetime > 0 {
 		if a.cache.entries == nil {
 			a.cache.entries = make(map[string]cachedToken)
 		}
-		// A fetch that started earlier must not replace a token that expires later.
-		expiresAt := now.Add(lifetime)
-		if current, ok := a.cache.entries[key]; !ok || !current.expiresAt.After(expiresAt) {
-			a.cache.entries[key] = cachedToken{
-				value:     token,
-				expiresAt: expiresAt,
-				lifetime:  lifetime,
-			}
+		// Only this flight writes key, so the entry it replaces is stale even if it expires later.
+		a.cache.entries[key] = cachedToken{
+			value:     token,
+			expiresAt: now.Add(lifetime),
+			lifetime:  lifetime,
 		}
 	}
-	if a.cache.inflight[key] == flight {
-		delete(a.cache.inflight, key)
-	}
+	a.cache.evictExpired(time.Now())
+	delete(a.cache.inflight, key)
 	flight.token, flight.lifetime, flight.err = token, lifetime, err
 	close(flight.done)
 	return token, err
+}
+
+// evictExpired bounds the cache when records resolve to many identities. Caller holds mu.
+func (c *authCache) evictExpired(now time.Time) {
+	for key, entry := range c.entries {
+		if !entry.expiresAt.After(now) {
+			delete(c.entries, key)
+		}
+	}
 }
 
 // tokenClient stays off the task proxy. API calls still use h.Proxy.
@@ -300,7 +289,8 @@ func (r *resolvedAuth) tokenRequest() (*http.Request, error) {
 		req.Header.Set(contentTypeKey, contentType)
 	}
 	if r.ClientAuth == clientAuthBasic {
-		req.SetBasicAuth(r.ClientID, r.ClientSecret)
+		// RFC 6749 section 2.3.1 form-encodes both values before Base64.
+		req.SetBasicAuth(url.QueryEscape(r.ClientID), url.QueryEscape(r.ClientSecret))
 	}
 	return req, nil
 }
@@ -352,13 +342,13 @@ func expiresFromFloat(seconds float64) (time.Duration, bool) {
 	return time.Duration(seconds * float64(time.Second)), true
 }
 
-// tokenTransportErr drops the request URL. *url.Error includes the query string and user info.
+// tokenTransportErr keeps no text from err: a wrapped error can carry a redirect URL with credentials.
 func tokenTransportErr(err error) error {
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) && urlErr.Err != nil {
-		return urlErr.Err
+	var netErr interface{ Timeout() bool }
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return errors.New("request timed out")
 	}
-	return err
+	return errors.New("transport error")
 }
 
 func tokenURLForError(raw string) string {

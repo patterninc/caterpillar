@@ -161,9 +161,9 @@ The 2.0 flow builds a signed JWT assertion, so `private_key`, `issuer`, `subject
 
 `auth` fetches a short-lived access token and sets it on each API request, including every page from `next_page`. It cannot be combined with `oauth`: if both are set, the task fails before it sends a request, and `ignore_error` does not apply.
 
-The token request uses the task `timeout` and does not use the task `proxy`. A token redirect is followed only when the scheme, host, and port stay the same. `expected_statuses` applies only to the API call. A failed token request fails the record before the API request.
+The token request uses the task `timeout` and does not use the task `proxy`. A token redirect is followed only when the scheme, host, and port stay the same. An API redirect that changes the scheme, host, or port drops the auth header. `expected_statuses` applies only to the API call. A failed token request fails the record before the API request.
 
-The token is cached for the task until `expires_in`. It is fetched again when the remaining lifetime is under 30 seconds, or under half of `expires_in` when that lifetime is shorter than 60 seconds. A response with no `expires_in` is not cached. Workers share one cache entry and one in-flight fetch. Scope, audience, issuer, and private key are part of that entry's identity, so a different scope does not reuse another record's token. The client secret is not part of that identity, so two secrets for the same client share the cached token. A `401` or `403` that is not listed in `expected_statuses` drops the cached token. The retry fetches it once, and other workers join that fetch.
+The token is cached for the task until `expires_in`. It is fetched again when the remaining lifetime is under 30 seconds, or under half of `expires_in` when that lifetime is shorter than 60 seconds. A response with no `expires_in` is not cached. Expired entries are evicted when a new token is stored. Workers share one cache entry and one in-flight fetch. Scope, audience, issuer, and private key are part of that entry's identity, so a different scope does not reuse another record's token. The client secret is not part of that identity, so two secrets for the same client share the cached token. A `401` or `403` that is not listed in `expected_statuses` drops the cached token if it is still the one that was rejected. The retry fetches it once, and other workers join that fetch. If the replacement token is also rejected, it is dropped and the call fails without further retries.
 
 ```yaml
 auth:
@@ -184,7 +184,7 @@ auth:
   expires_field: expires_in          # default
 ```
 
-`scheme: bearer` sends `Bearer <token>`, `raw` sends the token alone, and `token` sends `Token <token>`. `client_auth: basic` sends the client id and secret as an HTTP Basic header instead of in the body or query.
+`scheme: bearer` sends `Bearer <token>`, `raw` sends the token alone, and `token` sends `Token <token>`. `client_auth: basic` sends the form-encoded client id and secret as an HTTP Basic header instead of in the body or query.
 
 `client_credentials` sends `grant_type`, `client_id`, and `client_secret`. `jwt_bearer` signs an assertion (`iss`, `sub`, `aud`, `iat`, `exp`, and `scope` when set) with `private_key` and posts `grant_type` `urn:ietf:params:oauth:grant-type:jwt-bearer` plus `assertion`. It requires `private_key`, `issuer`, `subject`, and `audience`.
 
