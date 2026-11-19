@@ -8,12 +8,20 @@ Caterpillar is a single Go CLI, `caterpillar -conf <pipeline.yaml>`, that runs a
 
 | What | Command |
 | --- | --- |
+| One-command setup (toolchain check, build, tests, smoke, hooks) | `scripts/dev.sh` |
 | Build | `go build -o caterpillar ./cmd/caterpillar/caterpillar.go` |
 | Run a pipeline | `./caterpillar -conf test/pipelines/hello_name.yaml` |
-| Tests (as CI runs them) | `go test -race ./...` |
-| Vet (as CI runs it) | `go vet -copylocks=false ./...` |
+| Unit and golden tests | `go test -race ./...` |
+| Regenerate golden files | `go test ./test/golden/... -run Golden -update` (then review the diff) |
+| Integration tests (LocalStack) | see [Integration tests](#integration-tests) |
+| Benchmarks | `go test -run='^$' -bench=. -benchmem ./...` |
+| Lint (golangci-lint v2.15.0, built with Go 1.27) | `golangci-lint run ./...` |
 | Format check | `gofmt -l $(git ls-files '*.go')` must print nothing |
-| Docker image | `docker build -f build/Dockerfile .` |
+| Vet (as CI runs it) | `go vet -copylocks=false ./...` |
+| Coverage floor | `go test -coverprofile=coverage.out ./... && scripts/check-coverage.sh coverage.out` |
+| Dependency policy, licenses | `scripts/check-deps.sh`, `scripts/check-licenses.sh` |
+| Smoke test a binary or image | `scripts/smoke.sh ./caterpillar`, `scripts/smoke.sh docker:patternoss/caterpillar:dev` |
+| Watch mode | `PIPELINE=test/pipelines/<file>.yaml air` (config in `.air.toml`) |
 
 **Toolchain:** Go version from `go.mod` (1.27). A C compiler is required because `confluent-kafka-go` builds with cgo; the module bundles librdkafka for glibc builds, and `build/Dockerfile` links Alpine's librdkafka (`-tags dynamic`), which must be 2.14.0 or newer.
 
@@ -30,7 +38,7 @@ Caterpillar is a single Go CLI, `caterpillar -conf <pipeline.yaml>`, that runs a
 | `internal/pkg/pipeline/record/` | `Record` (ID, Origin, Data, Context) passed between tasks |
 | `internal/pkg/pipeline/task/<type>/` | One package per task type, each with a `README.md` documenting its fields |
 | `internal/pkg/jq/` | gojq wrapper plus custom functions (crypto, shuffle, sleep, translate) |
-| `test/pipelines/` | Example pipelines and fixture data, used for manual runs and the release check |
+| `test/pipelines/` | Example pipelines and fixture data; several are run by the golden tests |
 | `docs/` | ADRs, runbooks, on-call playbook, readiness audit |
 
 ## Adding or changing a task type
@@ -42,7 +50,7 @@ Follow `.claude/skills/add-task-type/SKILL.md`. In short:
 3. Put client creation in `Init()`; `tasks.go` calls it once after decoding and `validator` checks.
 4. In `Run`, for every input record: send results with `SendData`/`SendRecord`, then `ack.Release(r.Context)` on success or `ack.Reject(r.Context)` on failure. Returning an error stops that worker.
 5. Write `README.md` (Configuration Fields table, behaviour, example) and add the type to the Supported Tasks list in the top-level `README.md`.
-6. Add unit tests next to the code (`*_test.go`), driving `Run` with channels.
+6. Add unit tests next to the code and, for AWS types, a `//go:build integration` test.
 
 ## Invariants (break these and pipelines silently lose data)
 
@@ -56,26 +64,39 @@ Follow `.claude/skills/add-task-type/SKILL.md`. In short:
 
 ## Tests
 
-- Tests live next to the code (`*_test.go`) and must be offline and deterministic: no network, AWS, Kafka, or wall-clock assertions. Use `t.TempDir()` for files. Match the style of `internal/pkg/pipeline/dag_test.go` and `internal/pkg/pipeline/task/acking_test.go` (testify, table-driven).
-- Ack behaviour is covered by `internal/pkg/pipeline/task/acking_test.go` and `internal/pkg/pipeline/ack/ack_test.go`; extend them when a task's ack handling changes.
+- Unit tests live next to the code (`*_test.go`), use `testify`, and must be offline and deterministic: no network, AWS, Kafka, or wall-clock assertions. Use `t.TempDir()` for files.
+- Golden tests run selected `test/pipelines/*.yaml` and compare stdout with `test/golden/testdata/*.golden`. Only use pipelines whose output order is deterministic.
+- <a id="integration-tests"></a>Integration tests are `*_integration_test.go` with `//go:build integration` and skip unless `AWS_ENDPOINT_URL` is set. Locally:
+  ```bash
+  docker run -d --rm -p 4566:4566 -e SERVICES=s3,sqs,sns,ssm localstack/localstack:4.14.0
+  AWS_ENDPOINT_URL=http://localhost:4566 AWS_ENDPOINT_URL_S3=http://s3.localhost.localstack.cloud:4566 \
+    AWS_REGION=us-east-1 AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test \
+    go test -race -tags=integration -run Integration ./...
+  ```
+  The S3 client has no path-style option, so S3 needs LocalStack's wildcard hostname.
+- Benchmarks are `*_bench_test.go`. `.github/workflows/bench.yml` compares each PR with its base and fails on a significant slowdown of more than 25%.
 - **Flaky tests:** do not retry in a loop or add sleeps. Quarantine with `t.Skip("flaky: <ClickUp task id>")` as the first line, link the task in the PR, and fix or delete it within two weeks. `go test -run <Name> -count=50 -race` reproduces most races.
+- Coverage may not drop below the floor in `scripts/check-coverage.sh`. Raise the floor when you add tests; never lower it to pass.
 
-## CI
+## CI (all on every pull request to `main`)
 
-| Check (job name) | Workflow | When | What it runs |
-| --- | --- | --- | --- |
-| `build` | `.github/workflows/ci.yaml` | Pull requests to `main` | build, `go vet -copylocks=false`, `go test -race ./...` |
-| Release jobs | `.github/workflows/release.yaml` | Pushes to `main`, `v*` and `latest` tags | amd64 and arm64 builds, each run on `test/pipelines/hello_name.yaml`; GitHub release; Docker Hub image |
+| Check (job name) | Workflow | What it runs |
+| --- | --- | --- |
+| `build` | `ci.yaml` | build, `go vet -copylocks=false`, `go test -race` |
+| `lint`, `format`, `coverage`, `dependencies`, `licenses` | `quality.yml` | golangci-lint, gofmt, coverage floor with `go test -json` artifact, deny list and `go mod verify`, go-licenses |
+| `integration` | `integration.yml` | LocalStack S3, SQS, SNS, SSM tests |
+| `pr-title` | `pr-title.yml` | Conventional Commits PR title |
+| `bench` | `bench.yml` | benchstat comparison (informational) |
 
-Wiz scanners (secrets, SAST, dependencies, IaC) report on every PR through Pattern's org-wide policy.
+After a release run, `smoke.yml` smoke-tests the published binaries and image. `mutation.yml` runs gremlins weekly.
 
 ## Conventions
 
 - PR titles and commits: Conventional Commits (`feat(http): ...`, `fix(sqs): ...`). The squash-merge title becomes the release note.
 - Update `CHANGELOG.md` under `## [Unreleased]` for any change to a task's fields or behaviour; breaking changes need a **Migration** note.
 - Match the existing style: backtick string literals, early returns, blank lines inside function bodies, comments that explain *why*.
-- Keep code `gofmt`-clean and `go vet -copylocks=false` clean.
-- Prefer `aws-sdk-go-v2`, `gopkg.in/yaml.v3` and the standard library's `errors`; do not add AWS SDK v1, `github.com/pkg/errors` or `gopkg.in/yaml.v2` as direct dependencies.
+- Lint baselines live in `.golangci.yml` under `exclusions.rules`, scoped to one file each. Remove an entry when you fix its finding; never widen one.
+- Do not add direct dependencies listed in `.github/dependency-policy.txt`.
 
 ## Where to look next
 

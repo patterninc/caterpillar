@@ -17,4 +17,4 @@ Inferred rationale: keeping the linear runner as the default protected existing 
 
 - Two runners to maintain. Ack handling must hold in both: `distributeToChannels` registers one ack branch per copy itself, because it does not go through `SendRecord` (ADR 0005).
 - Branches share the same `*record.Record`; a task that mutates a record in one branch is visible in the others.
-- `validateInput` in `dag.go` has a cyclomatic complexity of 36, the highest in the repo (measured with gocyclo on 2026-11-19).
+- `validateInput` in `dag.go` has a cyclomatic complexity of 36 and is the one baselined `gocyclo` finding in `.golangci.yml`.

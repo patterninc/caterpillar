@@ -15,5 +15,5 @@ Each type lives in its own package under `internal/pkg/pipeline/task/<type>/` wi
 
 - Adding a type is local: one package, one registry line, one README. `.claude/skills/add-task-type/SKILL.md` documents the steps.
 - An unknown type fails at load with `task type is not supported: <type>`, before any task runs.
-- Task packages must not import `internal/pkg/pipeline` (that would be an import cycle, which the compiler rejects).
+- Task packages must not import `internal/pkg/pipeline` (that would be an import cycle); `.golangci.yml` enforces this with `depguard`.
 - `Init()` errors (for example, an unreachable AWS endpoint) surface at load time as `failed to initialize task <name>`.

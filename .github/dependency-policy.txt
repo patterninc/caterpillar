@@ -1,0 +1,9 @@
+# Modules that must not be added as direct dependencies (lines in go.mod
+# without "// indirect"). One module path per line, then " # reason".
+# scripts/check-deps.sh enforces this list in CI and in pre-commit.
+github.com/aws/aws-sdk-go # AWS SDK v1 is end of support; use github.com/aws/aws-sdk-go-v2
+github.com/golang/protobuf # superseded by google.golang.org/protobuf
+github.com/pkg/errors # archived; use errors and fmt.Errorf with %w
+github.com/dgrijalva/jwt-go # unmaintained, CVE-2020-26160; use github.com/golang-jwt/jwt/v5
+github.com/satori/go.uuid # unmaintained, insecure randomness; use github.com/google/uuid
+gopkg.in/yaml.v2 # the repo standardises on gopkg.in/yaml.v3

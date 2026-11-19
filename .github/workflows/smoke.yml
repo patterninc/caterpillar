@@ -1,0 +1,129 @@
+name: Smoke
+
+# Runs after every successful Release run and checks what it published: the
+# GitHub release binaries for v* tags, and the patternoss/caterpillar image
+# for main (`dev`), v* tags (`<version>`) and `latest`. Each runs
+# test/pipelines/hello_name.yaml through scripts/smoke.sh.
+on:
+  workflow_run:
+    workflows: [ Release ]
+    types: [ completed ]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag (v1.2.3, latest) or main
+        required: true
+        default: main
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  resolve:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    outputs:
+      ref: ${{ steps.ref.outputs.ref }}
+      sha: ${{ steps.ref.outputs.sha }}
+      image_tag: ${{ steps.ref.outputs.image_tag }}
+      image: ${{ steps.ref.outputs.image }}
+      binary: ${{ steps.ref.outputs.binary }}
+    steps:
+    - name: Resolve what was published
+      id: ref
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        RUN_ID: ${{ github.event.workflow_run.id }}
+        RUN_REF: ${{ github.event.workflow_run.head_branch }}
+        RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        INPUT_REF: ${{ inputs.ref }}
+      run: |
+        set -euo pipefail
+        if [ -n "$INPUT_REF" ]; then
+          ref="$INPUT_REF"
+          sha="$(gh api "repos/$REPO/commits/$ref" --jq .sha)"
+          image=true
+        else
+          ref="$RUN_REF"
+          sha="$RUN_SHA"
+          merge="$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --jq '[.jobs[] | select(.name == "docker-merge")][0].conclusion // "skipped"')"
+          image="$([ "$merge" = success ] && echo true || echo false)"
+          if [ "$image" = false ]; then
+            echo "::warning::docker-merge did not publish an image in run $RUN_ID ($merge); skipping the image smoke test"
+          fi
+        fi
+        case "$ref" in
+          main) tag=dev; binary=false ;;
+          latest) tag=latest; binary=false ;;
+          v*) tag="${ref#v}"; binary=true ;;
+          *) echo "::error::No published artifacts are defined for $ref"; exit 1 ;;
+        esac
+        {
+          echo "ref=$ref"
+          echo "sha=$sha"
+          echo "image_tag=$tag"
+          echo "image=$image"
+          echo "binary=$binary"
+        } >> "$GITHUB_OUTPUT"
+
+  smoke-binary:
+    needs: resolve
+    if: needs.resolve.outputs.binary == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - asset: caterpillar
+            runner: ubuntu-24.04
+          - asset: caterpillar-linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        ref: ${{ needs.resolve.outputs.sha }}
+        persist-credentials: false
+
+    - name: Download release asset
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: ${{ needs.resolve.outputs.ref }}
+        ASSET: ${{ matrix.asset }}
+      run: |
+        gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$ASSET" --dir "$RUNNER_TEMP"
+        chmod +x "$RUNNER_TEMP/$ASSET"
+
+    - name: Smoke test
+      env:
+        ASSET: ${{ matrix.asset }}
+      run: scripts/smoke.sh "$RUNNER_TEMP/$ASSET"
+
+  smoke-image:
+    needs: resolve
+    if: needs.resolve.outputs.image == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        ref: ${{ needs.resolve.outputs.sha }}
+        persist-credentials: false
+
+    - name: Smoke test
+      env:
+        TAG: ${{ needs.resolve.outputs.image_tag }}
+        PLATFORM: ${{ matrix.platform }}
+      run: |
+        docker pull --platform "$PLATFORM" "patternoss/caterpillar:$TAG"
+        scripts/smoke.sh "docker:patternoss/caterpillar:$TAG"

@@ -1,0 +1,14 @@
+# stdout
+echo - {"hash":"beda78b3c86280efd15218e4fa2106af5e763607a58ac4599d21411ab0eac52a","name":"Aadhya"}
+echo - {"hash":"45d59db9dd72162fc01209947c59df30903e99b2904c994c412d9cb988e7eb79","name":"Aaliyah"}
+echo - {"hash":"889d040c23b96914f6b7e64b8baa501ec46b457de6aa715a59a4841149148546","name":"Aarav"}
+echo - {"hash":"324a17d21917a99cf2ac6ea468b73ece5685161d414e9416c16df0018d3c6db5","name":"Aaron"}
+echo - {"hash":"cda1a8908779af6da73e058ec134f33ae90246d1599433691fd987e09d624a28","name":"Abby"}
+echo - {"hash":"36dd0c81757a4e8b251436ef88a3bf4ce537c680e5771debee1bbc5051179082","name":"Abdiel"}
+echo - {"hash":"5eb60936c374c1be93fab792fc9946de3cd025da80961e605844feab4e55bb9b","name":"Abdullah"}
+echo - {"hash":"744346004d55ba351fe0c44acef27aaeb66c318124a0d71879050f0a19afddae","name":"Abel"}
+echo - {"hash":"f5ea3614e396c1bf0c6ebd301a2d7b2f4b23dd26233c1e7c9ebb5ef3a03c3430","name":"Abigail"}
+echo - {"hash":"ec824af319821166ef2806d8ffd1acd34bba02d794b973c299991410d6bd039f","name":"Abner"}
+# diagnostics
+# result
+ok

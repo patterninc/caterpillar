@@ -1,0 +1,90 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+    - gocyclo
+    - depguard
+  settings:
+    govet:
+      enable-all: false
+      disable:
+        - copylocks
+    staticcheck:
+      checks:
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        - -QF1008
+        - -QF1012
+        - -S1021
+    gocyclo:
+      min-complexity: 30
+    depguard:
+      rules:
+        cmd-boundary:
+          list-mode: lax
+          files:
+            - "**/internal/pkg/**"
+          deny:
+            - pkg: github.com/patterninc/caterpillar/cmd
+              desc: internal packages must not import the cmd entrypoint
+        task-boundary:
+          list-mode: lax
+          files:
+            - "**/internal/pkg/pipeline/task/**"
+            - "!**/internal/pkg/pipeline/task/task.go"
+          deny:
+            - pkg: github.com/patterninc/caterpillar/internal/pkg/pipeline$
+              desc: task packages are registered by pipeline/tasks.go and must not import the pipeline package back
+        no-legacy-aws-sdk:
+          list-mode: lax
+          deny:
+            - pkg: github.com/aws/aws-sdk-go/
+              desc: use github.com/aws/aws-sdk-go-v2
+            - pkg: io/ioutil
+              desc: deprecated; use io and os
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    # Baseline: findings that existed when this config was added (2026-11-19).
+    # Each rule is scoped to one file so new code is still checked. Remove a
+    # rule once its finding is fixed.
+    rules:
+      - path: internal/pkg/pipeline/dag.go
+        linters: [gocyclo]
+        text: "func `validateInput`"
+      - path: internal/pkg/jq/crypto.go
+        linters: [staticcheck]
+        text: "SA1019: golang.org/x/crypto/blowfish is deprecated"
+      - path: internal/pkg/pipeline/task/http/server/(auth|handler)\.go
+        linters: [errcheck]
+        text: "w.Write"
+      - path: internal/pkg/pipeline/task/file/writer.go
+        linters: [unused]
+        text: "nopWriteCloser"
+      - path: internal/pkg/pipeline/task/http/http.go
+        linters: [unused]
+        text: "var ctx is unused"
+
+formatters:
+  enable:
+    - gofmt
+  settings:
+    gofmt:
+      simplify: false

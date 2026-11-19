@@ -1,0 +1,78 @@
+name: Benchmarks
+
+# Runs every Benchmark* on the pull request and on its base commit, compares
+# them with benchstat, and fails when a benchmark is significantly slower
+# (p < 0.05) by more than THRESHOLD percent. Informational until the team
+# makes `bench` a required check; shared runners are noisy, hence the margin.
+on:
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  THRESHOLD: '25'
+  BENCH_ARGS: -run=^$ -bench=. -benchmem -count=10 -benchtime=300ms ./...
+
+jobs:
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+
+    - name: Install benchstat
+      run: go install golang.org/x/perf/cmd/benchstat@4febdb082b2ce2a0f9f6f496698aa5a2273279b8
+
+    - name: Benchmark this commit
+      run: |
+        set -o pipefail
+        go test $BENCH_ARGS | tee "$RUNNER_TEMP/new.txt"
+
+    - name: Benchmark the base commit
+      if: github.event_name == 'pull_request'
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        set -o pipefail
+        git checkout --quiet "$BASE_SHA"
+        go test $BENCH_ARGS | tee "$RUNNER_TEMP/old.txt" || true
+        git checkout --quiet -
+
+    - name: Compare
+      run: |
+        set -euo pipefail
+        if [ ! -s "$RUNNER_TEMP/old.txt" ] || ! grep -q '^Benchmark' "$RUNNER_TEMP/old.txt"; then
+          benchstat "$RUNNER_TEMP/new.txt" | tee "$RUNNER_TEMP/benchstat.txt"
+          exit 0
+        fi
+        benchstat "$RUNNER_TEMP/old.txt" "$RUNNER_TEMP/new.txt" | tee "$RUNNER_TEMP/benchstat.txt"
+        benchstat -format csv "$RUNNER_TEMP/old.txt" "$RUNNER_TEMP/new.txt" > "$RUNNER_TEMP/benchstat.csv"
+        scripts/check-bench.sh "$RUNNER_TEMP/benchstat.csv" "$THRESHOLD"
+
+    - name: Upload results
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: benchmarks
+        path: ${{ runner.temp }}/*.txt
+        if-no-files-found: warn
+        retention-days: 30

@@ -1,0 +1,9 @@
+# stdout
+echo - "Aadhya"
+echo - "Aaliyah"
+echo - "Aarav"
+echo - "Aaron"
+# diagnostics
+error in raise_on_match: error: unexpected name: Abby
+# result
+ok

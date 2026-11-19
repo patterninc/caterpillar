@@ -1,0 +1,38 @@
+# stdout
+ - {
+  "description": [
+    "Built with Go for lightning-fast data processing and minimal resource\n                    consumption.",
+    "Version: 1.0.0"
+  ],
+  "icon": [
+    "🚀"
+  ],
+  "title": [
+    "High Performance"
+  ]
+}
+ - {
+  "description": [
+    "Create complex data workflows with modular tasks including file\n                    operations, HTTP requests, and data transformations."
+  ],
+  "icon": [
+    "🔗"
+  ],
+  "title": [
+    "Flexible Pipelines"
+  ]
+}
+ - {
+  "description": [
+    "Seamless integration with AWS services including S3, SQS, and Parameter\n                    Store with glob pattern support."
+  ],
+  "icon": [
+    "☁️"
+  ],
+  "title": [
+    "Cloud Ready"
+  ]
+}
+# diagnostics
+# result
+ok

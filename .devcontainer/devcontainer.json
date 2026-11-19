@@ -1,0 +1,18 @@
+{
+  "name": "caterpillar",
+  "image": "mcr.microsoft.com/devcontainers/go:2.3.4-1.27-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/aws-cli:1": {},
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
+    "ghcr.io/devcontainers/features/python:1": {}
+  },
+  "containerEnv": {
+    "CGO_ENABLED": "1"
+  },
+  "postCreateCommand": "pipx install pre-commit && go install github.com/air-verse/air@v1.67.4 && scripts/dev.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": ["golang.go"]
+    }
+  }
+}

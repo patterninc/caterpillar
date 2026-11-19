@@ -4,7 +4,7 @@
 
 | Where | Symptom | Fix |
 | --- | --- | --- |
-| Local | `cgo: C compiler "gcc" not found` or `clang: not found` | Install a C compiler: `xcode-select --install` (macOS), `apt-get install build-essential` (Debian/Ubuntu). |
+| Local | `cgo: C compiler "gcc" not found` or `clang: not found` | Install a C compiler: `xcode-select --install` (macOS), `apt-get install build-essential` (Debian/Ubuntu). `scripts/dev.sh` checks this. |
 | Local | `undefined: kafka.` errors | `CGO_ENABLED=0` is set; unset it. |
 | Docker build | `confluent-kafka-go requires librdkafka v2.14.0 or later` | `build/Dockerfile` installs librdkafka from Alpine `edge/community` because Alpine 3.20 ships 2.4.0. Check that edge still has a new enough package. |
 | Docker build | `apk` fetch errors from `dl-cdn.alpinelinux.org` | Mirror outage; re-run the job. |

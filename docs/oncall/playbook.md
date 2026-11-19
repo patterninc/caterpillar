@@ -19,7 +19,7 @@ Usually raised by the system running it (caterpillar-services, Airflow, a Heimda
 
 ## 2. A new release broke consumers
 
-1. Check the last Release run in Actions, then run the published artifact yourself: `docker run --rm -v "$PWD/test:/test:ro" -w / patternoss/caterpillar:<tag> /caterpillar -conf /test/pipelines/hello_name.yaml` should print 10 greetings.
+1. Check the last Release and Smoke runs in Actions. A failing `smoke-binary` or `smoke-image` means the published artifact is bad.
 2. Roll back with [release-and-rollback](../runbooks/release-and-rollback.md): move `latest` back, or ask consumers to pin the previous version.
 3. Post in `#dev-data-acquisition` with the bad version, the good version, and the consumer impact.
 4. Fix forward and cut a patch release.
@@ -29,6 +29,7 @@ Usually raised by the system running it (caterpillar-services, Airflow, a Heimda
 - `main` red: find the PR that broke it from the run's commit; revert if the fix is not quick, because every open PR is blocked by required checks.
 - Image not published: [docker-hub-publishing](../runbooks/docker-hub-publishing.md).
 - Build errors: [build-cgo-librdkafka](../runbooks/build-cgo-librdkafka.md).
+- `integration` red with LocalStack errors only: check whether the LocalStack image or service health changed before suspecting code.
 
 ## Severity
 

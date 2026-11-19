@@ -7,7 +7,7 @@ Add entries under **Unreleased** in the same PR as the change. When cutting a re
 ## [Unreleased]
 
 ### Added
-- Documentation: `AGENTS.md`, `CHANGELOG.md`, ADRs, runbooks, on-call playbook, secrets guide, agent skills and the agent-dispatch manifest. No change to the binary.
+- Developer and agent tooling: `AGENTS.md`, ADRs, runbooks, on-call playbook, golangci-lint, pre-commit, devcontainer, unit, golden, integration (LocalStack) and benchmark tests, and the `quality`, `integration`, `pr-title`, `bench`, `smoke` and `mutation` workflows. No change to the binary.
 
 ## [2.33.0] - 2026-11-17
 

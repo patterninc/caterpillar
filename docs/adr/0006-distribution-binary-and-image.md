@@ -15,5 +15,5 @@ Caterpillar is run by other systems (for example `patterninc/caterpillar-service
 
 - No cross-compiling; each architecture needs its own runner.
 - Asset names are a contract with downstream images and must not change.
-- "Deploy" for this repo means publishing; each build job runs `test/pipelines/hello_name.yaml` on its binary before upload, and `docker-merge` checks each platform's `/caterpillar` architecture.
-- Local builds need a C compiler.
+- "Deploy" for this repo means publishing; `smoke.yml` checks the published binaries and image after each release run.
+- Local builds need a C compiler (`scripts/dev.sh` checks for one).

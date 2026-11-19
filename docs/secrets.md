@@ -14,10 +14,10 @@ Caterpillar holds no runtime credentials. It reads them, at load time, with what
 | Secret | Used by | Exposed to pull requests |
 | --- | --- | --- |
 | `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | `docker-secrets`, `docker-build`, `docker-merge` in `release.yaml` | No: the workflow runs only on pushes to `main` and tags |
-| `GITHUB_TOKEN` | `release` (contents: write, tags only) | Read-only on pull requests |
+| `GITHUB_TOKEN` | `release` (contents: write, tags only), `pr-title` (pull-requests: read), `smoke` (read) | Read-only on pull requests |
 
-CI has no AWS credentials; tests are offline.
+Integration tests use LocalStack with the dummy credentials `test` / `test`; no real AWS account is reachable from CI.
 
 ## Leaks
 
-Pattern's org-wide Wiz scanning covers secret detection on every PR Running `gitleaks detect` locally before pushing is recommended. If a secret is committed: rotate it first, then remove it from the code; history rewrites do not help in a public repo.
+Pattern's org-wide Wiz scanning covers secret detection on every PR, and `.pre-commit-config.yaml` runs `gitleaks` locally. If a secret is committed: rotate it first, then remove it from the code; history rewrites do not help in a public repo.

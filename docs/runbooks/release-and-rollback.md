@@ -1,6 +1,6 @@
 # Cutting a release, rolling one back
 
-Publishing is the deploy for this repo (ADR 0006). `.github/workflows/release.yaml` runs on pushes to `main` and on `v*` and `latest` tags.
+Publishing is the deploy for this repo (ADR 0006). `.github/workflows/release.yaml` runs on pushes to `main` and on `v*` and `latest` tags; `.github/workflows/smoke.yml` runs after it.
 
 ## Cut a release
 
@@ -11,8 +11,8 @@ Publishing is the deploy for this repo (ADR 0006). `.github/workflows/release.ya
    git tag vX.Y.Z
    git push origin vX.Y.Z
    ```
-3. Watch the Release run: both `build-linux-*` jobs (each runs `hello_name.yaml` on its binary), `release`, then `docker-merge` (its last step checks both platforms' binaries). Then pull the new image and run `hello_name.yaml` once by hand (command in `docs/oncall/playbook.md`).
-4. If consumers track `latest`, move it once that check passes:
+3. Watch the Release run: both `build-linux-*` jobs, `release`, then `docker-merge`. Then watch Smoke: `smoke-binary` for both assets and `smoke-image` for both platforms.
+4. If consumers track `latest`, move it once the smoke run passes:
    ```bash
    git tag -f latest vX.Y.Z
    git push -f origin latest

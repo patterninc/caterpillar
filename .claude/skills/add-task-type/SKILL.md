@@ -17,5 +17,6 @@ description: Adds a new caterpillar task type (a YAML `type:` value) end to end 
 5. **Document** `internal/pkg/pipeline/task/<type>/README.md` with Function, Behavior, a Configuration Fields table (`name`, `type`, `task_concurrency`, `context`, `fail_on_error` rows included), and an example. Add the type to "Supported Tasks" in the top-level `README.md`. Add a `CHANGELOG.md` entry under Unreleased.
 6. **Test:**
    - unit tests in `<type>_test.go` driving `Run` with channels (see `internal/pkg/pipeline/task/acking_test.go` for ack assertions);
+   - for AWS-backed tasks, `<type>_integration_test.go` with `//go:build integration` that skips without `AWS_ENDPOINT_URL`;
    - an example pipeline under `test/pipelines/`.
-7. **Verify:** `gofmt -l`, `go vet -copylocks=false ./...`, `go test -race ./...`, `go build ./cmd/caterpillar/...`, then run the example pipeline.
+7. **Verify:** `gofmt -l`, `golangci-lint run ./...`, `go test -race ./...`, `go build ./cmd/caterpillar/...`, then run the example pipeline.

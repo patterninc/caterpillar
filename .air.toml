@@ -1,0 +1,17 @@
+# Watch mode: rebuilds ./tmp/caterpillar on every .go or pipeline change and
+# reruns the pipeline named by PIPELINE (default test/pipelines/hello_name.yaml).
+#   go install github.com/air-verse/air@v1.67.4
+#   PIPELINE=test/pipelines/<file>.yaml air
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/caterpillar ./cmd/caterpillar/caterpillar.go"
+  entrypoint = ["sh", "-c", "./tmp/caterpillar -conf \"${PIPELINE:-test/pipelines/hello_name.yaml}\""]
+  include_ext = ["go", "yaml", "yml"]
+  exclude_dir = ["tmp", "build", ".github", "docs"]
+  delay = 500
+  stop_on_error = true
+
+[misc]
+  clean_on_exit = true
