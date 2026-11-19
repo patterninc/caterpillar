@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "github": {
+    "repo": "patterninc/caterpillar"
+  },
+  "clickup_list_id": "901715758330",
+  "slack_channel": "#dev-data-acquisition",
+  "datadog": {
+    "service": "caterpillar",
+    "env": "prod"
+  },
+  "skills": {
+    "plugins": ["ai-sdlc", "data-acq"]
+  }
+}

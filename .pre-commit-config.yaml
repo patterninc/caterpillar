@@ -1,0 +1,54 @@
+# Mirrors the CI checks that are fast enough to run on commit. Install with
+# scripts/dev.sh, or: pre-commit install && pre-commit install --hook-type commit-msg
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+        exclude: ^test/pipelines/
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v2.15.0
+    hooks:
+      - id: golangci-lint
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.5.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: bash -c 'out="$(gofmt -l "$@")"; [ -z "$out" ] || { echo "$out"; exit 1; }' --
+        language: system
+        types: [go]
+      - id: go-vet
+        name: go vet
+        entry: go vet -copylocks=false ./...
+        language: system
+        types: [go]
+        pass_filenames: false
+      - id: go-test
+        name: go test
+        entry: go test ./...
+        language: system
+        types: [go]
+        pass_filenames: false
+      - id: dependency-policy
+        name: dependency policy
+        entry: scripts/check-deps.sh
+        language: system
+        files: ^(go\.mod|go\.sum|\.github/dependency-policy\.txt)$
+        pass_filenames: false

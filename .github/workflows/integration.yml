@@ -1,0 +1,70 @@
+name: Integration
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+# A new push to a pull request cancels the run for its previous commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    services:
+      localstack:
+        image: localstack/localstack:4.14.0
+        ports:
+          - 4566:4566
+        env:
+          SERVICES: s3,sqs,sns,ssm
+          EAGER_SERVICE_LOADING: 1
+        options: >-
+          --health-cmd "curl -fsS http://localhost:4566/_localstack/health"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 24
+          --health-start-period 10s
+
+    # AWS_ENDPOINT_URL_S3 uses LocalStack's wildcard hostname because the file
+    # task builds a default virtual-hosted S3 client, which plain localhost
+    # cannot serve.
+    env:
+      AWS_ENDPOINT_URL: http://localhost:4566
+      AWS_ENDPOINT_URL_S3: http://s3.localhost.localstack.cloud:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+
+    - name: Integration tests
+      run: |
+        set -o pipefail
+        go test -race -tags=integration -json -run Integration ./... | tee integration.json
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: integration-test-results
+        path: integration.json
+        if-no-files-found: warn

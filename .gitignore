@@ -34,3 +34,10 @@ go.work.sum
 PATTERN-AIDLC.md
 .aidlc-rule-details/
 aidlc-docs/
+
+# Local build, watch-mode and CI output
+/tmp/
+test-results.json
+integration.json
+gremlins.json
+gremlins.txt

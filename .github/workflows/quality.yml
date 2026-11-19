@@ -1,0 +1,134 @@
+name: Quality
+
+# Lint, format, coverage, dependency-policy and license checks. Every job runs
+# on every pull request (no paths filter) so each can be a required check; the
+# job ids are the check names.
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+
+    # goinstall builds golangci-lint with the module's Go version; a prebuilt
+    # binary built with an older Go refuses to lint a go 1.27 module.
+    - name: golangci-lint
+      uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+      with:
+        version: v2.15.0
+        install-mode: goinstall
+        args: --timeout=5m
+
+  format:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+
+    - name: gofmt
+      run: |
+        unformatted="$(gofmt -l $(git ls-files '*.go'))"
+        if [ -n "$unformatted" ]; then
+          echo "::error::gofmt needed on:"
+          echo "$unformatted"
+          exit 1
+        fi
+
+  coverage:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+
+    - name: Test with coverage
+      run: |
+        set -o pipefail
+        go test -race -json -covermode=atomic -coverprofile=coverage.out ./... | tee test-results.json
+
+    - name: Coverage floor
+      run: scripts/check-coverage.sh coverage.out
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: test-results
+        path: |
+          test-results.json
+          coverage.out
+        if-no-files-found: warn
+        retention-days: 14
+
+  dependencies:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+
+    - name: Dependency policy
+      run: scripts/check-deps.sh
+
+  licenses:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+
+    - name: Install go-licenses
+      run: go install github.com/google/go-licenses/v2@v2.0.1
+
+    - name: License check
+      run: scripts/check-licenses.sh

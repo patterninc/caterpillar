@@ -1,0 +1,16 @@
+# stdout
+echo - {"actual":"$2a$04$XajjQvNhvvRt5GSeFk1xFeFSjbRlNk/Ta1yxtAEbNtK1N.ZPZVHUu","expected":"$2a$04$XajjQvNhvvRt5GSeFk1xFeFSjbRlNk/Ta1yxtAEbNtK1N.ZPZVHUu","match":true,"name":"bare_salt_defaults_to_2a_cost_4"}
+echo - {"actual":"$2a$10$XajjQvNhvvRt5GSeFk1xFeyqRrsxkhBkUiQeg0dt.wU1qD4aFDcga","expected":"$2a$10$XajjQvNhvvRt5GSeFk1xFeyqRrsxkhBkUiQeg0dt.wU1qD4aFDcga","match":true,"name":"upstream_known_answer_cost_10"}
+echo - {"actual":"$2a$06$XajjQvNhvvRt5GSeFk1xFenXDhAWTtiuYVFqohMZ8DFcwdkTSrQ9m","expected":"$2a$06$XajjQvNhvvRt5GSeFk1xFenXDhAWTtiuYVFqohMZ8DFcwdkTSrQ9m","match":true,"name":"cost_read_from_salt_prefix"}
+echo - {"actual":"$2b$04$XajjQvNhvvRt5GSeFk1xFeFSjbRlNk/Ta1yxtAEbNtK1N.ZPZVHUu","expected":"$2b$04$XajjQvNhvvRt5GSeFk1xFeFSjbRlNk/Ta1yxtAEbNtK1N.ZPZVHUu","match":true,"name":"version_2b"}
+echo - {"actual":"$2y$04$XajjQvNhvvRt5GSeFk1xFeFSjbRlNk/Ta1yxtAEbNtK1N.ZPZVHUu","expected":"$2y$04$XajjQvNhvvRt5GSeFk1xFeFSjbRlNk/Ta1yxtAEbNtK1N.ZPZVHUu","match":true,"name":"version_2y"}
+echo - {"actual":"$2a$10$XajjQvNhvvRt5GSeFk1xFeyqRrsxkhBkUiQeg0dt.wU1qD4aFDcga","expected":"$2a$10$XajjQvNhvvRt5GSeFk1xFeyqRrsxkhBkUiQeg0dt.wU1qD4aFDcga","match":true,"name":"full_hash_reused_as_salt"}
+echo - {"actual":"$2a$04$XajjQvNhvvRt5GSeFk1xFepbFmn5qB6E32eDZVF4nGTBzvpodiua2","expected":"$2a$04$XajjQvNhvvRt5GSeFk1xFepbFmn5qB6E32eDZVF4nGTBzvpodiua2","match":true,"name":"single_byte_of_data"}
+echo - {"actual":"$2a$04$XajjQvNhvvRt5GSeFk1xFeEJbavgjNvL/jG9AE6IkyS6AkyJy/ySS","expected":"$2a$04$XajjQvNhvvRt5GSeFk1xFeEJbavgjNvL/jG9AE6IkyS6AkyJy/ySS","match":true,"name":"data_at_72_byte_maximum"}
+echo - {"actual":"$2a$04$XajjQvNhvvRt5GSeFk1xFe730/5CcL3wKWG7T7.STsMSIB3tRROg.","expected":"$2a$04$XajjQvNhvvRt5GSeFk1xFe730/5CcL3wKWG7T7.STsMSIB3tRROg.","match":true,"name":"non_ascii_data"}
+echo - {"actual":"$2a$04$......................COqHO4FmNPvlXsQuH6eZpm4fmQBEyxG","expected":"$2a$04$......................COqHO4FmNPvlXsQuH6eZpm4fmQBEyxG","match":true,"name":"salt_of_all_dots"}
+echo - {"actual":"$2a$04$abcdefghijklmnopqrstuuH1UXnaO7ONwppVwdkk87sINyprJzJI.","expected":"$2a$04$abcdefghijklmnopqrstuuH1UXnaO7ONwppVwdkk87sINyprJzJI.","match":true,"name":"request_signature_shape"}
+echo - {"all_passed":true,"name":"summary","passed":11,"total":11}
+# diagnostics
+# result
+ok

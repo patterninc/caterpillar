@@ -1,0 +1,46 @@
+name: Mutation testing
+
+# Weekly gremlins run over the packages with unit tests. Informational: it
+# reports the test efficacy and mutant coverage, and uploads the report.
+on:
+  schedule:
+    - cron: '41 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+
+    - name: Install gremlins
+      run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
+
+    - name: Run gremlins
+      run: |
+        set -o pipefail
+        gremlins unleash --workers 2 --timeout-coefficient 5 --output gremlins.json . | tee gremlins.txt
+
+    - name: Upload report
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: gremlins
+        path: |
+          gremlins.json
+          gremlins.txt
+        if-no-files-found: warn
+        retention-days: 30

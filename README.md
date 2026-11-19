@@ -408,3 +408,14 @@ See the `test/pipelines/` directory for comprehensive examples of different pipe
 ## Credits
 
 **Caterpillar** was created at **Pattern, Inc** by Stan Babourine, with contributions from Will Graham, Prasad Lohakpure, Mahesh Kamble, Shubham Khanna, Ivan Hladush, Amol Udage, Divyanshu Tiwari, Dnyaneshwar Mane and Narayan Attarde.
+
+## Development
+
+A C compiler is required in addition to Go: the Kafka task uses `confluent-kafka-go`, which builds with cgo (`xcode-select --install` on macOS, `build-essential` on Debian/Ubuntu). The Docker build links Alpine's librdkafka, which must be 2.14.0 or newer (see `build/Dockerfile`).
+
+`scripts/dev.sh` checks the toolchain, builds `./caterpillar`, runs the tests and a sample pipeline, and installs the pre-commit hooks. A devcontainer is in `.devcontainer/`.
+
+- Agent and contributor guide, commands and CI checks: [AGENTS.md](AGENTS.md)
+- Release history: [CHANGELOG.md](CHANGELOG.md)
+- Architecture decisions: [docs/adr](docs/adr/README.md)
+- Runbooks and on-call: [docs/runbooks](docs/runbooks/README.md), [docs/oncall/playbook.md](docs/oncall/playbook.md)

@@ -1,0 +1,14 @@
+# stdout
+echo - "Aadhya"
+echo - "Aaliyah"
+echo - "Aarav"
+echo - "Aaron"
+echo - "Abdiel"
+echo - "Abdullah"
+echo - "Abel"
+echo - "Abigail"
+echo - "Abner"
+# diagnostics
+WARN: raise_on_match: skipping record 5: error: unexpected name: Abby
+# result
+ok
