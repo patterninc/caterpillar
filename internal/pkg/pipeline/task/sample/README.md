@@ -17,24 +17,29 @@ The sample task filters records using various sampling strategies. It receives r
 | `name` | string | - | Task name for identification |
 | `type` | string | `sample` | Must be "sample" |
 | `filter` | string | `random` | Sampling strategy (random, head, tail, nth, percent) |
-| `limit` | int | `10` | Number of records to keep (for head, tail, nth strategies) |
-| `percent` | int | `1` | Percentage of records to keep (for percent strategy) |
-| `divider` | int | `1000` | Divisor for percentage calculation |
-| `size` | int | `50000` | Buffer size for random sampling |
+| `limit` | int | `10` | Number of records to keep (head, tail, random strategies) |
+| `percent` | int | `1` | Percentage of records to keep, 0-100 (percent strategy) |
+| `divider` | int | `1000` | Keep every Nth record (nth strategy) |
+| `size` | int | `50000` | Buffer size to draw from (random strategy) |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
+
+Each strategy reads only its own fields; setting a field another strategy uses has no effect.
 
 ## Sampling Strategies
 
 ### Random Sampling (`random`)
-Randomly selects records based on a percentage. Uses the `percent` and `divider` fields.
+Buffers up to `size` records, then emits `limit` of them drawn at random. Draws are
+independent, so the same record can be emitted more than once.
 
 ```yaml
 tasks:
   - name: random_sample
     type: sample
     filter: random
-    percent: 10  # 10% of records
-    divider: 100
+    limit: 10   # emit 10 records
+    size: 50000 # drawn from the first 50k records seen
 ```
 
 ### Head Sampling (`head`)
@@ -60,14 +65,14 @@ tasks:
 ```
 
 ### Nth Sampling (`nth`)
-Keeps every Nth record from the input.
+Keeps every Nth record from the input, starting with the first.
 
 ```yaml
 tasks:
   - name: every_tenth
     type: sample
     filter: nth
-    limit: 10  # Every 10th record
+    divider: 10  # Every 10th record
 ```
 
 ### Percent Sampling (`percent`)
@@ -83,14 +88,14 @@ tasks:
 
 ## Example Configurations
 
-### Random 5% sampling:
+### Random 5% of a 2000-record buffer:
 ```yaml
 tasks:
   - name: random_sample
     type: sample
     filter: random
-    percent: 5
-    divider: 100
+    limit: 100
+    size: 2000
 ```
 
 ### First 100 records:
@@ -108,7 +113,7 @@ tasks:
   - name: sparse_sample
     type: sample
     filter: nth
-    limit: 50
+    divider: 50
 ```
 
 ## Sample Pipelines

@@ -1,0 +1,21 @@
+# Credentials come from env and secret, the same way oauth examples do.
+tasks:
+  - name: fetch_resource
+    type: http
+    method: GET
+    endpoint: https://example.com/resources
+    auth:
+      grant_type: refresh_token
+      token_url: https://example.com/oauth/token
+      client_auth: body
+      body_encoding: json
+      client_id: '{{ env "CLIENT_ID" }}'
+      client_secret: '{{ secret "/oauth/client_secret" }}'
+      refresh_token: '{{ secret "/oauth/refresh_token" }}'
+      header: Authorization
+      scheme: bearer
+      token_field: access_token
+      expires_field: expires_in
+  - name: echo
+    type: echo
+    only_data: true

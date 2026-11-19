@@ -30,11 +30,16 @@ When used with an input channel, the task acts as a destination. It processes ea
 | `type` | string | `heimdall` | Must be "heimdall" |
 | `endpoint` | string | `http://localhost:9090` | Heimdall API endpoint |
 | `headers` | map[string]string | - | HTTP headers for API requests |
-| `poll_interval` | int | `5` | Polling interval in seconds for async jobs |
-| `timeout` | int | `300` | Job timeout in seconds |
+| `poll_interval` | duration | `5s` | Polling interval for async jobs |
+| `timeout` | duration | `5m` | Job timeout |
 | `get_result` | bool | `true` | Whether to fetch results from the `/result` endpoint after job completion.
-| `job` | object | - | Job configuration (see Job Configuration) |
-| `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
+| `job` | object | - | Job configuration, **required** (see Job Configuration) |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `fail_on_error` | bool | `false` | Whether to mark the overall pipeline run as failed if this task encounters an error |
+| `skip_on_error` | bool | `false` | Destination mode only. On a per-record job failure, log a warning and move on to the next record instead of aborting this worker. Overrides `fail_on_error` for per-record failures - the task never reports failed while this is set |
+
+
+`poll_interval` and `timeout` take a string with a unit (`10s`, `1h`); a bare number fails to parse.
 
 ## Job Configuration
 
@@ -47,7 +52,7 @@ The `job` field contains the job specification:
 | `context` | map[string]any | - | Job execution context |
 | `command_criteria` | []string | - | Criteria to match commands |
 | `cluster_criteria` | []string | - | Criteria to match clusters |
-| `tags` | []string | - | Job tags |
+| `tags` | []string | - | Job tags. A `caterpillar_task_name:<task name>` tag is always appended. |
 
 ## Example Configurations
 
@@ -88,8 +93,8 @@ tasks:
   - name: submit_spark_job
     type: heimdall
     endpoint: http://heimdall.example.com
-    timeout: 3600  # 1 hour timeout
-    poll_interval: 10  # Check every 10 seconds
+    timeout: 1h
+    poll_interval: 10s
     job:
       name: spark-analysis
       command_criteria: ["type:spark"]
@@ -128,10 +133,6 @@ tasks:
 
 In this example, the `jq` task transforms the HTTP response data into a proper job context object with a query field. The heimdall task then uses this context when submitting the job to Heimdall. Each record processed by the pipeline will trigger a separate Heimdall job with the context derived from the jq transformation.
 
-## Sample Pipelines
-
-- `test/pipelines/heimdall.yaml` - Heimdall job submission example
-
 ## Use Cases
 
 - **Data processing**: Submit Spark, Snowflake, or Trino queries
@@ -155,3 +156,4 @@ The task supports both synchronous and asynchronous job execution:
 - **Job criteria**: Set correct command and cluster criteria
 - **Timeout configuration**: Set appropriate timeouts for job types
 - **Error handling**: Handle job failures and timeouts gracefully
+- **Worker isolation**: A record's job failure normally stops the worker for the rest of the run. Enough independent failures can exhaust every worker, leaving anything still unconsumed in the shared channel unprocessed. Set `skip_on_error: true` if records can fail independently so no worker is lost to a single bad one - note this also disables `fail_on_error` reporting for the task.

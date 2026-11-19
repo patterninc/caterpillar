@@ -22,7 +22,7 @@ The system is particularly useful for:
 
 ### Prerequisites
 
-- Go 1.24.7 or later
+- Go 1.27 or later (the version in `go.mod`)
 - AWS CLI configured (for AWS-related tasks)
 
 ### Building and Running
@@ -43,6 +43,23 @@ The system is particularly useful for:
    ./caterpillar -conf test/pipelines/hello_name.yaml
    ```
 
+### Docker Image
+
+CI builds `build/Dockerfile` for linux/amd64 and linux/arm64 and publishes it to Docker Hub as the multi-arch image `patternoss/caterpillar`:
+
+| Tag | Published when |
+| --- | --- |
+| `<version>` (for example `1.2.3`) | a `v<version>` git tag is pushed |
+| `dev` | a commit is pushed to `main` |
+| `latest` | the `latest` git tag is pushed |
+
+The image has no `ENTRYPOINT`. The binary is `/caterpillar`, so name it in the command:
+
+```bash
+docker run --rm -v "$PWD/test:/test:ro" patternoss/caterpillar:dev \
+  /caterpillar -conf /test/pipelines/hello_name.yaml
+```
+
 ## Core Concepts
 
 ### Tasks and Records
@@ -50,7 +67,7 @@ The system is particularly useful for:
 Caterpillar is built around the concept of **tasks** that process **records** in a pipeline. Here's how it works:
 
 1. **Records**: Each piece of data in the pipeline is wrapped in a `Record` object containing:
-   - `Data`: The actual data string
+   - `Data`: The actual data, as raw bytes
    - `Origin`: The name of the task that created this record
    - `ID`: A unique identifier for the record
    - `Context`: Additional metadata that can be shared between tasks
@@ -113,10 +130,22 @@ continuing instead of returning. Each decides that from its own field, documente
 README:
 
 - **`jq`** — a query error on a single record; non-critical until `ignore_error: false`.
+- **`http`** — an HTTP request or input failure; non-critical from `ignore_error: true`.
 - **`xpath`** — a container XPath matching nothing; non-critical until `ignore_missing: false`.
+- **`heimdall`** — a per-record job failure in destination mode; non-critical from
+  `skip_on_error: true`.
+- **`parameter_store`** — a parameter that does not exist in lookup mode; non-critical from
+  `on_missing: skip`.
 
 An ignored error is never returned, so `fail_on_error` has nothing to judge: failing a run on
 one of these takes the task's own field as well.
+
+A skipped record also counts as *processed* for acknowledgment. On a pipeline whose source
+defers acknowledgment — SQS read mode ([Message Acknowledgment](internal/pkg/pipeline/task/sqs/README.md#message-acknowledgment))
+or Kafka group read mode ([Message acknowledgment](internal/pkg/pipeline/task/kafka/README.md#message-acknowledgment-group-read-mode)) —
+the source record is settled as done and will not be redelivered, so the data is dropped for
+good. At-least-once delivery covers errors that are returned, not conditions a task is
+configured to ignore. Note that `jq` and `xpath` default to ignoring theirs.
 
 ### DAG (Directed Acyclic Graph) Execution - EXPERIMENTAL
 
@@ -254,7 +283,7 @@ tasks:
 Caterpillar supports the following tasks, each of which can serve different roles depending on their configuration:
 
 - **`archive`** - [Pack and unpack archives (tar, zip)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/archive/README.md)
-- **`aws_parameter_store`** - [Read parameters from AWS Systems Manager Parameter Store](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/aws/parameter_store/README.md)
+- **`aws_parameter_store`** - [Write to or look up parameters in AWS Systems Manager Parameter Store](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/aws/parameter_store/README.md)
 - **`compress`** - [Compress or decompress data using various algorithms](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/compress/README.md)
 - **`converter`** - [Convert data between different formats (CSV, HTML, JSON, XML, SST, Protobuf)](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/converter/README.md)
 - **`delay`** - [Add controlled delays between record processing](https://github.com/patterninc/caterpillar/blob/main/internal/pkg/pipeline/task/delay/README.md)
@@ -288,6 +317,13 @@ tasks:
   - name: task1
     type: echo
 ```
+
+Depth is also latency: a record can wait in a full channel for as long as it takes the
+downstream task to work through everything ahead of it. Where the source defers
+acknowledgment, that wait is time the source record stays unacknowledged, which is why
+`channel_size` needs tuning against the broker's own limits rather than set high by default —
+see [SQS Message Acknowledgment](internal/pkg/pipeline/task/sqs/README.md#message-acknowledgment)
+and [Kafka Message acknowledgment](internal/pkg/pipeline/task/kafka/README.md#message-acknowledgment-group-read-mode).
 
 ### Task Concurrency
 

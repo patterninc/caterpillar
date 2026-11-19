@@ -18,12 +18,20 @@ The task automatically determines its mode based on the presence of input/output
 | `name` | string | - | Task name for identification |
 | `type` | string | `sqs` | Must be "sqs" |
 | `queue_url` | string | - | SQS queue URL (required) |
-| `concurrency` | int | `10` | Number of concurrent message processors |
-| `max_messages` | int | `10` | Maximum number of messages to receive per batch |
-| `wait_time` | int | `10` | Long polling wait time in seconds |
-| `exit_on_empty` | bool | `false` | Exit when queue is empty |
+| `concurrency` | int | `10` | Number of concurrent `DeleteMessage` calls |
+| `max_messages` | int | `10` | Per poll: max messages per `ReceiveMessage` (AWS cap 10) |
+| `max_records` | int | `0` (unlimited) | Read-mode cap on records forwarded downstream (per worker). `0` = unlimited. |
+| `wait_time_seconds` | int | `10` | Long polling wait time in seconds |
+| `exit_on_empty` | bool | `false` | Exit when a receive returns no messages. FIFO: empty poll is not drain while this task holds receipts or the queue still has visible, in-flight, or delayed messages. |
+| `end_after` | duration | - | Stop polling after this much time (read mode); e.g. `5m` |
 | `message_group_id` | string | - | Message group ID for FIFO queues |
+| `delivery` | string | `at-least-once` | Read mode: `at-least-once` deletes after downstream finishes; `at-most-once` deletes on receive. |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
+
+In read mode the task polls until the queue drains (`exit_on_empty`), `end_after` elapses, or `max_records` is reached;
+with none of those set it polls indefinitely.
 
 ## Example Configurations
 
@@ -34,7 +42,7 @@ tasks:
     type: sqs
     queue_url: https://sqs.us-west-2.amazonaws.com/123456789012/my-queue
     max_messages: 10
-    wait_time: 10
+    wait_time_seconds: 10
     concurrency: 5
 ```
 
@@ -64,9 +72,52 @@ tasks:
     queue_url: {{ env "SQS_QUEUE_URL" }}
 ```
 
+## Message Acknowledgment
+
+When reading from a queue, a message's receipt is deleted only once every downstream task
+has finished with the record produced from it (`delivery: at-least-once`, the default). A task
+that returns an error while holding a record leaves the receipt alone, so SQS redelivers the
+message after the visibility timeout rather than losing it. Delivery is therefore at-least-once:
+a pipeline may see a message more than once. `delivery: at-most-once` forwards the record
+without an ack and deletes on the same `concurrency` pool, so FIFO groups are not blocked by
+downstream work; a crash can lose the message.
+
+That covers failures, not drops. A task configured to skip a bad record counts it as
+finished, so the receipt is deleted and the message does not come back — and `jq`'s
+`ignore_error` and `xpath`'s `ignore_missing` both default to skipping. See
+[Non-critical errors](../../../../../README.md#non-critical-errors) for the full set of
+fields that behave this way.
+
+Two consequences worth tuning for:
+
+- **`channel_size` bounds how many messages can sit inside the pipeline at once** (see
+  [Channel Size](../../../../../README.md#channel-size)). A message waiting in a deep channel
+  can exceed the queue's visibility timeout, at which point SQS redelivers it while the first
+  copy is still in flight and the eventual delete fails on a stale receipt handle. Keep
+  `channel_size` in proportion
+  to how long a record takes to traverse the pipeline, relative to the queue's visibility
+  timeout. Messages that have finished the pipeline but whose delete has not yet returned
+  are bounded only by `concurrency` (how many `DeleteMessage` calls run at once), not by
+  `channel_size`.
+- **SQS caps in-flight messages** at 120,000 per standard queue and 20,000 per FIFO queue.
+  A large `channel_size` on a long pipeline can approach that; on a breach `ReceiveMessage`
+  returns `OverLimit` and the task stops. FIFO queues are stricter still, since
+  unacknowledged messages block their message group: later messages in that group are not
+  returned until the in-flight receipts are deleted, so a receive can come back empty while
+  the queue still holds work. That also happens when another consumer — or a dead one whose
+  visibility timeout has not expired — holds the group heads. `exit_on_empty` therefore
+  does not treat an empty FIFO poll as drained while this task still holds receipts or
+  `GetQueueAttributes` still shows visible, in-flight, or delayed messages. A
+  `GetQueueAttributes` error also keeps polling; set `end_after` when the run must be
+  bounded. After those clear, the next poll either returns the next batch or a true empty.
+  One message group is still capped at `max_messages` in flight by AWS. An unbounded `join`
+  downstream of read mode keeps those receipts outstanding for the run, so the reader keeps
+  polling rather than exiting: set `duration:` (or `size:` / `number:`) on that join so
+  records flush mid-run and messages can be deleted (see the join task README).
+
 ## Sample Pipelines
 
-- `test/pipelines/sqs_reader.yaml` - SQS message reading example
+- `test/pipelines/sqs_with_context_concurrency.yaml` - SQS read with context variables and concurrency
 
 ## Use Cases
 

@@ -1,6 +1,7 @@
 package sample
 
 import (
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 )
 
@@ -24,6 +25,12 @@ func newTail(s *sample) (sampler, error) {
 
 func (t *tail) filter(r *record.Record, _ chan<- *record.Record) error {
 
+	// the ring buffer is about to overwrite this slot; the evicted record will
+	// never be forwarded, so settle its ack here.
+	if evicted := t.buffer[t.index]; evicted != nil {
+		ack.Release(evicted.Context)
+	}
+
 	t.buffer[t.index] = r
 	t.index = (t.index + 1) % t.limit
 	t.count++
@@ -43,6 +50,13 @@ func (t *tail) drain(output chan<- *record.Record) error {
 
 	for i := 0; i < t.limit; i++ {
 		t.sendRecord(t.buffer[(start+i)%len(t.buffer)], output)
+	}
+
+	// the ring held these back across iterations, so it owes each one a release
+	for _, row := range t.buffer {
+		if row != nil {
+			ack.Release(row.Context)
+		}
 	}
 
 	return nil

@@ -4,16 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/patterninc/caterpillar/internal/pkg/config"
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/http/status"
@@ -34,23 +37,6 @@ var (
 	ctx = context.Background()
 )
 
-type oauth struct {
-	ConsumerKey     string   `yaml:"consumer_key" json:"consumer_key"`
-	ConsumerSecret  string   `yaml:"consumer_secret" json:"consumer_secret"`
-	Token           string   `yaml:"token" json:"token"`
-	TokenSecret     string   `yaml:"token_secret" json:"token_secret"`
-	Version         string   `yaml:"version,omitempty" json:"version,omitempty"`
-	SignatureMethod string   `yaml:"signature_method,omitempty" json:"signature_method,omitempty"`
-	Realm           string   `yaml:"realm,omitempty" json:"realm,omitempty"`
-	PrivateKey      string   `yaml:"private_key,omitempty" json:"private_key,omitempty"`
-	Subject         string   `yaml:"subject,omitempty" json:"subject,omitempty"`
-	Issuer          string   `yaml:"issuer,omitempty" json:"issuer,omitempty"`
-	Audience        string   `yaml:"audience,omitempty" json:"audience,omitempty"`
-	TokenURI        string   `yaml:"token_uri,omitempty" json:"token_uri,omitempty"`
-	GrantType       string   `yaml:"grant_type,omitempty" json:"grant_type,omitempty"`
-	Scope           []string `yaml:"scope,omitempty" json:"scope,omitempty"`
-}
-
 type httpCore struct {
 	task.Base        `yaml:",inline" json:",inline"`
 	Method           string            `yaml:"method,omitempty" json:"method,omitempty"`
@@ -60,10 +46,12 @@ type httpCore struct {
 	Body             string            `yaml:"body,omitempty" json:"body,omitempty"`
 	NextPage         *config.String    `yaml:"next_page,omitempty" json:"next_page,omitempty"`
 	Oauth            *oauth            `yaml:"oauth,omitempty" json:"oauth,omitempty"`
+	Auth             *auth             `yaml:"auth,omitempty" json:"auth,omitempty"`
 	Proxy            *proxy            `yaml:"proxy,omitempty" json:"proxy,omitempty"`
 	Timeout          duration.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	MaxRetries       int               `yaml:"max_retries,omitempty" json:"max_retries,omitempty"`
 	RetryDelay       duration.Duration `yaml:"retry_delay,omitempty" json:"retry_delay,omitempty"`
+	IgnoreError      bool              `yaml:"ignore_error,omitempty" json:"ignore_error,omitempty"`
 	client           *http.Client
 	clientOnce       sync.Once
 }
@@ -97,12 +85,29 @@ func (h *httpCore) getClient() *http.Client {
 		transport.MaxIdleConnsPerHost = defaultMaxConnsPerHost
 		jar, _ := cookiejar.New(nil)
 		h.client = &http.Client{
-			Timeout:   time.Duration(h.Timeout),
-			Transport: transport,
-			Jar:       jar,
+			Timeout:       time.Duration(h.Timeout),
+			Transport:     transport,
+			Jar:           jar,
+			CheckRedirect: dropAuthHeaderOnHostChange,
 		}
 	})
 	return h.client
+}
+
+// dropAuthHeaderOnHostChange removes the auth header when a redirect changes scheme, host, or port.
+// The name is the one applyAuth stored on the request.
+func dropAuthHeaderOnHostChange(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if len(via) == 0 || sameEndpoint(req.URL, via[0].URL) {
+		return nil
+	}
+	name, _ := req.Context().Value(authHeaderContextKey{}).(string)
+	if name != `` {
+		req.Header.Del(name)
+	}
+	return nil
 }
 
 func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
@@ -118,15 +123,22 @@ func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 		ExpectedStatuses: h.ExpectedStatuses,
 		Body:             h.Body,
 		NextPage:         h.NextPage,
-		Oauth:            h.Oauth,
+		Oauth:            h.Oauth.copy(),
 		Proxy:            h.Proxy,
 		Timeout:          h.Timeout,
 		MaxRetries:       h.MaxRetries,
 		RetryDelay:       h.RetryDelay,
+		IgnoreError:      h.IgnoreError,
 	}
 
 	if err := json.Unmarshal(data, newHttp); err != nil {
-		return nil, fmt.Errorf("cannot parse http payload [%s]: %s", err, string(data))
+		return nil, fmt.Errorf("cannot parse http payload: %w", err)
+	}
+
+	// Unmarshal must not see the shared pointer: encoding/json writes into a non-nil auth.
+	newHttp.Auth = h.Auth
+	if err := newHttp.rejectCombinedAuth(); err != nil {
+		return nil, err
 	}
 
 	// we only append headers that are present in the current task (h) and missing in the new one
@@ -145,7 +157,21 @@ func (h *httpCore) newFromInput(data []byte) (*httpCore, error) {
 
 }
 
+func cleanURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	u.User = nil
+	return u.String()
+}
+
 func (h *httpCore) Run(input <-chan *record.Record, output chan<- *record.Record) (err error) {
+
+	// Task configuration, not a per-record failure.
+	if err := h.rejectCombinedAuth(); err != nil {
+		return err
+	}
 
 	// if we have input, treat each value as a URL and try to get data from it...
 	if input != nil {
@@ -158,16 +184,38 @@ func (h *httpCore) Run(input <-chan *record.Record, output chan<- *record.Record
 			// let's get our http object
 			newHttp, err := h.newFromInput(rc.Data)
 			if err != nil {
-				return err
+				if errors.Is(err, errAuthAndOAuth) {
+					return ack.Rejected(rc.Context, err)
+				}
+				if h.IgnoreError {
+					fmt.Printf("WARN: %s: skipping record %d: %s\n", h.GetName(), rc.ID, err)
+					ack.Release(rc.Context)
+					continue
+				}
+				return ack.Rejected(rc.Context, err)
 			}
 			if err := newHttp.processItem(rc, output); err != nil {
-				return err
+				if newHttp.IgnoreError {
+					ack.Release(rc.Context)
+					continue
+				}
+				return ack.Rejected(rc.Context, err)
 			}
+
+			// one release per input record, however many pages it produced: each
+			// page's send registered its own branch.
+			ack.Release(rc.Context)
 		}
 	}
 
 	// now we'll process the task configured item itself...
-	return h.processItem(nil, output)
+	if err := h.processItem(nil, output); err != nil {
+		if h.IgnoreError {
+			return nil
+		}
+		return err
+	}
+	return nil
 
 }
 
@@ -186,15 +234,23 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 		rc = &record.Record{Context: context.Background()}
 	}
 
+	handleErr := func(err error, failedEndpoint string) error {
+		if h.IgnoreError {
+			fmt.Printf("WARN: %s: skipping record %d %s %s: %s\n", h.GetName(), rc.ID, h.Method, cleanURL(failedEndpoint), err)
+			return err
+		}
+		return err
+	}
+
 	// TODO: perhaps expose the starting page number as a parameter for the task
 	pageID := 1
 
 	// we have infinite loop to account for potential pagination
 	for {
-		result, err := h.call(endpoint)
+		result, err := h.call(endpoint, rc)
 
 		if err != nil {
-			return err
+			return handleErr(err, endpoint)
 		}
 
 		if output != nil {
@@ -218,18 +274,18 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 
 		nextPage, err := h.NextPage.GetJQ(rc)
 		if err != nil {
-			return err
+			return handleErr(err, endpoint)
 		}
 		nextPageInput, err := json.Marshal(result)
 		if err != nil {
-			return err
+			return handleErr(err, endpoint)
 		}
 		nextPageData, err := nextPage.Execute(nextPageInput, map[string]any{
 			`page_id`: pageID,
 		})
 
 		if err != nil {
-			return err
+			return handleErr(err, endpoint)
 		}
 
 		if nextPageData == nil {
@@ -288,9 +344,10 @@ func (h *httpCore) processItem(rc *record.Record, output chan<- *record.Record) 
 
 }
 
-func (h *httpCore) call(endpoint string) (*result, error) {
+func (h *httpCore) call(endpoint string, rc *record.Record) (*result, error) {
 
 	var lastErr error
+	var authRefreshed bool
 	for attempt := 1; attempt <= h.MaxRetries; attempt++ {
 
 		// set http request
@@ -308,16 +365,18 @@ func (h *httpCore) call(endpoint string) (*result, error) {
 			request.Header.Set(k, v)
 		}
 
-		// TODO: support multiple "behaviors" for oauth support
-		if h.Oauth != nil {
-			// apply default values if version and hash method are missing
-			if h.Oauth.Version == `` {
-				h.Oauth.Version = defaultOAuthVersion
+		// After the header copy so a header carried by next_page cannot keep a stale token.
+		if h.Auth != nil && h.Oauth != nil {
+			return nil, errAuthAndOAuth
+		}
+		var authToken string
+		if h.Auth != nil {
+			authToken, err = h.applyAuth(request, rc)
+			if err != nil {
+				return nil, err
 			}
-			if h.Oauth.SignatureMethod == `` {
-				h.Oauth.SignatureMethod = defaultSignatureMethod
-			}
-			if err := h.oauth(endpoint, request); err != nil {
+		} else if h.Oauth != nil {
+			if err := h.oauth(endpoint, request, rc); err != nil {
 				lastErr = err
 				if attempt < h.MaxRetries {
 					continue
@@ -338,9 +397,10 @@ func (h *httpCore) call(endpoint string) (*result, error) {
 			}
 			jar, _ := cookiejar.New(nil)
 			client = &http.Client{
-				Timeout:   time.Duration(h.Timeout),
-				Transport: transport,
-				Jar:       jar,
+				Timeout:       time.Duration(h.Timeout),
+				Transport:     transport,
+				Jar:           jar,
+				CheckRedirect: dropAuthHeaderOnHostChange,
 			}
 		}
 
@@ -367,6 +427,16 @@ func (h *httpCore) call(endpoint string) (*result, error) {
 		if h.ExpectedStatuses != nil {
 			if code := response.StatusCode; !h.ExpectedStatuses.Has(code) {
 				lastErr = fmt.Errorf("unexpected http response code [%v %s]: %s", code, http.StatusText(code), string(body))
+				if h.Auth != nil && (code == http.StatusUnauthorized || code == http.StatusForbidden) {
+					if err := h.invalidateAuth(rc, authToken); err != nil {
+						return nil, err
+					}
+					// One refresh per call: a rejected replacement token fails the call.
+					if authRefreshed {
+						break
+					}
+					authRefreshed = true
+				}
 				if attempt < h.MaxRetries {
 					h.handleBackoff(attempt, response)
 					continue

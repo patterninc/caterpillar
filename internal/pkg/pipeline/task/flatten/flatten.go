@@ -3,6 +3,7 @@ package flatten
 import (
 	"encoding/json"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -26,7 +27,7 @@ func (f *flatten) Run(input <-chan *record.Record, output chan<- *record.Record)
 
 		var data map[string]any
 		if err := json.Unmarshal(r.Data, &data); err != nil {
-			return err
+			return ack.Rejected(r.Context, err)
 		}
 
 		flat := make(map[string]any)
@@ -38,10 +39,11 @@ func (f *flatten) Run(input <-chan *record.Record, output chan<- *record.Record)
 
 		flatJson, err := json.Marshal(flat)
 		if err != nil {
-			return err
+			return ack.Rejected(r.Context, err)
 		}
 
 		f.SendData(r.Context, flatJson, output)
+		ack.Release(r.Context)
 	}
 
 	return nil

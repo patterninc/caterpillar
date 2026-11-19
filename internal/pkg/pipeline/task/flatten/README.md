@@ -4,7 +4,7 @@ The `flatten` task flattens nested JSON structures into a single level, making c
 
 ## Function
 
-The flatten task takes nested JSON objects and converts them into flat key-value pairs, where nested keys are represented using dot notation or other separators.
+The flatten task takes nested JSON objects and converts them into flat key-value pairs, joining nested keys with an underscore. The separator is not configurable.
 
 ## Behavior
 
@@ -17,6 +17,8 @@ The flatten task converts nested JSON structures into flat key-value pairs. It r
 | `name` | string | - | Task name for identification |
 | `type` | string | `flatten` | Must be "flatten" |
 | `include_original` | string | - | Key name to include the original nested structure |
+| `task_concurrency` | int | `1` | Number of competing-consumer workers for this task |
+| `context` | map | - | JQ expressions whose results are stored on each record for downstream tasks |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
 ## Example Configurations
@@ -35,10 +37,6 @@ tasks:
     type: flatten
     include_original: "original_data"
 ```
-
-## Sample Pipelines
-
-- `test/pipelines/flatten_test.yaml` - Flatten task examples
 
 ## Use Cases
 

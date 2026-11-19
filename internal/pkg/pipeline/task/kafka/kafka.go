@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/patterninc/caterpillar/internal/pkg/duration"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -54,6 +55,10 @@ type kafka struct {
 	Idempotent         bool                 `yaml:"idempotent,omitempty" json:"idempotent,omitempty"`                                                          // enable idempotent producer
 	Format             string               `yaml:"format,omitempty" json:"format,omitempty"`                                                                  // message format: "json" (default) or "avro"
 	SchemaRegistry     schemaRegistryConfig `yaml:",inline" json:",inline"`                                                                                    // Schema Registry connection — required when format is "avro"
+
+	tracker   *ack.Tracker
+	readersMu sync.Mutex
+	readers   []*reader
 }
 
 func New() (task.Task, error) {
@@ -144,15 +149,57 @@ func (k *kafka) write(input <-chan *record.Record) error {
 		wg               sync.WaitGroup
 		firstDeliveryErr error
 	)
+
+	// acks for records the producer has taken but not yet confirmed. A message that
+	// never produces a delivery report — a flush timeout, typically — would
+	// otherwise leave its source record unsettled and the pipeline waiting on it
+	// forever, so whatever is left here at the end is failed explicitly.
+	var (
+		pendingMu sync.Mutex
+		pending   = make(map[*ack.Ack]struct{})
+	)
+
+	settle := func(a *ack.Ack, deliveryErr error) {
+
+		if a == nil {
+			return
+		}
+
+		pendingMu.Lock()
+		delete(pending, a)
+		pendingMu.Unlock()
+
+		if deliveryErr != nil {
+			a.Fail()
+			return
+		}
+
+		a.Done()
+
+	}
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for e := range deliveryCh {
-			if m, ok := e.(*ckafka.Message); ok && m.TopicPartition.Error != nil && firstDeliveryErr == nil {
-				firstDeliveryErr = m.TopicPartition.Error
-				fmt.Printf("delivery failed for topic %s partition %d: %v\n",
-					k.Topic, m.TopicPartition.Partition, m.TopicPartition.Error)
+			m, ok := e.(*ckafka.Message)
+			if !ok {
+				continue
 			}
+			a, _ := m.Opaque.(*ack.Ack)
+			if m.TopicPartition.Error != nil {
+				if firstDeliveryErr == nil {
+					firstDeliveryErr = m.TopicPartition.Error
+					fmt.Printf("delivery failed for topic %s partition %d: %v\n",
+						k.Topic, m.TopicPartition.Partition, m.TopicPartition.Error)
+				}
+				// the source record never made it to the topic, so fail its
+				// ack: the source must leave it unacknowledged for retry.
+				settle(a, m.TopicPartition.Error)
+				continue
+			}
+			// settle only on broker-confirmed delivery, not on local enqueue.
+			settle(a, nil)
 		}
 	}()
 
@@ -166,14 +213,27 @@ func (k *kafka) write(input <-chan *record.Record) error {
 		msgBytes, err := codec.serialize(k.Topic, r.Data)
 		if err != nil {
 			produceErr = fmt.Errorf("failed to serialize record for topic %s: %w", k.Topic, err)
+			ack.Reject(r.Context)
 			break
+		}
+
+		var opaque any
+		a, tracked := ack.FromContext(r.Context)
+		if tracked {
+			opaque = a
+			pendingMu.Lock()
+			pending[a] = struct{}{}
+			pendingMu.Unlock()
 		}
 
 		if err = p.Produce(&ckafka.Message{
 			TopicPartition: ckafka.TopicPartition{Topic: &k.Topic, Partition: ckafka.PartitionAny},
 			Value:          msgBytes,
+			Opaque:         opaque,
 		}, deliveryCh); err != nil {
 			produceErr = fmt.Errorf("failed to enqueue message to topic %s: %w", k.Topic, err)
+			// the producer never took it, so no delivery report is coming
+			settle(a, produceErr)
 			break
 		}
 	}
@@ -186,6 +246,14 @@ func (k *kafka) write(input <-chan *record.Record) error {
 	p.Close()
 	close(deliveryCh)
 	wg.Wait()
+
+	// no delivery report ever arrived for these, so nothing else will settle them
+	pendingMu.Lock()
+	for a := range pending {
+		a.Fail()
+	}
+	pending = nil
+	pendingMu.Unlock()
 
 	if produceErr != nil {
 		return produceErr
@@ -224,21 +292,18 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 	if err != nil {
 		return fmt.Errorf("failed to create consumer: %w", err)
 	}
-	defer func() {
-		if err := c.Close(); err != nil {
-			fmt.Printf("warning: error closing kafka consumer: %v\n", err)
-		}
-	}()
 
-	if standalone {
-		fmt.Printf("no group_id set — standalone read from beginning of topic %s\n", k.Topic)
-		if err := k.assignAllPartitions(c); err != nil {
-			return fmt.Errorf("failed to assign partitions: %w", err)
-		}
-	} else {
-		if err := c.SubscribeTopics([]string{k.Topic}, nil); err != nil {
-			return fmt.Errorf("failed to subscribe to topic %s: %w", k.Topic, err)
-		}
+	r, err := k.openReader(c, standalone)
+	if err != nil {
+		return err
+	}
+	if r.group {
+		// Pause assigned partitions so Finish heartbeat polls do not fetch new records.
+		defer func() {
+			if err := r.pauseAll(); err != nil {
+				fmt.Printf("warning: failed to pause partitions for topic %s: %v\n", k.Topic, err)
+			}
+		}()
 	}
 
 	codec, err := k.newCodec()
@@ -257,7 +322,14 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 		default:
 		}
 
-		msg, err := c.ReadMessage(timeout)
+		if stop, err := r.shouldStop(); err != nil {
+			fmt.Printf("warning: failed to check kafka assignment for topic %s: %v\n", k.Topic, err)
+		} else if stop {
+			fmt.Printf("all assigned partitions paused for topic %s, stopping reader\n", k.Topic)
+			return nil
+		}
+
+		msg, err := r.readMessage(timeout)
 		if err != nil {
 			if kafkaErr, ok := err.(ckafka.Error); ok && kafkaErr.Code() == ckafka.ErrTimedOut {
 				retriesNumber++
@@ -282,15 +354,7 @@ func (k *kafka) read(ctx context.Context, output chan<- *record.Record) error {
 			return fmt.Errorf("failed to deserialize message from topic %s: %w", k.Topic, err)
 		}
 
-		k.SendData(ctx, data, output)
-
-		// Only store offsets for group consumers — standalone reads never commit.
-		if !standalone {
-			if _, err := c.StoreMessage(msg); err != nil {
-				fmt.Printf("warning: failed to store offset for topic %s partition %d: %v\n",
-					k.Topic, msg.TopicPartition.Partition, err)
-			}
-		}
+		r.emit(ctx, data, output, msg)
 
 		recordsRead++
 		if k.MaxRecords > 0 && recordsRead >= k.MaxRecords {
@@ -391,7 +455,7 @@ func (k *kafka) buildProducerConfig() (*ckafka.ConfigMap, error) {
 	return cfg, nil
 }
 
-// buildConsumerConfig builds config for group consumer mode; auto-commits every 5s, offsets stored only after downstream delivery.
+// auto.offset.store is off so the watermark, not librdkafka, chooses the commit position.
 func (k *kafka) buildConsumerConfig() (*ckafka.ConfigMap, error) {
 	cfg, err := k.buildBaseConfig()
 	if err != nil {
@@ -399,6 +463,7 @@ func (k *kafka) buildConsumerConfig() (*ckafka.ConfigMap, error) {
 	}
 
 	_ = cfg.SetKey("auto.offset.reset", k.AutoOffsetReset)
+	_ = cfg.SetKey("partition.assignment.strategy", "cooperative-sticky")
 	_ = cfg.SetKey("session.timeout.ms", 30000)
 	_ = cfg.SetKey("heartbeat.interval.ms", 3000)
 	_ = cfg.SetKey("enable.auto.offset.store", false)

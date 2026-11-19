@@ -3,11 +3,13 @@ package archive
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"io"
 	"log"
 	"path/filepath"
 	"strings"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 	"github.com/patterninc/caterpillar/internal/pkg/textutil"
@@ -26,6 +28,7 @@ func (z *zipArchive) Read() {
 		}
 
 		if len(rc.Data) == 0 {
+			ack.Release(rc.Context)
 			continue
 		}
 
@@ -35,6 +38,7 @@ func (z *zipArchive) Read() {
 		if err != nil {
 			log.Fatal(err)
 		}
+
 		for _, f := range r.File {
 
 			// check the file type is regular file
@@ -58,6 +62,8 @@ func (z *zipArchive) Read() {
 				z.SendData(rc.Context, buf, z.OutputChan)
 			}
 		}
+
+		ack.Release(rc.Context)
 	}
 }
 
@@ -66,6 +72,7 @@ func (z *zipArchive) Write() {
 	zipBuf := new(bytes.Buffer)
 	zipWriter := zip.NewWriter(zipBuf)
 	var rc record.Record
+	var ctxs []context.Context
 
 	for {
 		rec, ok := z.GetRecord(z.InputChan)
@@ -94,13 +101,18 @@ func (z *zipArchive) Write() {
 		}
 
 		rc.Context = rec.Context
+		ctxs = append(ctxs, rec.Context)
 	}
 
 	if err := zipWriter.Close(); err != nil {
 		log.Fatal(err)
 	}
 
+	// fan-in: the archive record is produced from every input consumed above,
+	// so its ack must transitively complete all of theirs.
+	joinedAck := ack.Joined(ctxs...)
+
 	// Send the complete ZIP archive
-	z.SendData(rc.Context, zipBuf.Bytes(), z.OutputChan)
+	z.SendData(ack.WithContext(rc.Context, joinedAck), zipBuf.Bytes(), z.OutputChan)
 
 }

@@ -46,7 +46,10 @@ func (r *result) toSlice() ([][]byte, error) {
 
 }
 
-func (h *heimdall) sendToOutput(result *result, output chan<- *record.Record) error {
+// srcCtx carries the ack of the record the job was built from, so the results
+// descend from it. A fresh context here would emit untracked records and let the
+// source acknowledge before any of them was written.
+func (h *heimdall) sendToOutput(srcCtx context.Context, result *result, output chan<- *record.Record) error {
 
 	items, err := result.toSlice()
 	if err != nil {
@@ -54,7 +57,7 @@ func (h *heimdall) sendToOutput(result *result, output chan<- *record.Record) er
 	}
 
 	for _, item := range items {
-		h.SendData(ctx, item, output)
+		h.SendData(srcCtx, item, output)
 	}
 
 	return nil

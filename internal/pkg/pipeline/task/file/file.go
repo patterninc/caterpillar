@@ -11,9 +11,11 @@ import (
 	"strings"
 
 	"github.com/patterninc/caterpillar/internal/pkg/config"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 	"github.com/patterninc/caterpillar/internal/pkg/textutil"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -130,31 +132,65 @@ func (f *file) readFile(output chan<- *record.Record) error {
 		return err
 	}
 
-	for _, path := range paths {
-
-		readerCloser, err := reader.read(path)
-		if err != nil {
-			return err
-		}
-		defer readerCloser.Close()
-
-		content, err := io.ReadAll(readerCloser)
-		if err != nil {
-			return err
-		}
-
-		// Create a default record with context
-		fileName := textutil.SlugifyFileName(filepath.Base(path))
-		rc := &record.Record{Context: ctx}
-		rc.SetContextValue(string(task.CtxKeyFileNameWrite), fileName)
-		rc.SetContextValue(string(task.CtxKeyFilePathWrite), textutil.SlugifyFilePath(path))
-
-		// let's write content to output channel
-		f.SendData(rc.Context, content, output)
-
+	// if no paths are found, return nil
+	if len(paths) == 0 {
+		return nil
 	}
 
+	// set the error group limit to the minimum of the task concurrency and the number of paths
+	g, gctx := errgroup.WithContext(context.Background())
+	g.SetLimit(min(f.GetTaskConcurrency(), len(paths)))
+
+	// iterate over the paths and emit the file
+	for _, path := range paths {
+		if gctx.Err() != nil {
+			break
+		}
+		g.Go(func() error {
+			return f.emitFile(reader, path, output)
+		})
+	}
+
+	return g.Wait()
+
+}
+
+func (f *file) emitFile(r reader, path string, output chan<- *record.Record) error {
+
+	readerCloser, err := r.read(path)
+	if err != nil {
+		return err
+	}
+	defer readerCloser.Close()
+
+	content, err := io.ReadAll(readerCloser)
+	if err != nil {
+		return err
+	}
+
+	fileName := textutil.SlugifyFileName(filepath.Base(path))
+	rc := &record.Record{Context: ctx}
+	rc.SetContextValue(string(task.CtxKeyFileNameWrite), fileName)
+	rc.SetContextValue(string(task.CtxKeyFilePathWrite), textutil.SlugifyFilePath(path))
+
+	f.SendData(rc.Context, content, output)
+
 	return nil
+
+}
+
+// abort settles rc as failed, then returns err, so a source deferring
+// acknowledgement redelivers the record rather than waiting forever for a
+// write that will never happen.
+//
+// Only rc is rejected, never the records queued behind it: sibling workers are
+// still running and will write those, and the pipeline rejects whatever is
+// genuinely left over once every worker has returned.
+func (f *file) abort(rc *record.Record, err error) error {
+
+	ack.Reject(rc.Context)
+
+	return err
 
 }
 
@@ -169,13 +205,13 @@ func (f *file) writeFile(input <-chan *record.Record) error {
 		// Evaluate the path with the record context
 		path, err := f.Path.Get(rc)
 		if err != nil {
-			return err
+			return f.abort(rc, err)
 		}
 
 		// Determine the scheme from the evaluated path
 		parsedURL, err := url.Parse(path)
 		if err != nil {
-			return err
+			return f.abort(rc, err)
 		}
 		pathScheme := parsedURL.Scheme
 		if pathScheme == `` {
@@ -198,11 +234,13 @@ func (f *file) writeFile(input <-chan *record.Record) error {
 
 		writerFunction, found := writers[pathScheme]
 		if !found {
-			return unknownSchemeError(pathScheme)
+			return f.abort(rc, unknownSchemeError(pathScheme))
 		}
 		if err := writerFunction(&fs, rc, bytes.NewReader(rc.Data)); err != nil {
-			return err
+			return f.abort(rc, err)
 		}
+
+		ack.Release(rc.Context)
 	}
 
 	return nil

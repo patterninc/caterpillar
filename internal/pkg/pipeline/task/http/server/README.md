@@ -8,7 +8,15 @@ The HTTP server task creates a web server that listens for incoming HTTP request
 
 ## Behavior
 
-The HTTP server task starts a web server that listens for incoming HTTP requests. It operates as a data source (no input channel required), accepts HTTP requests on the configured port, and sends each request as a record to its output channel. The record contains the request body as data and request metadata (headers, method, URL) as context. The server can be configured to stop after a specified number of requests.
+The HTTP server task starts a web server that listens for incoming HTTP requests. It operates as a data source (no input channel required), accepts HTTP requests on the configured port, and sends each request as a record to its output channel.
+
+Each record's **data** is a JSON object carrying the request's `method`, `path`, `query`, `body`
+and `headers` — the metadata travels in the payload, not in the record context. Reach a field
+with a downstream `jq` task (e.g. `path: .body`).
+
+The server serves only the method/path pairs listed in `paths`, defaulting to a single
+`GET /`. A request whose method does not match the configured method for that path is
+rejected with `405 Method not allowed`.
 
 ## Configuration Fields
 
@@ -17,20 +25,47 @@ The HTTP server task starts a web server that listens for incoming HTTP requests
 | `name` | string | - | Task name for identification |
 | `type` | string | `http_server` | Must be "http_server" |
 | `port` | int | `8080` | Port number to listen on |
-| `end_after` | int | - | Stop server after specified number of requests |
+| `paths` | list | `GET /` | Method/path pairs to serve; each item takes `method` and `path` |
+| `end_after` | duration | - | Shut the server down after this much time, e.g. `10s` |
+| `read_timeout` | duration | `15s` | Request read timeout |
+| `write_timeout` | duration | `15s` | Response write timeout |
+| `idle_timeout` | duration | `5s` | Keep-alive idle timeout |
 | `auth` | object | - | Authentication configuration (see Auth section) |
 | `fail_on_error` | bool | `false` | Whether to stop the pipeline if this task encounters an error |
 
+Duration fields take a string with a unit (`10s`, `5m`); a bare number fails to parse.
+Without `end_after` the server runs until the process is stopped.
+`task_concurrency` is accepted but forced to 1 — only one server instance runs.
+
 ## Authentication Configuration
 
-The server supports API key authentication:
+Set `auth.behavior` to one of `api-key`, `basic-auth`, or `ip-whitelist`. Each behavior reads
+its own fields; an unrecognized value fails the task.
 
 ```yaml
+# api-key: every header listed must be present on the request with a matching value
 auth:
   behavior: api-key
   headers:
     Authorization: your-api-key-here
+
+# basic-auth: HTTP Basic credentials
+auth:
+  behavior: basic-auth
+  username: pipeline
+  password: {{ env "SERVER_PASSWORD" }}
+
+# ip-whitelist: only these source addresses are served
+auth:
+  behavior: ip-whitelist
+  whitelist_ips:
+    - 10.0.0.1
+    - 10.0.0.2
 ```
+
+`ip-whitelist` matches the first address in `X-Forwarded-For` when that header is present,
+falling back to the peer address — so it trusts the header, and is only meaningful behind a
+proxy that overwrites it.
 
 ## Example Configurations
 
@@ -54,19 +89,31 @@ tasks:
         Authorization: Bearer {{ env "API_KEY" }}
 ```
 
-### Limited request server:
+### Server that shuts itself down:
 ```yaml
 tasks:
   - name: test_server
     type: http_server
     port: 8080
-    end_after: 100
+    end_after: 30s
+```
+
+### Receiving a POST webhook on a custom path:
+```yaml
+tasks:
+  - name: webhook_receiver
+    type: http_server
+    port: 8080
+    paths:
+      - method: POST
+        path: /events
 ```
 
 ## Sample Pipelines
 
 - `test/pipelines/http_server.yaml` - Basic HTTP server example
 - `test/pipelines/http_server_rest.yaml` - HTTP server with REST API interaction
+- `test/pipelines/basic_auth_test.yaml` - HTTP server with basic authentication
 
 ## Use Cases
 
@@ -87,18 +134,17 @@ tasks:
 - Returns HTTP response to the client
 
 ### Supported HTTP Methods:
-- GET, POST, PUT, DELETE, PATCH
-- Request body is included in the record data
-- Headers are preserved in the record context
+- Any method may be configured, but each `paths` entry serves exactly one; anything else gets `405`
+- Request body, method, path, query and headers are all included in the record data
 
 ### Response Handling:
-- Returns appropriate HTTP status codes
-- Can be configured to return custom responses
-- Handles errors gracefully
+- A served request returns `{"ok":true}`
+- A rejected request returns `401` with `{"ok":false, "error":"access denied"}`
+- An unreadable body returns `400`
 
 ## Security Considerations
 
-- **Authentication**: Use API key authentication for production deployments
+- **Authentication**: Configure `auth` for production deployments
 - **HTTPS**: Consider using HTTPS for secure data transmission
 - **Input validation**: Validate incoming request data
 - **Rate limiting**: Consider implementing rate limiting for high-traffic scenarios

@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
+	"sync/atomic"
 
 	"github.com/patterninc/caterpillar/internal/pkg/jq"
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 )
 
@@ -32,9 +33,22 @@ const (
 type Task interface {
 	Run(<-chan *record.Record, chan<- *record.Record) error
 	GetName() string
+	GetType() string
 	GetFailOnError() bool
 	GetTaskConcurrency() int
 	Init() error // Called once after unmarshaling, before pipeline execution
+}
+
+// Finisher is implemented by tasks with work to do only once their output
+// channel has been closed. Deferred acknowledgement is the case this exists
+// for: a source's acks settle only after every downstream task has drained,
+// and a downstream task that emits on input close can't drain until the
+// source's output channel is closed, so waiting inside Run would deadlock.
+//
+// The pipeline calls Finish exactly once per task, after every worker of that
+// task has returned from Run and after the task's output channel is closed.
+type Finisher interface {
+	Finish() error
 }
 
 type Base struct {
@@ -44,8 +58,9 @@ type Base struct {
 	TaskConcurrency int                  `yaml:"task_concurrency,omitempty" json:"task_concurrency,omitempty"`
 	Context         map[string]*jq.Query `yaml:"context,omitempty" json:"context,omitempty"`
 
-	recordIndex int
-	sync.RWMutex
+	// recordIndex is atomic so concurrent workers of one task never wait on
+	// each other while their records are built, evaluated and sent.
+	recordIndex atomic.Int64
 }
 
 func (b *Base) GetFailOnError() bool {
@@ -54,6 +69,10 @@ func (b *Base) GetFailOnError() bool {
 
 func (b *Base) GetName() string {
 	return b.Name
+}
+
+func (b *Base) GetType() string {
+	return b.Type
 }
 
 func (b *Base) GetTaskConcurrency() int {
@@ -84,6 +103,7 @@ func (b *Base) Run(input <-chan *record.Record, output chan<- *record.Record) er
 
 	for r := range input {
 		b.SendRecord(r, output)
+		ack.Release(r.Context)
 	}
 
 	return nil
@@ -92,13 +112,8 @@ func (b *Base) Run(input <-chan *record.Record, output chan<- *record.Record) er
 
 func (b *Base) SendData(ctx context.Context, data []byte, output chan<- *record.Record) /* we should return error here */ {
 
-	b.Lock()
-	defer b.Unlock()
-
-	b.recordIndex++
-
 	record := &record.Record{
-		ID:      b.recordIndex,
+		ID:      int(b.recordIndex.Add(1)),
 		Origin:  b.Name,
 		Data:    data,
 		Context: ctx,
@@ -112,6 +127,13 @@ func (b *Base) SendRecord(r *record.Record, output chan<- *record.Record) /* we 
 
 	if output == nil {
 		return
+	}
+
+	// every send registers its own branch, before the record is visible to another
+	// goroutine. This is what removes the need for a task to declare a fan-out
+	// count: N sends are N branches, and the task then releases its input once.
+	if a, ok := ack.FromContext(r.Context); ok {
+		a.AddBranch(1)
 	}
 
 	defer func() {

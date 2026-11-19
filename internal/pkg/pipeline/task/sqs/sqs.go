@@ -5,42 +5,61 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	qs "github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/google/uuid"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
 
 const (
-	defaultConcurrency      = 10
-	defaultMaxMessages      = 10
-	defaultWaitTimeSeconds  = 10
-	receiptsQueueMultiplier = 1000
-	defaultRegion           = "us-west-2"
+	defaultConcurrency     = 10
+	defaultMaxMessages     = 10
+	defaultWaitTimeSeconds = 10
+	defaultRegion          = "us-west-2"
+)
+
+type deliveryMode string
+
+const (
+	deliveryAtMostOnce  deliveryMode = "at-most-once"
+	deliveryAtLeastOnce deliveryMode = "at-least-once"
 )
 
 var (
 	awsRegionRegex = regexp.MustCompile(`^[a-z]{2}-[a-z]+-\d+$`)
 	ctx            = context.Background()
+
+	fifoDrainAttributes = []types.QueueAttributeName{
+		types.QueueAttributeNameApproximateNumberOfMessages,
+		types.QueueAttributeNameApproximateNumberOfMessagesNotVisible,
+		types.QueueAttributeNameApproximateNumberOfMessagesDelayed,
+	}
 )
 
 type sqs struct {
 	task.ServerBase `yaml:",inline" json:",inline"`
-	QueueURL        string `yaml:"queue_url" json:"queue_url" validate:"required"`
-	Concurrency     int    `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
-	MaxMessages     int32  `yaml:"max_messages,omitempty" json:"max_messages,omitempty"`
-	WaitTimeSeconds int    `yaml:"wait_time_seconds,omitempty" json:"wait_time_seconds,omitempty"`
-	ExitOnEmpty     bool   `yaml:"exit_on_empty,omitempty" json:"exit_on_empty,omitempty"`
-	MessageGroupId  string `yaml:"message_group_id,omitempty" json:"message_group_id,omitempty"` // used for FIFO queues
+	QueueURL        string       `yaml:"queue_url" json:"queue_url" validate:"required"`
+	Concurrency     int          `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
+	MaxMessages     int32        `yaml:"max_messages,omitempty" json:"max_messages,omitempty"`
+	MaxRecords      int          `yaml:"max_records,omitempty" json:"max_records,omitempty" validate:"omitempty,gte=0"`
+	WaitTimeSeconds int          `yaml:"wait_time_seconds,omitempty" json:"wait_time_seconds,omitempty"`
+	ExitOnEmpty     bool         `yaml:"exit_on_empty,omitempty" json:"exit_on_empty,omitempty"`
+	MessageGroupId  string       `yaml:"message_group_id,omitempty" json:"message_group_id,omitempty"` // used for FIFO queues
+	Delivery        deliveryMode `yaml:"delivery,omitempty" json:"delivery,omitempty"`
 
-	client *qs.Client
+	client      *qs.Client
+	tracker     *ack.Tracker
+	outstanding atomic.Int32
 }
 
 func New() (task.Task, error) {
@@ -60,6 +79,16 @@ func (s *sqs) Init() error {
 		return fmt.Errorf("queue_url is required")
 	}
 
+	switch s.Delivery {
+	case "", deliveryAtLeastOnce:
+		s.Delivery = deliveryAtLeastOnce
+	case deliveryAtMostOnce:
+	default:
+		return fmt.Errorf("invalid delivery mode %q: must be %q or %q", s.Delivery, deliveryAtMostOnce, deliveryAtLeastOnce)
+	}
+
+	s.tracker = ack.NewTracker(s.Concurrency)
+
 	region := s.extractRegionFromQueueURL()
 	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
 	if err != nil {
@@ -67,6 +96,7 @@ func (s *sqs) Init() error {
 	}
 
 	s.client = qs.NewFromConfig(awsConfig)
+
 	return nil
 }
 
@@ -88,33 +118,34 @@ func (s *sqs) extractRegionFromQueueURL() string {
 
 func (s *sqs) Run(input <-chan *record.Record, output chan<- *record.Record) error {
 
-	// Client is already initialized in RunPreHook - just use it
+	// Client is already initialized in Init - just use it
 	if input != nil {
 		return s.sendMessages(input)
 	}
 
-	// If input is nil, act as a source: start getMessages and receipt workers
-	// let's create channel to which getMessages function will communicate messages receipts
-	receipts := make(chan *string, s.Concurrency*receiptsQueueMultiplier)
-
-	// we set a pool of workers that will delete messages from the queue
-	var wg sync.WaitGroup
-	wg.Add(s.Concurrency)
-	for i := 0; i < s.Concurrency; i++ {
-		go s.processReceipts(receipts, &wg)
-	}
-
-	err := s.getMessages(ctx, output, receipts)
-
-	wg.Wait()
-
-	return err
+	// If input is nil, act as a source: read messages and hand each receipt to
+	// the tracker, which deletes it once every downstream task has finished
+	// with the record it produced. Finish, not Run, waits for those deletions.
+	return s.getMessages(ctx, output)
 
 }
 
-func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record, receipts chan *string) error {
+// Finish waits for every deferred deletion before the pipeline treats this
+// task as complete, so a shutdown never abandons in-flight acknowledgements.
+// It can't happen in Run: downstream tasks that emit only once their input
+// closes can't finish with a record until this task's output channel is
+// closed, which the pipeline does only after Run returns.
+func (s *sqs) Finish() error {
 
-	defer close(receipts)
+	if s.tracker != nil {
+		s.tracker.Wait()
+	}
+
+	return nil
+
+}
+
+func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record) error {
 
 	// do we need to stop pipeline after a while?
 	if s.EndAfter > 0 {
@@ -123,6 +154,7 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record, rec
 		defer cancel()
 	}
 
+	recordsRead := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -148,7 +180,7 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record, rec
 			}
 
 			if receiveMessageOutput == nil || len(receiveMessageOutput.Messages) == 0 {
-				if s.ExitOnEmpty {
+				if s.shouldExitOnEmpty(ctx) {
 					fmt.Println(`Queue is empty, exiting`)
 					return nil
 				}
@@ -156,34 +188,130 @@ func (s *sqs) getMessages(ctx context.Context, output chan<- *record.Record, rec
 			}
 
 			for _, m := range receiveMessageOutput.Messages {
-				// create new record and send it downstream
 
-				if output != nil {
+				if output == nil {
+					s.deleteMessage(m.MessageId, m.ReceiptHandle)
+				} else if s.Delivery == deliveryAtMostOnce {
 					s.SendData(ctx, []byte(*m.Body), output)
+					del := ack.New()
+					del.AddBranch(1)
+					del.Done()
+					s.enqueueDelete(m, del)
+				} else {
+					msgAck := ack.New()
+					s.SendData(ack.WithContext(ctx, msgAck), []byte(*m.Body), output)
+					s.enqueueDelete(m, msgAck)
 				}
 
-				// send receipt to receipts channel for deletion
-				receipts <- m.ReceiptHandle
+				recordsRead++
+				if s.MaxRecords > 0 && recordsRead >= s.MaxRecords {
+					fmt.Printf("SQS max_records (%d) reached for queue %s, stopping reader\n", s.MaxRecords, s.QueueURL)
+					return nil
+				}
 			}
 		}
 	}
 
 }
 
-func (s *sqs) processReceipts(receipts <-chan *string, wg *sync.WaitGroup) error {
+func (s *sqs) enqueueDelete(m types.Message, a *ack.Ack) {
+	s.outstanding.Add(1)
+	s.tracker.Track(a, &messageAck{
+		sqs:           s,
+		messageId:     m.MessageId,
+		receiptHandle: m.ReceiptHandle,
+	})
+}
 
-	defer wg.Done()
+// messageAck acknowledges one received message on behalf of ack.Tracker.
+type messageAck struct {
+	sqs           *sqs
+	messageId     *string
+	receiptHandle *string
+}
 
-	for receipt := range receipts {
-		if _, err := s.client.DeleteMessage(ctx, &qs.DeleteMessageInput{
-			QueueUrl:      &s.QueueURL,
-			ReceiptHandle: receipt,
-		}); err != nil {
-			return err
-		}
+// Ack deletes the message's receipt so SQS doesn't redeliver it. On a
+// downstream failure it does nothing: leaving the receipt alone lets SQS
+// redeliver the message once the visibility timeout expires.
+func (m *messageAck) Ack(failed bool) {
+
+	defer m.sqs.outstanding.Add(-1)
+
+	if failed {
+		return
 	}
 
-	return nil
+	m.sqs.deleteMessage(m.messageId, m.receiptHandle)
+
+}
+
+// Outstanding is this process only; FIFO also hides groups held elsewhere until VT.
+func (s *sqs) shouldExitOnEmpty(ctx context.Context) bool {
+	if !s.ExitOnEmpty {
+		return false
+	}
+	if !s.isFifo() {
+		return true
+	}
+	if s.outstanding.Load() > 0 {
+		return false
+	}
+	empty, err := s.fifoQueueConfirmedEmpty(ctx)
+	if err != nil {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			fmt.Println(`GetQueueAttributes:`, err)
+		}
+		return false
+	}
+	if !empty {
+		fmt.Println(`FIFO queue still has messages, continuing`)
+		return false
+	}
+	return true
+}
+
+func (s *sqs) fifoQueueConfirmedEmpty(ctx context.Context) (bool, error) {
+	out, err := s.client.GetQueueAttributes(ctx, &qs.GetQueueAttributesInput{
+		QueueUrl:       &s.QueueURL,
+		AttributeNames: fifoDrainAttributes,
+	})
+	if err != nil {
+		return false, err
+	}
+	if out == nil {
+		return false, nil
+	}
+	for _, name := range fifoDrainAttributes {
+		raw, ok := out.Attributes[string(name)]
+		if !ok {
+			return false, nil
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return false, fmt.Errorf("%s: %w", name, err)
+		}
+		if n > 0 {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func (s *sqs) isFifo() bool {
+	return strings.HasSuffix(s.QueueURL, ".fifo")
+}
+
+// deleteMessage acknowledges a message by deleting its receipt. A failure is
+// logged rather than returned: the message has already been processed, so the
+// worst case is a redelivery after the visibility timeout.
+func (s *sqs) deleteMessage(messageId, receiptHandle *string) {
+
+	if _, err := s.client.DeleteMessage(ctx, &qs.DeleteMessageInput{
+		QueueUrl:      &s.QueueURL,
+		ReceiptHandle: receiptHandle,
+	}); err != nil {
+		fmt.Printf("failed to delete message %s from queue %s: %v\n", aws.ToString(messageId), s.QueueURL, err)
+	}
 
 }
 
@@ -203,15 +331,16 @@ func (s *sqs) sendMessages(input <-chan *record.Record) error {
 			MessageGroupId: s.getMessageGroupID(),
 		})
 		if err != nil {
-			return err
+			return ack.Rejected(r.Context, err)
 		}
+
+		ack.Release(r.Context)
 	}
 	return nil
 }
 
 func (s *sqs) getMessageGroupID() *string {
-	// Only return a group ID if the queue is FIFO (URL ends with .fifo)
-	if strings.HasSuffix(s.QueueURL, ".fifo") {
+	if s.isFifo() {
 
 		if s.MessageGroupId != "" {
 			return &s.MessageGroupId

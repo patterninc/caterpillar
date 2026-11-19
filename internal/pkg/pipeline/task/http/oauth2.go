@@ -22,14 +22,14 @@ const (
 	contentTypeForm = `application/x-www-form-urlencoded`
 )
 
-func (h *httpCore) oauth2(endpoint string, r *http.Request) error {
+func (h *httpCore) oauth2(endpoint string, r *http.Request, oauth *resolvedOAuth) error {
 
-	jwt, err := h.getJWT()
+	jwt, err := getJWT(oauth)
 	if err != nil {
 		return err
 	}
 
-	accessToken, err := h.getOauthToken(jwt)
+	accessToken, err := getOauthToken(oauth, jwt)
 	if err != nil {
 		return err
 	}
@@ -40,23 +40,22 @@ func (h *httpCore) oauth2(endpoint string, r *http.Request) error {
 
 }
 
-func (h *httpCore) getJWT() (string, error) {
+func getJWT(oauth *resolvedOAuth) (string, error) {
 
 	now := time.Now().Unix()
 
 	claims := jwt.MapClaims{
-		"iss":   h.Oauth.Issuer,
-		"sub":   h.Oauth.Subject,
-		"aud":   h.Oauth.Audience,
+		"iss":   oauth.Issuer,
+		"sub":   oauth.Subject,
+		"aud":   oauth.Audience,
 		"iat":   now,
 		"exp":   now + jwtExpiration,
-		"scope": strings.Join(h.Oauth.Scope, " "),
+		"scope": strings.Join(oauth.Scope, " "),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 
-	// parse private key
-	key, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(h.Oauth.PrivateKey))
+	key, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(oauth.PrivateKey))
 	if err != nil {
 		return ``, err
 	}
@@ -65,14 +64,14 @@ func (h *httpCore) getJWT() (string, error) {
 
 }
 
-func (h *httpCore) getOauthToken(jwt string) (string, error) {
+func getOauthToken(oauth *resolvedOAuth, jwt string) (string, error) {
 
 	data := url.Values{}
 	data.Set(assertionKey, jwt)
-	data.Set(grantTypeKey, h.Oauth.GrantType)
+	data.Set(grantTypeKey, oauth.GrantType)
 	payload := strings.NewReader(data.Encode())
 
-	req, err := http.NewRequest(http.MethodPost, h.Oauth.TokenURI, payload)
+	req, err := http.NewRequest(http.MethodPost, oauth.TokenURI, payload)
 	if err != nil {
 		return ``, err
 	}
@@ -91,11 +90,20 @@ func (h *httpCore) getOauthToken(jwt string) (string, error) {
 		return ``, err
 	}
 
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return ``, fmt.Errorf("oauth token request failed with status %d", resp.StatusCode)
+	}
+
 	var accessTokenResp map[string]interface{}
 	if err = json.Unmarshal(body, &accessTokenResp); err != nil {
 		return ``, err
 	}
 
-	return accessTokenResp[accessTokenKey].(string), nil
+	accessToken, ok := accessTokenResp[accessTokenKey].(string)
+	if !ok || accessToken == `` {
+		return ``, fmt.Errorf("oauth token response missing access_token")
+	}
+
+	return accessToken, nil
 
 }

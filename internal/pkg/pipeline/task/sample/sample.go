@@ -3,6 +3,7 @@ package sample
 import (
 	"fmt"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -72,7 +73,7 @@ func (s *sample) Run(input <-chan *record.Record, output chan<- *record.Record) 
 			break
 		}
 		if err := sampler.filter(r, output); err != nil {
-			return err
+			return ack.Rejected(r.Context, err)
 		}
 	}
 

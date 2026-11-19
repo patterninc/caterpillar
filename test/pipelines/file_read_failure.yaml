@@ -1,0 +1,11 @@
+# Glob matches two readable files and one directory named like a file.
+# Opening that directory fails the read, and fail_on_error fails the run.
+tasks:
+  - name: read_with_failure
+    type: file
+    path: test/pipelines/file_read_failure/*
+    task_concurrency: 2
+    fail_on_error: true
+  - name: echo
+    type: echo
+    only_data: true

@@ -63,7 +63,7 @@ func shouldEscape(c byte) bool {
 	return true
 }
 
-func (h *httpCore) oauth1(endpoint string, r *http.Request) (err error) {
+func (h *httpCore) oauth1(endpoint string, r *http.Request, oauth *resolvedOAuth) (err error) {
 
 	// let's parse the endpoint we got to...
 	parsedURL, err := url.Parse(endpoint)
@@ -81,11 +81,11 @@ func (h *httpCore) oauth1(endpoint string, r *http.Request) (err error) {
 
 	// set oauth parameters
 	oauthParameters := map[string]string{
-		`oauth_consumer_key`:     h.Oauth.ConsumerKey,
-		`oauth_signature_method`: h.Oauth.SignatureMethod,
+		`oauth_consumer_key`:     oauth.ConsumerKey,
+		`oauth_signature_method`: oauth.SignatureMethod,
 		`oauth_timestamp`:        fmt.Sprintf("%d", time.Now().Unix()),
-		`oauth_token`:            h.Oauth.Token,
-		`oauth_version`:          h.Oauth.Version,
+		`oauth_token`:            oauth.Token,
+		`oauth_version`:          oauth.Version,
 	}
 
 	if oauthParameters[`oauth_nonce`], err = getNonce(); err != nil {
@@ -108,12 +108,12 @@ func (h *httpCore) oauth1(endpoint string, r *http.Request) (err error) {
 	sort.Strings(parameters)
 
 	baseString := strings.Join([]string{h.Method, percentEncode(parsedURL.String()), percentEncode(strings.Join(parameters, `&`))}, "&")
-	signature := url.QueryEscape(sha256Hash(baseString, h.Oauth.ConsumerSecret+`&`+h.Oauth.TokenSecret))
+	signature := url.QueryEscape(sha256Hash(baseString, oauth.ConsumerSecret+`&`+oauth.TokenSecret))
 
 	// generate authorization header value
 	authorizationParts = append(authorizationParts, fmt.Sprintf("%s=%q", `oauth_signature`, signature))
-	if h.Oauth.Realm != `` {
-		authorizationParts = append(authorizationParts, fmt.Sprintf("%s=%q", `realm`, h.Oauth.Realm))
+	if oauth.Realm != `` {
+		authorizationParts = append(authorizationParts, fmt.Sprintf("%s=%q", `realm`, oauth.Realm))
 	}
 	r.Header.Set(headerAuthorization, fmt.Sprintf("OAuth %s", strings.Join(authorizationParts, `,`)))
 

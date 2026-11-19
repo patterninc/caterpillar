@@ -3,24 +3,30 @@ package http
 import (
 	"fmt"
 	"net/http"
+
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 )
 
 const (
 	headerAuthorization = `Authorization`
 )
 
-func (h *httpCore) oauth(endpoint string, r *http.Request) error {
+func (h *httpCore) oauth(endpoint string, r *http.Request, rc *record.Record) error {
 
-	// let's choose the behavior
-	behavior, found := map[string]func(string, *http.Request) error{
-		`1.0`: h.oauth1,
-		`2.0`: h.oauth2,
-	}[h.Oauth.Version]
-
-	if !found {
-		return fmt.Errorf("unsupported oauth behavior: %v", h.Oauth.Version)
+	resolved, err := h.Oauth.resolve(rc)
+	if err != nil {
+		return err
 	}
 
-	return behavior(endpoint, r)
+	behavior, found := map[string]func(string, *http.Request, *resolvedOAuth) error{
+		`1.0`: h.oauth1,
+		`2.0`: h.oauth2,
+	}[resolved.Version]
+
+	if !found {
+		return fmt.Errorf("unsupported oauth behavior: %v", resolved.Version)
+	}
+
+	return behavior(endpoint, r, resolved)
 
 }

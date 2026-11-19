@@ -9,6 +9,7 @@ import (
 	"github.com/antchfx/htmlquery"
 	"golang.org/x/net/html"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task/converter"
@@ -21,10 +22,35 @@ type xpath struct {
 	Container     string            `yaml:"container" json:"container"`
 	Fields        map[string]string `yaml:"fields" json:"fields"`
 	IgnoreMissing bool              `yaml:"ignore_missing" json:"ignore_missing"` // if true, missing fields will not cause an error
+
+	containerExpr compiledXPath
+	fieldExprs    map[string]compiledXPath
 }
 
 func New() (task.Task, error) {
 	return &xpath{IgnoreMissing: true}, nil
+}
+
+func (x *xpath) Init() error {
+	if x.Container != `` {
+		cx, err := compileXPath(x.Container)
+		if err != nil {
+			return fmt.Errorf("invalid container xpath %q: %w", x.Container, err)
+		}
+		x.containerExpr = cx
+	}
+	if len(x.Fields) == 0 {
+		return nil
+	}
+	x.fieldExprs = make(map[string]compiledXPath, len(x.Fields))
+	for field, expr := range x.Fields {
+		cx, err := compileXPath(expr)
+		if err != nil {
+			return fmt.Errorf("invalid field %q xpath %q: %w", field, expr, err)
+		}
+		x.fieldExprs[field] = cx
+	}
+	return nil
 }
 
 func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) error {
@@ -37,17 +63,18 @@ func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) e
 
 		document, err := htmlquery.Parse(bytes.NewReader(r.Data))
 		if err != nil {
-			return err
+			return ack.Rejected(r.Context, err)
 		}
 
 		containerNodes := []*html.Node{document}
 		if x.Container != `` {
-			containerNodes = htmlquery.Find(document, x.Container)
+			containerNodes = x.containerExpr.find(document)
 			if len(containerNodes) == 0 {
 				if !x.IgnoreMissing {
-					return fmt.Errorf("no nodes found for XPath: %s", x.Container)
+					return ack.Rejected(r.Context, fmt.Errorf("no nodes found for XPath: %s", x.Container))
 				}
 				fmt.Println("container is missing - ", x.Container)
+				ack.Release(r.Context)
 				continue
 			}
 		}
@@ -55,7 +82,7 @@ func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) e
 		for i, container := range containerNodes {
 			data, err := x.queryFields(container)
 			if err != nil {
-				return err
+				return ack.Rejected(r.Context, err)
 			}
 
 			if len(data) != 0 {
@@ -64,6 +91,8 @@ func (x *xpath) Run(input <-chan *record.Record, output chan<- *record.Record) e
 				x.SendData(r.Context, data, output)
 			}
 		}
+
+		ack.Release(r.Context)
 	}
 
 	return nil
@@ -75,7 +104,7 @@ func (x *xpath) queryFields(container *html.Node) ([]byte, error) {
 	result := make(map[string]any)
 
 	for field, xpathExpr := range x.Fields {
-		nodes := htmlquery.Find(container, xpathExpr)
+		nodes := x.fieldExprs[field].find(container)
 
 		if len(nodes) == 0 && !x.IgnoreMissing {
 			return nil, fmt.Errorf("field '%s' not found for xpath: %s", field, xpathExpr)

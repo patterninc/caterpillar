@@ -3,6 +3,7 @@ package converter
 import (
 	"fmt"
 
+	"github.com/patterninc/caterpillar/internal/pkg/pipeline/ack"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/record"
 	"github.com/patterninc/caterpillar/internal/pkg/pipeline/task"
 )
@@ -79,7 +80,7 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) er
 
 		outputs, err := c.convert(r.Data, c.Delimiter)
 		if err != nil {
-			return err
+			return ack.Rejected(r.Context, err)
 		}
 
 		for _, out := range outputs {
@@ -92,6 +93,8 @@ func (c *core) Run(input <-chan *record.Record, output chan<- *record.Record) er
 				c.SendData(r.Context, out.Data, output)
 			}
 		}
+
+		ack.Release(r.Context)
 	}
 
 	return nil

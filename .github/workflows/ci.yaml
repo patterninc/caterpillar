@@ -4,19 +4,41 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
+# A new push to a pull request cancels the run for its previous commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/checkout@v7
       with:
-        go-version: '1.24.7'
-        
+        persist-credentials: false
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version: '1.27'
+
     - name: Build caterpillar
       run: |
         go build -o caterpillar ./cmd/caterpillar/caterpillar.go
+
+    # copylocks is disabled because of three existing findings, all from
+    # copying task structs that embed task.Base (archive.go, compress.go,
+    # file.go). Re-enable it once those are fixed. Every other vet check runs.
+    - name: Vet
+      run: |
+        go vet -copylocks=false ./...
+
+    # The tests need no external services (no Kafka, AWS or network).
+    - name: Test
+      run: |
+        go test -race ./...
