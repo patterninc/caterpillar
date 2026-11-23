@@ -48,6 +48,8 @@ otherwise it logs and keeps polling. This applies to standard and FIFO queues.
   deliberately keeps the receipt), keep the reader polling until their visibility timeout expires and they
   become visible again. That wait can be as long as the visibility timeout (for example 30 minutes) and is
   intended; set `end_after` when the run must be bounded. Redelivered messages are processed in the same run.
+  Configure a redrive policy (`maxReceiveCount` plus a DLQ) on the queue: without one, a message that fails on
+  every attempt is redelivered indefinitely and the reader never exits unless `end_after` is set.
 - **FIFO queues**: unchanged. Any receipt this task holds blocks the exit, as does any non-zero count.
 - **`GetQueueAttributes` errors** keep the task polling (and are logged). The one exception is an
   `AccessDenied` error on a standard queue: the task logs a warning and exits on the empty receive, which

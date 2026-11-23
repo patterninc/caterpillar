@@ -305,6 +305,13 @@ func (s *sqs) shouldExitOnEmpty(ctx context.Context) bool {
 
 	if depth.visible > 0 || depth.inFlight > 0 || depth.delayed > 0 {
 		fmt.Printf("Queue still has messages (visible=%d, in_flight_elsewhere=%d, delayed=%d), continuing\n", depth.visible, max(depth.inFlight, 0), depth.delayed)
+		if s.WaitTimeSeconds == 0 {
+			// Short polling returns at once; pause so the not-drained path does not spin on the API.
+			select {
+			case <-ctx.Done():
+			case <-time.After(time.Second):
+			}
+		}
 		return false
 	}
 
