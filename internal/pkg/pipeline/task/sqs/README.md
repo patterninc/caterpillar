@@ -22,7 +22,7 @@ The task automatically determines its mode based on the presence of input/output
 | `max_messages` | int | `10` | Per poll: max messages per `ReceiveMessage` (AWS cap 10) |
 | `max_records` | int | `0` (unlimited) | Read-mode cap on records forwarded downstream (per worker). `0` = unlimited. |
 | `wait_time_seconds` | int | `10` | Long polling wait time in seconds |
-| `exit_on_empty` | bool | `false` | Exit when a receive returns no messages. FIFO: empty poll is not drain while this task holds receipts or the queue still has visible, in-flight, or delayed messages. |
+| `exit_on_empty` | bool | `false` | Exit once the queue is confirmed drained after an empty receive (see [Exit on empty](#exit-on-empty)). An empty receive alone is never treated as drained. |
 | `end_after` | duration | - | Stop polling after this much time (read mode); e.g. `5m` |
 | `message_group_id` | string | - | Message group ID for FIFO queues |
 | `delivery` | string | `at-least-once` | Read mode: `at-least-once` deletes after downstream finishes; `at-most-once` deletes on receive. |
@@ -32,6 +32,29 @@ The task automatically determines its mode based on the presence of input/output
 
 In read mode the task polls until the queue drains (`exit_on_empty`), `end_after` elapses, or `max_records` is reached;
 with none of those set it polls indefinitely.
+
+## Exit on empty
+
+With `exit_on_empty: true` an empty `ReceiveMessage` is not enough to stop: messages that another
+consumer (or an earlier failed attempt) received but did not delete are invisible until the queue's
+visibility timeout ends, and then reappear with no reader left. After an empty receive the task calls
+`GetQueueAttributes` and exits only when `ApproximateNumberOfMessages` (visible),
+`ApproximateNumberOfMessagesNotVisible` (in flight) and `ApproximateNumberOfMessagesDelayed` are all `0`;
+otherwise it logs and keeps polling. This applies to standard and FIFO queues.
+
+- **Standard queues**: receipts this task itself still holds (for example records buffered in a `join`
+  that flushes only when its input closes) are subtracted from the in-flight count, so they do not block
+  the exit. Messages held by other consumers, or left in flight by a failed ack (`Ack(failed=true)`
+  deliberately keeps the receipt), keep the reader polling until their visibility timeout expires and they
+  become visible again. That wait can be as long as the visibility timeout (for example 30 minutes) and is
+  intended; set `end_after` when the run must be bounded. Redelivered messages are processed in the same run.
+  Configure a redrive policy (`maxReceiveCount` plus a DLQ) on the queue: without one, a message that fails on
+  every attempt is redelivered indefinitely and the reader never exits unless `end_after` is set.
+- **FIFO queues**: unchanged. Any receipt this task holds blocks the exit, as does any non-zero count.
+- **`GetQueueAttributes` errors** keep the task polling (and are logged). The one exception is an
+  `AccessDenied` error on a standard queue: the task logs a warning and exits on the empty receive, which
+  is the behaviour before this check existed. Grant `sqs:GetQueueAttributes` to get the drain guarantee.
+- `exit_on_empty: false` (the default) never exits on an empty receive.
 
 ## Example Configurations
 
@@ -136,6 +159,6 @@ For SQS operations, ensure:
   - `sqs:ReceiveMessage`
   - `sqs:DeleteMessage`
   - `sqs:SendMessage`
-  - `sqs:GetQueueAttributes`
+  - `sqs:GetQueueAttributes` (required for the `exit_on_empty` drain check on all queues; without it standard queues exit on the first empty receive with a warning and FIFO queues keep polling)
 - Correct region configuration
 - Valid queue URL
