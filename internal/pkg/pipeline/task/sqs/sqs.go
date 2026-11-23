@@ -39,12 +39,20 @@ var (
 	awsRegionRegex = regexp.MustCompile(`^[a-z]{2}-[a-z]+-\d+$`)
 	ctx            = context.Background()
 
-	fifoDrainAttributes = []types.QueueAttributeName{
+	queueDrainAttributes = []types.QueueAttributeName{
 		types.QueueAttributeNameApproximateNumberOfMessages,
 		types.QueueAttributeNameApproximateNumberOfMessagesNotVisible,
 		types.QueueAttributeNameApproximateNumberOfMessagesDelayed,
 	}
 )
+
+// sqsClient is the subset of *qs.Client this task uses, so tests can fake it.
+type sqsClient interface {
+	ReceiveMessage(context.Context, *qs.ReceiveMessageInput, ...func(*qs.Options)) (*qs.ReceiveMessageOutput, error)
+	DeleteMessage(context.Context, *qs.DeleteMessageInput, ...func(*qs.Options)) (*qs.DeleteMessageOutput, error)
+	SendMessage(context.Context, *qs.SendMessageInput, ...func(*qs.Options)) (*qs.SendMessageOutput, error)
+	GetQueueAttributes(context.Context, *qs.GetQueueAttributesInput, ...func(*qs.Options)) (*qs.GetQueueAttributesOutput, error)
+}
 
 type sqs struct {
 	task.ServerBase `yaml:",inline" json:",inline"`
@@ -57,7 +65,7 @@ type sqs struct {
 	MessageGroupId  string       `yaml:"message_group_id,omitempty" json:"message_group_id,omitempty"` // used for FIFO queues
 	Delivery        deliveryMode `yaml:"delivery,omitempty" json:"delivery,omitempty"`
 
-	client      *qs.Client
+	client      sqsClient
 	tracker     *ack.Tracker
 	outstanding atomic.Int32
 }
@@ -245,56 +253,111 @@ func (m *messageAck) Ack(failed bool) {
 
 }
 
-// Outstanding is this process only; FIFO also hides groups held elsewhere until VT.
+// queueDepth is the approximate message count reported by GetQueueAttributes.
+type queueDepth struct {
+	visible  int64
+	inFlight int64
+	delayed  int64
+}
+
+// shouldExitOnEmpty decides whether an empty ReceiveMessage means the queue is
+// drained. An empty receive alone proves nothing: messages another consumer
+// (or an earlier failed attempt) received but did not delete stay invisible
+// until the visibility timeout ends and then reappear with no reader left.
+// So the reader exits only when GetQueueAttributes shows no visible, in-flight
+// or delayed messages, ignoring the receipts this process itself still holds
+// on standard queues.
+//
+// FIFO queues are stricter: any receipt held by this process blocks the exit,
+// because an in-flight message also blocks its whole message group.
 func (s *sqs) shouldExitOnEmpty(ctx context.Context) bool {
 	if !s.ExitOnEmpty {
 		return false
 	}
-	if !s.isFifo() {
-		return true
-	}
-	if s.outstanding.Load() > 0 {
+
+	held := int64(s.outstanding.Load())
+	fifo := s.isFifo()
+	if fifo && held > 0 {
 		return false
 	}
-	empty, err := s.fifoQueueConfirmedEmpty(ctx)
+
+	depth, err := s.queueDepth(ctx)
 	if err != nil {
-		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			fmt.Println(`GetQueueAttributes:`, err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return false
 		}
+		if !fifo && isAccessDenied(err) {
+			// Legacy behaviour for standard queues whose role lacks
+			// sqs:GetQueueAttributes: exit on the first empty receive.
+			fmt.Printf("WARN: GetQueueAttributes denied (%v); sqs:GetQueueAttributes is required to confirm the queue is drained, exiting on empty receive without confirmation\n", err)
+			return true
+		}
+		fmt.Println(`GetQueueAttributes:`, err)
 		return false
 	}
-	if !empty {
-		fmt.Println(`FIFO queue still has messages, continuing`)
+
+	// Receipts held by this process are counted as in flight by SQS; they are
+	// not a reason to keep polling on a standard queue, where a downstream task
+	// (e.g. an unflushed join) may hold them until the output channel closes.
+	if !fifo {
+		depth.inFlight -= held
+	}
+
+	if depth.visible > 0 || depth.inFlight > 0 || depth.delayed > 0 {
+		fmt.Printf("Queue still has messages (visible=%d, in_flight_elsewhere=%d, delayed=%d), continuing\n", depth.visible, max(depth.inFlight, 0), depth.delayed)
 		return false
 	}
+
 	return true
 }
 
-func (s *sqs) fifoQueueConfirmedEmpty(ctx context.Context) (bool, error) {
+// queueDepth reads the approximate visible, in-flight and delayed counts. A
+// missing or non-numeric attribute is reported as an error or "not drained"
+// rather than as zero.
+func (s *sqs) queueDepth(ctx context.Context) (queueDepth, error) {
+	var depth queueDepth
+
 	out, err := s.client.GetQueueAttributes(ctx, &qs.GetQueueAttributesInput{
 		QueueUrl:       &s.QueueURL,
-		AttributeNames: fifoDrainAttributes,
+		AttributeNames: queueDrainAttributes,
 	})
 	if err != nil {
-		return false, err
+		return depth, err
 	}
 	if out == nil {
-		return false, nil
+		return depth, errors.New("empty GetQueueAttributes response")
 	}
-	for _, name := range fifoDrainAttributes {
+
+	values := make(map[types.QueueAttributeName]int64, len(queueDrainAttributes))
+	for _, name := range queueDrainAttributes {
 		raw, ok := out.Attributes[string(name)]
 		if !ok {
-			return false, nil
+			return depth, fmt.Errorf("%s: attribute missing from response", name)
 		}
-		n, err := strconv.Atoi(raw)
+		n, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil {
-			return false, fmt.Errorf("%s: %w", name, err)
+			return depth, fmt.Errorf("%s: %w", name, err)
 		}
-		if n > 0 {
-			return false, nil
-		}
+		values[name] = n
 	}
-	return true, nil
+
+	depth.visible = values[types.QueueAttributeNameApproximateNumberOfMessages]
+	depth.inFlight = values[types.QueueAttributeNameApproximateNumberOfMessagesNotVisible]
+	depth.delayed = values[types.QueueAttributeNameApproximateNumberOfMessagesDelayed]
+
+	return depth, nil
+}
+
+func isAccessDenied(err error) bool {
+	var apiErr interface{ ErrorCode() string }
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	switch apiErr.ErrorCode() {
+	case "AccessDenied", "AccessDeniedException", "AWS.SimpleQueueService.AccessDenied":
+		return true
+	}
+	return false
 }
 
 func (s *sqs) isFifo() bool {
